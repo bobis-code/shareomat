@@ -1,0 +1,7 @@
+services:
+  self_leg:
+    build: .
+    volumes:
+      - ./data:/app/data:Z
+      - ./config:/app/config:Z
+    restart: "no"
