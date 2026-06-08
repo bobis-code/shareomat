@@ -206,10 +206,10 @@ def after_first_run(tmp_path_factory):
 
 class TestFirstRun:
 
-    def test_five_report_files_created(self, after_first_run):
-        """Pipeline creates exactly five reports: billing CSV/JSON, match detail, audit, summary."""
+    def test_report_files_created(self, after_first_run):
+        """Pipeline creates exactly six reports: billing CSV/JSON, match detail, audit, summary, energy ledger."""
         files = list(after_first_run.reports.iterdir())
-        assert len(files) == 5
+        assert len(files) == 6
 
     def test_billing_csv_contains_all_three_participants(self, after_first_run):
         """Billing CSV has one row per participant including the supplier."""
@@ -336,7 +336,7 @@ class TestFirstRun:
             assert field in data
 
     def test_state_file_records_sha256_and_report_filenames(self, after_first_run):
-        """State file persists the processed file's SHA-256 and all five report filenames."""
+        """State file persists the processed file's SHA-256 and all six report filenames."""
         env = after_first_run
         state_file = env.state / "processed_files.json"
         assert state_file.exists()
@@ -345,7 +345,7 @@ class TestFirstRun:
         entry = data["entries"][0]
         assert entry["sha256"] == env.sha256
         assert entry["filename"] == "readings_20240601.csv"
-        assert len(entry["report_files"]) == 5
+        assert len(entry["report_files"]) == 6
 
     def test_source_csv_moved_to_archive(self, after_first_run):
         """Source CSV is removed from inbox and placed in archive after reports are written."""
@@ -364,7 +364,7 @@ def test_second_run_with_same_file_produces_no_new_reports(tmp_path):
 
     run(env.config_path)
     reports_after_first = {p.name for p in env.reports.iterdir()}
-    assert len(reports_after_first) == 5
+    assert len(reports_after_first) == 6
 
     archived = next(env.archive.iterdir())
     shutil.copy(archived, env.inbox / archived.name)

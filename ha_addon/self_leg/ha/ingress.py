@@ -167,9 +167,10 @@ def _render_report_section(selected_stem: str, ingress_path: str) -> str:
     except Exception:
         pass
 
-    # Download links for all 5 report files of this run
+    # Download links for all report files of this run
     date_suffix_dl = selected_stem[len("billing_"):]
     dl_files = [
+        (f"energy_ledger_{date_suffix_dl}.csv",     "Energy Ledger"),
         (f"billing_{date_suffix_dl}.csv",           "Billing CSV"),
         (f"billing_{date_suffix_dl}.json",          "Billing JSON"),
         (f"match_detail_{date_suffix_dl}.csv",      "Match Detail CSV"),
@@ -206,29 +207,80 @@ def _render_report_section(selected_stem: str, ingress_path: str) -> str:
         )
 
     if records:
-        rows = "".join(
+        th_r = 'style="padding:6px 8px;text-align:right;background:#f5f7fa;border-bottom:2px solid #e5e7eb"'
+        th_l = 'style="padding:6px 8px;text-align:left;background:#f5f7fa;border-bottom:2px solid #e5e7eb"'
+
+        # ── Energy flow table (Summen je Zähler) ──
+        sum_exp = sum(r.get("total_export_kwh", 0) for r in records)
+        sum_loc_s = sum(r.get("local_supplied_kwh", 0) for r in records)
+        sum_grd_e = sum(r.get("grid_export_kwh", 0) for r in records)
+        sum_imp = sum(r.get("total_import_kwh", 0) for r in records)
+        sum_loc_r = sum(r.get("local_received_kwh", 0) for r in records)
+        sum_grd_i = sum(r.get("grid_import_kwh", 0) for r in records)
+
+        flow_rows = "".join(
             f'<tr style="border-bottom:1px solid #f0f0f0">'
             f'<td style="padding:6px 8px">{_html_escape(str(r.get("label", "")))}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{r.get("total_export_kwh", 0):.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{r.get("local_supplied_kwh", 0):.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{r.get("grid_export_kwh", 0):.3f}</td>'
             f'<td style="padding:6px 8px;text-align:right">{r.get("total_import_kwh", 0):.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{r.get("local_received_kwh", 0):.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{r.get("grid_import_kwh", 0):.3f}</td>'
+            f'</tr>'
+            for r in records
+        )
+        flow_rows += (
+            f'<tr style="font-weight:bold;border-top:2px solid #e5e7eb;background:#f9fafb">'
+            f'<td style="padding:6px 8px">SUMME</td>'
+            f'<td style="padding:6px 8px;text-align:right">{sum_exp:.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{sum_loc_s:.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{sum_grd_e:.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{sum_imp:.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{sum_loc_r:.3f}</td>'
+            f'<td style="padding:6px 8px;text-align:right">{sum_grd_i:.3f}</td>'
+            f'</tr>'
+        )
+        parts.append(
+            f'<div style="overflow-x:auto;margin-top:16px">'
+            f'<div style="font-weight:600;font-size:.8rem;color:#6b7280;text-transform:uppercase;'
+            f'letter-spacing:.05em;margin-bottom:6px">Summen je Zähler</div>'
+            f'<table style="width:100%;border-collapse:collapse;font-size:.85rem">'
+            f'<thead><tr>'
+            f'<th {th_l}>Zähler</th>'
+            f'<th {th_r}>Total Export</th>'
+            f'<th {th_r}>Lokal verkauft</th>'
+            f'<th {th_r}>Netzeinspeisung</th>'
+            f'<th {th_r}>Total Import</th>'
+            f'<th {th_r}>Lokal erhalten</th>'
+            f'<th {th_r}>Netzbezug</th>'
+            f'</tr></thead>'
+            f'<tbody>{flow_rows}</tbody>'
+            f'</table></div>'
+        )
+
+        # ── Cost table ──
+        cost_rows = "".join(
+            f'<tr style="border-bottom:1px solid #f0f0f0">'
+            f'<td style="padding:6px 8px">{_html_escape(str(r.get("label", "")))}</td>'
             f'<td style="padding:6px 8px;text-align:right">{r.get("local_received_kwh", 0):.3f}</td>'
             f'<td style="padding:6px 8px;text-align:right">{r.get("grid_import_kwh", 0):.3f}</td>'
             f'<td style="padding:6px 8px;text-align:right"><strong>{r.get("total_cost_chf", 0):.4f} CHF</strong></td>'
             f'</tr>'
             for r in records
         )
-        th_r = 'style="padding:6px 8px;text-align:right;background:#f5f7fa;border-bottom:2px solid #e5e7eb"'
-        th_l = 'style="padding:6px 8px;text-align:left;background:#f5f7fa;border-bottom:2px solid #e5e7eb"'
         parts.append(
-            f'<div style="overflow-x:auto;margin-top:12px">'
+            f'<div style="overflow-x:auto;margin-top:16px">'
+            f'<div style="font-weight:600;font-size:.8rem;color:#6b7280;text-transform:uppercase;'
+            f'letter-spacing:.05em;margin-bottom:6px">Kosten je Teilnehmer</div>'
             f'<table style="width:100%;border-collapse:collapse;font-size:.85rem">'
             f'<thead><tr>'
-            f'<th {th_l}>Participant</th>'
-            f'<th {th_r}>Import kWh</th>'
-            f'<th {th_r}>Local kWh</th>'
-            f'<th {th_r}>Grid kWh</th>'
-            f'<th {th_r}>Cost CHF</th>'
+            f'<th {th_l}>Teilnehmer</th>'
+            f'<th {th_r}>Lokal erhalten kWh</th>'
+            f'<th {th_r}>Netzbezug kWh</th>'
+            f'<th {th_r}>Kosten CHF</th>'
             f'</tr></thead>'
-            f'<tbody>{rows}</tbody>'
+            f'<tbody>{cost_rows}</tbody>'
             f'</table></div>'
         )
     else:

@@ -68,31 +68,51 @@ A prosumer meter can have both export and import in the same slot. Its export go
 
 ### Algorithm
 
-**Step 1 — Cross-meter flows**
+**Step 1 — Eligible importers per exporter**
 
-For each exporter E (export = X_E):
-distribute X_E proportionally among all importers *except E*:
-
-```
-flow[E → I] = X_E × (import_I / Σ_{J ≠ E} import_J)   for all I ≠ E
-```
-
-**Step 2 — Scale if demand-limited**
+For each exporter E, the eligible importers are **all meters that have import, except E itself**.
+Their combined import is called `eligible_import_E`:
 
 ```
-total_raw  = Σ all cross-meter flows
-scale      = min(1.0,  total_import / total_raw)
+eligible_import_E = Σ import_J   for all J ≠ E
+```
+
+This per-exporter denominator is what makes the self-exclusion rule work: if E has both export
+and import in the same slot, E's own import is not counted in the denominator and E receives
+nothing from its own export.
+
+**Step 2 — Proportional cross-meter flows**
+
+Exporter E distributes its full export proportionally among the eligible importers:
+
+```
+flow[E → I] = export_E × (import_I / eligible_import_E)   for all I ≠ E
+```
+
+Every eligible importer gets a share proportional to how much it needs relative to all other
+eligible importers. Exporters with no eligible importers (single-meter community) contribute 0
+to local_shared.
+
+**Step 3 — Scale if demand is the limiting factor**
+
+If total eligible demand exceeds total supply, all flows are scaled down uniformly:
+
+```
+total_raw    = Σ flow[E → I]   (all cross-meter flows)
+scale        = min(1.0,  total_import / total_raw)
 local_shared = total_raw × scale
 ```
 
-**Step 3 — Residuals go to grid**
+When supply ≤ demand (typical solar community), scale = 1.0 and all export is shared locally.
+
+**Step 4 — Residuals go to grid**
 
 ```
 grid_export_E = export_E  − local_supplied_E
 grid_import_I = import_I  − local_received_I
 ```
 
-### Example
+### Worked example
 
 ```
 Slot 12:00
@@ -101,20 +121,45 @@ Meter 1:  export 5 kWh,  import 5 kWh   (prosumer)
 Meter 2:  export 3 kWh,  import 1 kWh   (prosumer)
 Meter 3:  export 0 kWh,  import 20 kWh  (consumer)
 
-total_export = 8,  total_import = 26
-local_shared = 8  (all export used locally)
-
-Meter 1 → Meter 2: 5 × (1/21)  = 0.24 kWh
-Meter 1 → Meter 3: 5 × (20/21) = 4.76 kWh
-Meter 2 → Meter 1: 3 × (5/25)  = 0.60 kWh
-Meter 2 → Meter 3: 3 × (20/25) = 2.40 kWh
-
-Meter 1 receives 0.60 kWh local,  4.40 kWh from grid
-Meter 2 receives 0.24 kWh local,  0.76 kWh from grid
-Meter 3 receives 7.16 kWh local, 12.84 kWh from grid
+total_export =  8 kWh
+total_import = 26 kWh
 ```
 
-With **one meter only**, local_shared = 0 — there is no one else to share with.
+**Meter 1 distributes 5 kWh**
+
+Eligible importers: Meter 2 (1 kWh) + Meter 3 (20 kWh)  — Meter 1 excluded from its own denominator
+eligible_import_1 = 1 + 20 = 21 kWh
+
+```
+Meter 1 → Meter 2:  5 × ( 1 / 21) = 0.238 kWh
+Meter 1 → Meter 3:  5 × (20 / 21) = 4.762 kWh
+```
+
+**Meter 2 distributes 3 kWh**
+
+Eligible importers: Meter 1 (5 kWh) + Meter 3 (20 kWh)  — Meter 2 excluded from its own denominator
+eligible_import_2 = 5 + 20 = 25 kWh
+
+```
+Meter 2 → Meter 1:  3 × ( 5 / 25) = 0.600 kWh
+Meter 2 → Meter 3:  3 × (20 / 25) = 2.400 kWh
+```
+
+**Totals**
+
+```
+total_raw = 0.238 + 4.762 + 0.600 + 2.400 = 8.000 kWh
+scale     = min(1.0, 26 / 8) = 1.0   → no scaling needed, all export goes local
+
+local_shared = 8.000 kWh
+
+Meter 1:  local_received = 0.600 kWh,  grid_import =  4.400 kWh
+Meter 2:  local_received = 0.238 kWh,  grid_import =  0.762 kWh
+Meter 3:  local_received = 7.162 kWh,  grid_import = 12.838 kWh
+```
+
+With **one meter only**, eligible_import = 0 for that meter → local_shared = 0.
+There must be at least two meters for any local sharing to occur.
 
 ## Running tests
 
