@@ -1,5 +1,5 @@
 name: SELF LEG
-version: "0.1.5"
+version: "0.1.6"
 slug: self_leg
 description: LEG/ZEV — calculates local energy sharing.
 url: https://github.com/ha-bt-usr/self-leg

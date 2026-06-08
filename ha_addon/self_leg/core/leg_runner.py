@@ -43,6 +43,7 @@ from self_leg.core.leg_report import (
     write_billing_json,
     write_community_audit_csv,
     write_community_summary_json,
+    write_ledger_csv,
     write_match_csv,
 )
 from self_leg.core.leg_storage import is_processed, mark_processed
@@ -149,6 +150,8 @@ def run(config_path: Path, mqtt_client: object = None) -> None:
         source_files=source_file_names,
     )
 
+    meter_labels = {m.meter_id: m.label for m in config.meters}
+
     # Write reports — must succeed before touching state or archive
     report_paths = [
         write_billing_csv(billing_records, reports, period_start),
@@ -158,6 +161,7 @@ def run(config_path: Path, mqtt_client: object = None) -> None:
         write_community_summary_json(
             billing_records, config.community_id, config.name, reports, period_start
         ),
+        write_ledger_csv(match_results, reports, period_start, meter_labels=meter_labels),
     ]
 
     missing = [str(p) for p in report_paths if not p.exists()]

@@ -42,6 +42,10 @@ class MatchResult:
     meter_local_supplied_kwh: dict[str, float] = field(default_factory=dict)
     meter_grid_export_kwh: dict[str, float] = field(default_factory=dict)
 
+    # Bilateral flows: flows[exp_id][imp_id] = scaled kWh allocated from exp to imp.
+    # Empty dict means no cross-meter flows occurred in this slot (single-meter community).
+    flows: dict[str, dict[str, float]] = field(default_factory=dict)
+
 
 @dataclass
 class BillingRecord:

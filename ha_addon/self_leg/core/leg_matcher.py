@@ -100,6 +100,12 @@ def match_slot(slot: EnergySlot) -> MatchResult:
     scale = min(1.0, total_import / total_raw) if total_raw > 0 else 0.0
     local_shared = total_raw * scale
 
+    # Build scaled bilateral flows for the ledger report
+    scaled_flows: dict[str, dict[str, float]] = {
+        exp_id: {imp_id: amount * scale for imp_id, amount in targets.items()}
+        for exp_id, targets in flow.items()
+    }
+
     # Apply scale and compute grid residuals
     meter_local_supplied: dict[str, float] = {}
     meter_grid_export: dict[str, float] = {}
@@ -126,6 +132,7 @@ def match_slot(slot: EnergySlot) -> MatchResult:
         meter_grid_import_kwh=meter_grid_import,
         meter_local_supplied_kwh=meter_local_supplied,
         meter_grid_export_kwh=meter_grid_export,
+        flows=scaled_flows,
     )
 
 

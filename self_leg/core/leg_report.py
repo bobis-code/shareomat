@@ -284,6 +284,173 @@ def write_community_audit_csv(
 # ── Community summary report ──────────────────────────────────────────────────
 
 
+def write_ledger_csv(
+    results: list[MatchResult],
+    reports_dir: Path,
+    period_start: datetime,
+    meter_labels: dict[str, str] | None = None,
+) -> Path:
+    """Write the Energy Ledger report: per-flow detail, per-meter summary, and audit section."""
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    path = reports_dir / f"{_stem('energy_ledger', period_start)}.csv"
+
+    def _label(meter_id: str) -> str:
+        if meter_labels:
+            return meter_labels.get(meter_id, meter_id)
+        return meter_id
+
+    def _fmt(v: float) -> str:
+        return f"{round(v, 3):.3f}"
+
+    with path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+
+        # ── Section 1: Detail rows ──────────────────────────────────────────
+        writer.writerow([
+            "Zeit", "Exporteur", "Importeur",
+            "Exporteur Export [kWh]", "Importeur Import [kWh]",
+            "Verteilerbasis [kWh]", "Schlüssel",
+            "Lokal zugeteilt [kWh]",
+            "Netz Rest Export [kWh]", "Netz Rest Import [kWh]",
+        ])
+
+        for r in results:
+            if not r.flows:
+                continue
+
+            # Per-meter totals for this slot
+            slot_exports: dict[str, float] = {
+                exp_id: (
+                    r.meter_local_supplied_kwh.get(exp_id, 0.0)
+                    + r.meter_grid_export_kwh.get(exp_id, 0.0)
+                )
+                for exp_id in r.flows
+            }
+            all_imp_ids = {imp_id for targets in r.flows.values() for imp_id in targets}
+            slot_imports: dict[str, float] = {
+                imp_id: (
+                    r.meter_local_received_kwh.get(imp_id, 0.0)
+                    + r.meter_grid_import_kwh.get(imp_id, 0.0)
+                )
+                for imp_id in all_imp_ids
+            }
+
+            # Running import remainder per importer within this slot
+            remaining: dict[str, float] = dict(slot_imports)
+
+            for exp_id in sorted(r.flows):
+                targets = r.flows[exp_id]
+                exp_kwh = slot_exports.get(exp_id, 0.0)
+                grid_export = _round_kwh(r.meter_grid_export_kwh.get(exp_id, 0.0))
+                eligible = sum(v for k, v in slot_imports.items() if k != exp_id)
+
+                for imp_id in sorted(targets):
+                    flow_kwh = targets[imp_id]
+                    imp_kwh = slot_imports.get(imp_id, 0.0)
+                    remaining[imp_id] -= flow_kwh
+
+                    writer.writerow([
+                        _to_ch(r.slot_start),
+                        _label(exp_id),
+                        _label(imp_id),
+                        _fmt(exp_kwh),
+                        _fmt(imp_kwh),
+                        _fmt(eligible),
+                        f"{_fmt(imp_kwh)} / {_fmt(eligible)}",
+                        _fmt(flow_kwh),
+                        _fmt(grid_export),
+                        _fmt(remaining[imp_id]),
+                    ])
+
+        # ── Section 2: Per-meter summary ────────────────────────────────────
+        writer.writerow([])
+        writer.writerow([
+            "Zähler",
+            "Total Export [kWh]", "Lokal verkauft [kWh]", "Netzeinspeisung [kWh]",
+            "Total Import [kWh]", "Lokal erhalten [kWh]", "Netzbezug [kWh]",
+        ])
+
+        totals: dict[str, dict[str, float]] = {}
+
+        def _ensure(mid: str) -> dict[str, float]:
+            if mid not in totals:
+                totals[mid] = {
+                    "local_supplied": 0.0, "grid_export": 0.0,
+                    "local_received": 0.0, "grid_import": 0.0,
+                }
+            return totals[mid]
+
+        for r in results:
+            for mid, v in r.meter_local_supplied_kwh.items():
+                _ensure(mid)["local_supplied"] += v
+            for mid, v in r.meter_grid_export_kwh.items():
+                _ensure(mid)["grid_export"] += v
+            for mid, v in r.meter_local_received_kwh.items():
+                _ensure(mid)["local_received"] += v
+            for mid, v in r.meter_grid_import_kwh.items():
+                _ensure(mid)["grid_import"] += v
+
+        sum_row = {k: 0.0 for k in ("local_supplied", "grid_export", "local_received", "grid_import")}
+
+        for mid in sorted(totals, key=_label):
+            m = totals[mid]
+            total_exp = m["local_supplied"] + m["grid_export"]
+            total_imp = m["local_received"] + m["grid_import"]
+            for k in sum_row:
+                sum_row[k] += m[k]
+            writer.writerow([
+                _label(mid),
+                _round_kwh(total_exp),
+                _round_kwh(m["local_supplied"]),
+                _round_kwh(m["grid_export"]),
+                _round_kwh(total_imp),
+                _round_kwh(m["local_received"]),
+                _round_kwh(m["grid_import"]),
+            ])
+
+        sum_exp = sum_row["local_supplied"] + sum_row["grid_export"]
+        sum_imp = sum_row["local_received"] + sum_row["grid_import"]
+        writer.writerow([
+            "SUMME",
+            _round_kwh(sum_exp),
+            _round_kwh(sum_row["local_supplied"]),
+            _round_kwh(sum_row["grid_export"]),
+            _round_kwh(sum_imp),
+            _round_kwh(sum_row["local_received"]),
+            _round_kwh(sum_row["grid_import"]),
+        ])
+
+        # ── Section 3: Audit ────────────────────────────────────────────────
+        writer.writerow([])
+        writer.writerow(["Prüfung", "Wert"])
+
+        n_slots = len(results)
+        n_entries = sum(len(targets) for r in results for targets in r.flows.values())
+        self_supply = sum(
+            1 for r in results
+            for exp_id, targets in r.flows.items()
+            for imp_id in targets
+            if imp_id == exp_id
+        )
+        balance_err = abs(sum_row["local_supplied"] - sum_row["local_received"])
+        ok = self_supply == 0 and balance_err < 1e-6
+
+        writer.writerow(["Anzahl Time Slots", n_slots])
+        writer.writerow(["Anzahl Ledger-Einträge", n_entries])
+        writer.writerow(["Total Export [kWh]", _round_kwh(sum_exp)])
+        writer.writerow(["Total lokal verteilt [kWh]", _round_kwh(sum_row["local_supplied"])])
+        writer.writerow(["Total Netzeinspeisung [kWh]", _round_kwh(sum_row["grid_export"])])
+        writer.writerow(["Total Import [kWh]", _round_kwh(sum_imp)])
+        writer.writerow(["Total lokal erhalten [kWh]", _round_kwh(sum_row["local_received"])])
+        writer.writerow(["Total Netzbezug [kWh]", _round_kwh(sum_row["grid_import"])])
+        writer.writerow(["Selbstbelieferungen erkannt", self_supply])
+        writer.writerow(["Bilanzfehler", 0 if ok else _round_kwh(balance_err)])
+        writer.writerow(["Berechnung erfolgreich", "JA" if ok else "NEIN"])
+
+    logger.info("Energy Ledger CSV written: %s", path.name)
+    return path
+
+
 def write_community_summary_json(
     records: list[BillingRecord],
     community_id: str,
