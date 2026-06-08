@@ -56,14 +56,65 @@ Edit `config/leg_config.yaml`:
 
 ## Matching algorithm
 
-For each 15-minute slot:
+For each 15-minute slot, local energy is shared proportionally across meters — but **a meter can never supply itself**.
+
+### Core rule
 
 ```
-local_shared = min(Σ producer_export, Σ participant_import)
-participant_i local share = (import_i / Σ import) × local_shared
-grid_draw   = max(0, Σ import  − Σ export)
-grid_feedin = max(0, Σ export  − Σ import)
+exporter.meter_id ≠ importer.meter_id  for every flow
 ```
+
+A prosumer meter can have both export and import in the same slot. Its export goes into the community pool for *other* meters. Its import is covered from *other* exporters. The same electricity cannot leave and re-enter the same meter.
+
+### Algorithm
+
+**Step 1 — Cross-meter flows**
+
+For each exporter E (export = X_E):
+distribute X_E proportionally among all importers *except E*:
+
+```
+flow[E → I] = X_E × (import_I / Σ_{J ≠ E} import_J)   for all I ≠ E
+```
+
+**Step 2 — Scale if demand-limited**
+
+```
+total_raw  = Σ all cross-meter flows
+scale      = min(1.0,  total_import / total_raw)
+local_shared = total_raw × scale
+```
+
+**Step 3 — Residuals go to grid**
+
+```
+grid_export_E = export_E  − local_supplied_E
+grid_import_I = import_I  − local_received_I
+```
+
+### Example
+
+```
+Slot 12:00
+
+Meter 1:  export 5 kWh,  import 5 kWh   (prosumer)
+Meter 2:  export 3 kWh,  import 1 kWh   (prosumer)
+Meter 3:  export 0 kWh,  import 20 kWh  (consumer)
+
+total_export = 8,  total_import = 26
+local_shared = 8  (all export used locally)
+
+Meter 1 → Meter 2: 5 × (1/21)  = 0.24 kWh
+Meter 1 → Meter 3: 5 × (20/21) = 4.76 kWh
+Meter 2 → Meter 1: 3 × (5/25)  = 0.60 kWh
+Meter 2 → Meter 3: 3 × (20/25) = 2.40 kWh
+
+Meter 1 receives 0.60 kWh local,  4.40 kWh from grid
+Meter 2 receives 0.24 kWh local,  0.76 kWh from grid
+Meter 3 receives 7.16 kWh local, 12.84 kWh from grid
+```
+
+With **one meter only**, local_shared = 0 — there is no one else to share with.
 
 ## Running tests
 
