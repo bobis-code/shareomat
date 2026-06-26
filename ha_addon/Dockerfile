@@ -6,11 +6,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy SELF LEG application source.
-# Build context must be the project root (not the add-on subdirectory).
-# For HA Supervisor builds: run prepare_addon.sh first so that
-# self_leg/ and main.py are present in the add-on directory.
-# For local builds: docker build -f self_leg_addon/self_leg/Dockerfile .
+# Copy SELF LEG application source from the add-on build context.
+# The canonical source is ./self_leg and ./main.py in the project root.
+# Run ./prepare_addon.sh before building or publishing the add-on so the
+# generated add-on copy is current.
 COPY self_leg/ ./self_leg/
 COPY main.py generate_config.py ./
 
