@@ -44,3 +44,21 @@ def test_render_dashboard_shows_last_error() -> None:
     assert "Settlement failed: missing column" in html
     assert 'class="error-box"' in html
     assert 'status-error">error<' in html
+
+
+def test_render_dashboard_shows_startup_warnings() -> None:
+    state = get_state()
+    state.update(
+        status="ok",
+        last_run="-",
+        inbox_count=0,
+        report_count=0,
+        last_error="",
+    )
+    state.register_meters([])
+    state.register_reports(None)
+    state.add_warning("MQTT is enabled but SELF LEG could not connect to the broker.")
+
+    html = render_dashboard("", "")
+    assert "Startup warning" in html
+    assert "MQTT is enabled" in html

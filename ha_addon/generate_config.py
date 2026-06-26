@@ -45,39 +45,38 @@ _ROLE_TO_PARTICIPANT_TYPE: dict[str, str] = {
 }
 
 
-def _validate_metering_points(points: list[dict]) -> None:
-    """Validate meter roles; auto-fix recoverable combinations; exit on unrecoverable errors."""
+def _warn_metering_points(points: list[dict]) -> None:
+    """Print early hints for common meter setup mistakes.
+
+    The generated leg_config.yaml is still written even when the meter setup is
+    incomplete. main.py performs the authoritative validation and can then show
+    the exact startup error in the Ingress dashboard instead of the add-on
+    exiting before the user sees a useful screen.
+    """
     if not points:
         print(
-            "[ERROR] No metering_points configured!\n"
+            "[WARNING] No metering_points configured!\n"
             "        Go to Add-on → Configuration → metering_points and add\n"
             "        at least one meter with the real MPID from your energy provider.",
-            file=sys.stderr,
         )
-        sys.exit(1)
+        return
 
     roles = [mp.get("role", "") for mp in points]
-    has_producer = any(r in ("producer", "producer_consumer", "grid") for r in roles)
-    has_consumer = any(r in ("consumer", "producer_consumer", "grid") for r in roles)
+    has_producer = any(r in ("producer", "producer_consumer") for r in roles)
+    has_consumer = any(r in ("consumer", "producer_consumer") for r in roles)
 
     if not has_producer:
         print(
-            "[ERROR] No producer meter configured.\n"
+            "[WARNING] No producer meter configured.\n"
             "        At least one meter must have role 'producer' or 'producer_consumer'.\n"
             "        Use 'producer_consumer' if your meter both produces (PV) and consumes.",
-            file=sys.stderr,
         )
-        sys.exit(1)
 
     if not has_consumer:
-        # Auto-fix: promote all 'producer' to 'producer_consumer' so the add-on can start.
-        for mp in points:
-            if mp.get("role") == "producer":
-                mp["role"] = "producer_consumer"
         print(
-            "[WARNING] No consumer meter configured — automatically set all 'producer' meters\n"
-            "          to 'producer_consumer' so the add-on can start.\n"
-            "          To silence this warning, set the role to 'producer_consumer' in the options."
+            "[WARNING] No consumer meter configured.\n"
+            "          At least one meter must have role 'consumer' or 'producer_consumer'.\n"
+            "          Use 'producer_consumer' if your meter both produces (PV) and consumes."
         )
 
 
@@ -89,7 +88,7 @@ def main() -> None:
     with OPTIONS_PATH.open(encoding="utf-8-sig") as f:
         opts: dict = json.load(f)
 
-    _validate_metering_points(opts.get("metering_points", []))
+    _warn_metering_points(opts.get("metering_points", []))
     dry_run: bool = opts.get("dry_run", False)
 
     config = {

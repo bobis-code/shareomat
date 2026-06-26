@@ -47,6 +47,26 @@ def test_no_participants_raises(tmp_path):
         load_config(p)
 
 
+def test_no_producer_meter_raises(tmp_path):
+    data = _minimal_config()
+    data["meters"] = [
+        {"meter_id": "M2", "participant_id": "P2", "label": "Flat 1", "role": "consumer"},
+    ]
+    p = _write_yaml(tmp_path, data)
+    with pytest.raises(ValueError, match="producer"):
+        load_config(p)
+
+
+def test_no_consumer_meter_raises(tmp_path):
+    data = _minimal_config()
+    data["meters"] = [
+        {"meter_id": "M1", "participant_id": "P1", "label": "Solar", "role": "producer"},
+    ]
+    p = _write_yaml(tmp_path, data)
+    with pytest.raises(ValueError, match="consumer"):
+        load_config(p)
+
+
 def test_unknown_participant_in_meter_raises(tmp_path):
     data = _minimal_config()
     data["meters"][0]["participant_id"] = "UNKNOWN"
