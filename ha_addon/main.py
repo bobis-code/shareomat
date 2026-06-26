@@ -30,6 +30,7 @@ import logging
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -42,6 +43,9 @@ _CONFIG_PATH = Path(os.environ.get("SELF_LEG_CONFIG_PATH", "config/leg_config.ya
 
 logger = logging.getLogger(__name__)
 _RUN_LOCK = threading.Lock()
+_ERROR_DASHBOARD_ENABLED = os.environ.get("SELF_LEG_ERROR_DASHBOARD", "").lower() in {
+    "1", "true", "yes", "on",
+}
 
 
 def setup_logging() -> None:
@@ -187,17 +191,62 @@ def _run_daemon(
             _shutdown(mqtt_client)
 
 
+def _serve_startup_error(message: str, *, port: int = 8099) -> None:
+    """Start a minimal Ingress dashboard that explains why startup stopped."""
+    if not _ERROR_DASHBOARD_ENABLED:
+        logger.error("%s", message)
+        sys.exit(1)
+
+    logger.error("Startup failed; serving Ingress error dashboard: %s", message)
+    ingress_server = IngressServer(port=port)
+    ingress_server.start()
+
+    state = get_ingress_state()
+    state.update(
+        status="error",
+        last_run="-",
+        inbox_count=0,
+        report_count=0,
+        last_error=message,
+    )
+    state.add_warning(
+        "SELF LEG could not start because the configuration is incomplete or invalid. "
+        "Open the add-on Configuration tab, fix the items below, then restart the add-on."
+    )
+    state.register_inbox(Path("/config/self_leg/inbox"))
+    state.register_reports(Path("/config/self_leg/reports"))
+    state.register_meters([])
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        ingress_server.stop()
+        logger.info("Startup error dashboard stopped")
+
+
 def main() -> None:
     """Start the SELF LEG application."""
     setup_logging()
     logger.info("self_leg starting up")
 
     if not _CONFIG_PATH.exists():
-        logger.error("Config file not found: %s", _CONFIG_PATH)
-        sys.exit(1)
+        _serve_startup_error(f"Config file not found: {_CONFIG_PATH}")
+        return
 
-    config = load_config(_CONFIG_PATH)
+    try:
+        config = load_config(_CONFIG_PATH)
+    except Exception as exc:
+        _serve_startup_error(str(exc))
+        return
     mqtt_client = setup_mqtt(config)
+    startup_warnings: list[str] = []
+    if config.mqtt.enabled and mqtt_client is None:
+        startup_warnings.append(
+            "MQTT is enabled but SELF LEG could not connect to the broker. "
+            f"Check mqtt_host '{config.mqtt.broker}', port {config.mqtt.port}, "
+            "credentials, and whether the broker is running."
+        )
 
     # Start ingress server if enabled
     ingress_server = None
@@ -209,6 +258,8 @@ def main() -> None:
         _ingress.register_inbox(config.paths.inbox)
         _ingress.register_reports(config.paths.reports)
         _ingress.register_meters([(m.meter_id, m.label) for m in config.meters])
+        for warning in startup_warnings:
+            _ingress.add_warning(warning)
 
     _run_safe_cycle(_CONFIG_PATH, config, mqtt_client)
 

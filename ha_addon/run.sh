@@ -24,6 +24,7 @@ fi
 
 # Set the process timezone so Python datetime matches the configured locale.
 export TZ="${SELF_LEG_TZ}"
+export SELF_LEG_ERROR_DASHBOARD="true"
 
 echo "[INFO] Timezone : ${SELF_LEG_TZ}"
 echo "[INFO] Log level: ${SELF_LEG_LOG_LEVEL}"

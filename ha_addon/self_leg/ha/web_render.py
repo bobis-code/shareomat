@@ -76,6 +76,7 @@ _HTML_TEMPLATE = """\
     <div class="ts" style="margin-top:12px">Last run: {last_run}</div>
   </div>
   {meters_html}
+  {warnings_html}
   {error_html}
   {upload_msg_html}
   {reports_html}
@@ -168,6 +169,16 @@ def render_dashboard(ingress_path: str, selected_report: str) -> str:
             f'Last error: {_html_escape(str(state["last_error"]))}</div></div>'
         )
 
+    warnings_html = ""
+    warnings = state.get("warnings", [])
+    if warnings:
+        items = "".join(f"<li>{_html_escape(str(w))}</li>" for w in warnings)
+        warnings_html = (
+            '<div class="card"><div class="error-box">'
+            f'<strong>Startup warning</strong><ul style="margin:8px 0 0 18px">{items}</ul>'
+            '</div></div>'
+        )
+
     # Upload messages are one-shot feedback after POST /upload redirects back here.
     upload_msg, upload_ok = shared.pop_upload_result()
     upload_msg_html = ""
@@ -181,6 +192,7 @@ def render_dashboard(ingress_path: str, selected_report: str) -> str:
         inbox_count=state["inbox_count"],
         report_count=state["report_count"],
         last_run=_html_escape(str(state["last_run"] or "-")),
+        warnings_html=warnings_html,
         error_html=error_html,
         upload_msg_html=upload_msg_html,
         reports_html=build_reports_card(ingress_path, selected_report),

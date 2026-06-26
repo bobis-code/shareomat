@@ -25,6 +25,7 @@ class IngressState:
             "inbox_count": 0,
             "report_count": 0,
             "last_error": "",
+            "warnings": [],
         }
 
         # Runtime hooks and filesystem paths are registered once during app startup.
@@ -64,7 +65,22 @@ class IngressState:
     def get(self) -> dict:
         """Return a snapshot of the current state as a plain dict."""
         with self._lock:
-            return dict(self._data)
+            data = dict(self._data)
+            data["warnings"] = list(self._data.get("warnings", []))
+            return data
+
+    def add_warning(self, message: str) -> None:
+        """Add a persistent dashboard warning if it is not already shown."""
+        with self._lock:
+            warnings = list(self._data.get("warnings", []))
+            if message not in warnings:
+                warnings.append(message)
+            self._data["warnings"] = warnings
+
+    def clear_warnings(self) -> None:
+        """Clear persistent dashboard warnings."""
+        with self._lock:
+            self._data["warnings"] = []
 
     def register_on_run(self, callback: Callable[[], None]) -> None:
         """Register the function called by the dashboard Run button."""
