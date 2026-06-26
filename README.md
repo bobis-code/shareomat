@@ -20,6 +20,9 @@ LEG/ZEV — calculates local energy sharing.
 ## Quick start
 
 ```bash
+# First-time local setup:
+cp config/leg_config.example.yaml config/leg_config.yaml
+
 # Drop CSV or S-DAT files into data/inbox/, then:
 docker compose up --build
 ```
@@ -44,15 +47,23 @@ Standard Swiss S-DAT metering data exchange format. Both namespaced (`xmlns="htt
 
 ## Configuration
 
-Edit `config/leg_config.yaml`:
+Copy `config/leg_config.example.yaml` to `config/leg_config.yaml` and edit the
+local file. `config/leg_config.yaml` is intentionally ignored by Git because it
+may contain real meter IDs, broker addresses, and MQTT credentials.
 
 | Key | Description |
 |-----|-------------|
 | `leg.community_id` | Unique ID for the ZEV/LEG community |
-| `metering_points[].role` | `producer` or `participant` |
+| `participants[].participant_id` | Business/billing identity such as house, flat, or tenant |
+| `meters[].meter_id` | Official meter ID from the grid/operator data |
+| `meters[].role` | `producer`, `consumer`, `producer_consumer`, or `grid` |
 | `tariffs.local_rate_chf_kwh` | CHF/kWh for locally shared energy |
 | `tariffs.grid_rate_chf_kwh` | CHF/kWh for grid-sourced energy |
 | `processing.archive_processed` | Move processed files to archive (default `true`) |
+
+Never commit real passwords or private MQTT credentials. Use the Home Assistant
+add-on options for add-on deployments, or keep local credentials only in the
+ignored `config/leg_config.yaml`.
 
 ## Matching algorithm
 
@@ -166,6 +177,24 @@ There must be at least two meters for any local sharing to occur.
 ```bash
 pip install -r requirements.txt
 pytest tests/
+```
+
+## Home Assistant add-on source
+
+The canonical Python source lives in `self_leg/` and `main.py`. The add-on
+directory contains a build copy so Home Assistant can build the add-on from
+`ha_addon/` as its Docker context.
+
+After changing application code, refresh the add-on copy:
+
+```bash
+./prepare_addon.sh
+```
+
+To verify that the add-on copy is current:
+
+```bash
+python tools/prepare_addon.py --check
 ```
 
 ## Project layout

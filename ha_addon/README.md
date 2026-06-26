@@ -111,17 +111,23 @@ mosquitto_pub -h core-mosquitto -t "self_leg/cmd/run_once" -m "run"
 
 ## Building
 
-### Local Docker build (from project root)
-
-```bash
-docker build -f self_leg_addon/self_leg/Dockerfile .
-```
-
-### HA Supervisor build (prepare first)
+The add-on build context contains a generated copy of the canonical Python
+source from the project root. Refresh it before building or publishing:
 
 ```bash
 ./prepare_addon.sh
-# Then commit/push and install via HA Add-on Store
+```
+
+### Local Docker build (from project root)
+
+```bash
+docker build -f ha_addon/Dockerfile ha_addon
+```
+
+### Sync check
+
+```bash
+python tools/prepare_addon.py --check
 ```
 
 ---

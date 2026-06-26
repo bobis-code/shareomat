@@ -29,16 +29,19 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Callable
 
 from self_leg.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from self_leg.ha.ingress import IngressServer, get_state as get_ingress_state
 from self_leg.core.leg_config import LegConfig, load_config
 from self_leg.core.leg_runner import run
 
 _CONFIG_PATH = Path(os.environ.get("SELF_LEG_CONFIG_PATH", "config/leg_config.yaml"))
 
 logger = logging.getLogger(__name__)
+_RUN_LOCK = threading.Lock()
 
 
 def setup_logging() -> None:
@@ -55,7 +58,6 @@ def setup_logging() -> None:
 def _update_ingress_state(config: LegConfig, error: str = "") -> None:
     """Update the ingress dashboard state after a settlement run."""
     try:
-        from self_leg.ha.ingress import get_state as get_ingress_state
         from datetime import datetime, timezone
         state = get_ingress_state()
         inbox_count = (
@@ -73,21 +75,41 @@ def _update_ingress_state(config: LegConfig, error: str = "") -> None:
             report_count=report_count,
             last_error=error,
         )
-    except Exception:
-        pass  # ingress state update must never crash the engine
+    except Exception as exc:
+        logger.warning("Ingress state update failed: %s", exc)
 
 
-def _run_safe_cycle(config_path: Path, config: LegConfig, mqtt_client: object | None) -> None:
-    """Run one settlement cycle and publish an error status to MQTT on failure."""
+def _run_safe_cycle(config_path: Path, config: LegConfig, mqtt_client: object | None) -> bool:
+    """Run one settlement cycle unless another cycle is already active.
+
+    Every trigger path (startup, MQTT command, cron, file watcher, share importer,
+    and Ingress) goes through this function, so the lock protects the inbox,
+    archive, reports, and processed-file state from concurrent settlement runs.
+    """
+    if not _RUN_LOCK.acquire(blocking=False):
+        logger.warning("Settlement run skipped: another run is already active")
+        try:
+            get_ingress_state().set_upload_result(
+                "Run skipped: another settlement run is already active.",
+                ok=False,
+            )
+        except Exception as exc:
+            logger.debug("Could not publish skipped-run notice to Ingress: %s", exc)
+        return False
+
     try:
         run(config_path, mqtt_client=mqtt_client)
         _update_ingress_state(config, error="")
+        return True
     except Exception as exc:
         logger.error("Settlement run failed: %s", exc)
         if mqtt_client is not None:
             from self_leg.ha.mqtt_runtime import publish_status
             publish_status(mqtt_client, "error", config.mqtt)
         _update_ingress_state(config, error=str(exc))
+        return True
+    finally:
+        _RUN_LOCK.release()
 
 
 def _run_daemon(
@@ -180,7 +202,6 @@ def main() -> None:
     # Start ingress server if enabled
     ingress_server = None
     if config.ingress.enabled:
-        from self_leg.ha.ingress import IngressServer, get_state as get_ingress_state
         ingress_server = IngressServer(port=config.ingress.port)
         ingress_server.start()
         _ingress = get_ingress_state()
