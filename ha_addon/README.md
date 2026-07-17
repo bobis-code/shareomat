@@ -24,7 +24,7 @@ SELF LEG remains fully independent. HA only sees MQTT sensors.
 
 1. In Home Assistant: **Settings → Add-ons → Add-on Store**
 2. Click the three-dot menu → **Repositories**
-3. Add: `https://github.com/ha-bt-usr/self-leg`
+3. Add: `https://github.com/bobis-code/self_leg`
 4. Find **SELF LEG** and click **Install**
 
 ---
