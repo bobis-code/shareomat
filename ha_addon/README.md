@@ -50,6 +50,26 @@ SELF LEG remains fully independent. HA only sees MQTT sensors.
 | `dry_run` | Parse and match without archiving inbox files | `false` |
 | `unknown_meter_policy` | What to do with meter IDs in the data not found in config: `fail` stops the run, `skip` ignores them | `skip` |
 | `metering_points` | List of MPIDs with label and role | |
+| `email_enabled` | Poll an IMAP mailbox for meter-data attachments | `false` |
+| `email_imap_host` | IMAP server hostname | `imap.gmail.com` |
+| `email_imap_port` | IMAP server port (TLS) | `993` |
+| `email_username` | Mailbox address (e.g. a dedicated Gmail account) | |
+| `email_password` | IMAP password — for Gmail use an **App Password**, not the account password | |
+| `email_folder` | IMAP folder to watch | `INBOX` |
+| `email_allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender | `[]` |
+| `email_poll_interval_seconds` | How often to check the mailbox | `300` |
+
+### Email import
+
+Use a mailbox dedicated to meter data only — e.g. if your grid operator sends
+readings by email, or you want to forward them yourself. The mailbox is
+never modified: messages are read via `BODY.PEEK[]` (no `\Seen` flag set) and
+nothing is deleted. Already-seen messages are tracked locally by IMAP UID in
+`/config/self_leg/state/email_import_state.json`.
+
+For Gmail: enable 2-Step Verification on the account, then create an
+**App Password** under Google Account → Security → App passwords, and use
+that as `email_password`.
 
 ### `metering_points` format
 

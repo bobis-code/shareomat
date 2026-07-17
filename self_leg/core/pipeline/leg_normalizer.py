@@ -36,7 +36,7 @@ from self_leg.leg_const import (
 from self_leg.models.meter import IntervalReading
 
 if TYPE_CHECKING:
-    from self_leg.core.raw.ebl_xlsx import EblRow
+    from self_leg.core.pipeline.raw.ebl_xlsx import EblRow
 
 logger = logging.getLogger(__name__)
 

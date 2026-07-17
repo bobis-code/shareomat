@@ -150,3 +150,38 @@ def test_ingress_defaults(tmp_path):
     config = load_config(p)
     assert config.ingress.enabled is False
     assert config.ingress.port == 8099
+
+
+def test_email_defaults(tmp_path):
+    data = _minimal_config()
+    p = _write_yaml(tmp_path, data)
+    config = load_config(p)
+    assert config.email.enabled is False
+    assert config.email.imap_host == "imap.gmail.com"
+    assert config.email.imap_port == 993
+    assert config.email.folder == "INBOX"
+    assert config.email.allowed_senders == []
+
+
+def test_email_enabled_requires_username(tmp_path):
+    data = _minimal_config()
+    data["email"] = {"enabled": True}
+    p = _write_yaml(tmp_path, data)
+    with pytest.raises(ValueError, match="email.username"):
+        load_config(p)
+
+
+def test_email_port_range_invalid(tmp_path):
+    data = _minimal_config()
+    data["email"] = {"enabled": True, "username": "a@example.com", "imap_port": 99999}
+    p = _write_yaml(tmp_path, data)
+    with pytest.raises(ValueError, match="email.imap_port"):
+        load_config(p)
+
+
+def test_email_allowed_senders_lowercased(tmp_path):
+    data = _minimal_config()
+    data["email"] = {"allowed_senders": ["Grid@Operator.CH"]}
+    p = _write_yaml(tmp_path, data)
+    config = load_config(p)
+    assert config.email.allowed_senders == ["grid@operator.ch"]

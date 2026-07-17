@@ -32,6 +32,7 @@ from typing import Any
 import yaml
 
 from self_leg.leg_const import (
+    DEFAULT_IMAP_PORT,
     DEFAULT_MQTT_PORT,
     DEFAULT_SLOT_MINUTES,
     DEFAULT_TOPIC_PREFIX,
@@ -142,6 +143,20 @@ class MqttConfig:
 
 
 @dataclass
+class EmailConfig:
+    """IMAP mailbox polling for automatic meter-data ingestion (e.g. a dedicated Gmail inbox)."""
+
+    enabled: bool = False
+    imap_host: str = "imap.gmail.com"
+    imap_port: int = DEFAULT_IMAP_PORT
+    username: str = ""
+    password: str = ""             # Gmail: use an App Password, never the account password
+    folder: str = "INBOX"
+    allowed_senders: list[str] = field(default_factory=list)  # empty = accept any sender
+    poll_interval_seconds: int = 300
+
+
+@dataclass
 class IngressConfig:
     """Configuration for the optional Home Assistant Ingress web interface."""
     enabled: bool = False
@@ -160,6 +175,7 @@ class LegConfig:
     paths: PathConfig
     processing: ProcessingConfig
     mqtt: MqttConfig = field(default_factory=MqttConfig)
+    email: EmailConfig = field(default_factory=EmailConfig)
     ingress: IngressConfig = field(default_factory=IngressConfig)
 
 
@@ -254,6 +270,23 @@ def parse_mqtt(raw: dict[str, Any]) -> MqttConfig:
         retain=bool(m.get("retain", True)),
         tls_enabled=bool(m.get("tls_enabled", False)),
         tls_ca_cert=str(m.get("tls_ca_cert", "")),
+    )
+
+
+def parse_email(raw: dict[str, Any]) -> EmailConfig:
+    """Parse optional IMAP email-import settings."""
+    e = raw.get("email", {})
+    if not e:
+        return EmailConfig()
+    return EmailConfig(
+        enabled=bool(e.get("enabled", False)),
+        imap_host=str(e.get("imap_host", "imap.gmail.com")),
+        imap_port=int(e.get("imap_port", DEFAULT_IMAP_PORT)),
+        username=str(e.get("username", "")),
+        password=str(e.get("password", "")),
+        folder=str(e.get("folder", "INBOX")),
+        allowed_senders=[str(s).lower() for s in e.get("allowed_senders", [])],
+        poll_interval_seconds=int(e.get("poll_interval_seconds", 300)),
     )
 
 
@@ -354,6 +387,15 @@ def validate_config(config: LegConfig) -> None:
     if config.mqtt.enabled and config.mqtt.tls_enabled and config.mqtt.port == 1883:
         logger.warning("TLS is enabled but port is 1883 — typical TLS port is 8883")
 
+    # Email (IMAP) validation
+    if config.email.enabled:
+        if not (1 <= config.email.imap_port <= 65535):
+            errors.append(f"email.imap_port must be between 1 and 65535, got {config.email.imap_port}")
+        if not config.email.imap_host:
+            errors.append("email.imap_host is required when email.enabled is true")
+        if not config.email.username:
+            errors.append("email.username is required when email.enabled is true")
+
     # Cron schedule validation
     cron = config.processing.cron_schedule
     if cron:
@@ -386,14 +428,16 @@ def load_config(config_path: Path) -> LegConfig:
         paths=parse_paths(raw),
         processing=parse_processing(raw),
         mqtt=parse_mqtt(raw),
+        email=parse_email(raw),
         ingress=parse_ingress(raw),
     )
 
     validate_config(config)
     active_meters = sum(1 for m in config.meters if m.active)
     logger.info(
-        "Config OK: %d participant(s), %d active meter(s), slot=%dmin, MQTT=%s",
+        "Config OK: %d participant(s), %d active meter(s), slot=%dmin, MQTT=%s, Email=%s",
         len(config.participants), active_meters, config.processing.slot_minutes,
         "enabled" if config.mqtt.enabled else "disabled",
+        "enabled" if config.email.enabled else "disabled",
     )
     return config
