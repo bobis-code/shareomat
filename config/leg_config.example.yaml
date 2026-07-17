@@ -60,6 +60,16 @@ mqtt:
   tls_enabled: false
   tls_ca_cert: ""
 
+email:
+  enabled: false
+  imap_host: "imap.gmail.com"
+  imap_port: 993
+  username: ""
+  password: ""
+  folder: "INBOX"
+  allowed_senders: []
+  poll_interval_seconds: 300
+
 ingress:
   enabled: false
   port: 8099

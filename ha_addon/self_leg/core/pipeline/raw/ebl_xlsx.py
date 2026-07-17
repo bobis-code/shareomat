@@ -35,7 +35,7 @@ from pathlib import Path
 
 from self_leg.leg_const import SLOT_MINUTES
 from self_leg.models.meter import IntervalReading
-from self_leg.core.leg_normalizer import normalize_ebl_row
+from self_leg.core.pipeline.leg_normalizer import normalize_ebl_row
 
 logger = logging.getLogger(__name__)
 

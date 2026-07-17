@@ -29,7 +29,7 @@ from pathlib import Path
 
 from self_leg.leg_const import DIRECTION_EXPORT, DIRECTION_IMPORT, SLOT_MINUTES
 from self_leg.models.meter import EnergySlot, IntervalReading
-from self_leg.core.leg_normalizer import snap_to_slot as _snap_to_slot
+from self_leg.core.pipeline.leg_normalizer import snap_to_slot as _snap_to_slot
 
 logger = logging.getLogger(__name__)
 

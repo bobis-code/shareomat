@@ -153,6 +153,16 @@ def main() -> None:
             "tls_enabled":            bool(opts.get("mqtt_tls", False)),
             "tls_ca_cert":            str(opts.get("mqtt_ca_cert", "")),
         },
+        "email": {
+            "enabled":              bool(opts.get("email_enabled", False)),
+            "imap_host":            opts.get("email_imap_host", "imap.gmail.com"),
+            "imap_port":            int(opts.get("email_imap_port", 993)),
+            "username":             opts.get("email_username", ""),
+            "password":             opts.get("email_password", ""),
+            "folder":               opts.get("email_folder", "INBOX"),
+            "allowed_senders":      list(opts.get("email_allowed_senders", [])),
+            "poll_interval_seconds": int(opts.get("email_poll_interval_seconds", 300)),
+        },
         "ingress": {
             "enabled": bool(opts.get("ingress_enabled", True)),
             "port": 8099,

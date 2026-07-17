@@ -31,14 +31,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from self_leg.core.leg_billing import compute_billing
+from self_leg.core.pipeline.leg_billing import compute_billing
 from self_leg.core.leg_config import LegConfig, load_config
 from self_leg.leg_const import UNKNOWN_METER_POLICY_FAIL
-from self_leg.core.leg_import import move_to_archive, scan_inbox
-from self_leg.core.leg_matcher import match_all
+from self_leg.core.collector.leg_import import move_to_archive, scan_inbox
+from self_leg.core.pipeline.leg_matcher import match_all
 from self_leg.models.meter import ImportFile, IntervalReading
-from self_leg.core.leg_parser import parse_csv, parse_sdat, readings_to_slots
-from self_leg.core.leg_report import (
+from self_leg.core.pipeline.leg_parser import parse_csv, parse_sdat, readings_to_slots
+from self_leg.core.report.leg_report import (
     write_billing_csv,
     write_billing_json,
     write_community_audit_csv,
@@ -46,7 +46,7 @@ from self_leg.core.leg_report import (
     write_ledger_csv,
     write_match_csv,
 )
-from self_leg.core.leg_storage import is_processed, mark_processed
+from self_leg.core.collector.leg_storage import is_processed, mark_processed
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ def _parse_file(
     if imp.file_type == "sdat":
         return parse_sdat(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
     if imp.file_type == "xlsx":
-        from self_leg.core.raw.ebl_xlsx import parse as parse_ebl_xlsx
+        from self_leg.core.pipeline.raw.ebl_xlsx import parse as parse_ebl_xlsx
         return parse_ebl_xlsx(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
     raise ValueError(f"Unknown file type: {imp.file_type}")
 

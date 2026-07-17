@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from self_leg.core.leg_matcher import match_all, match_slot
+from self_leg.core.pipeline.leg_matcher import match_all, match_slot
 from self_leg.models.meter import EnergySlot
 
 TS  = datetime(2024, 6, 1, 12,  0, 0, tzinfo=timezone.utc)

@@ -132,7 +132,7 @@ def _run_daemon(
 
     # Cron scheduler
     if config.processing.cron_schedule:
-        from self_leg.core.leg_scheduler import SchedulerThread
+        from self_leg.core.collector.leg_scheduler import SchedulerThread
         t = SchedulerThread(config.processing.cron_schedule, on_run)
         t.start()
         threads.append(t)
@@ -140,7 +140,7 @@ def _run_daemon(
 
     # Share folder importer
     if config.paths.share_inbox:
-        from self_leg.core.leg_share_importer import ShareImporterThread
+        from self_leg.core.collector.leg_share_importer import ShareImporterThread
         share_t = ShareImporterThread(
             share_path=Path(config.paths.share_inbox),
             inbox_path=config.paths.inbox,
@@ -150,10 +150,28 @@ def _run_daemon(
         threads.append(share_t)
         logger.info("Share importer started: %s", config.paths.share_inbox)
 
+    # Email importer (IMAP mailbox, e.g. a dedicated Gmail inbox)
+    if config.email.enabled:
+        from self_leg.core.collector.leg_email_importer import EmailImporterThread
+        email_t = EmailImporterThread(
+            imap_host=config.email.imap_host,
+            imap_port=config.email.imap_port,
+            username=config.email.username,
+            password=config.email.password,
+            folder=config.email.folder,
+            allowed_senders=config.email.allowed_senders,
+            inbox_path=config.paths.inbox,
+            state_dir=config.paths.state,
+            interval=config.email.poll_interval_seconds,
+        )
+        email_t.start()
+        threads.append(email_t)
+        logger.info("Email importer started: %s@%s", config.email.username, config.email.imap_host)
+
     # File watcher
     watcher = None
     if config.processing.auto_scan_enabled:
-        from self_leg.core.leg_watcher import WatcherThread
+        from self_leg.core.collector.leg_watcher import WatcherThread
         watcher = WatcherThread(
             config.paths.inbox,
             on_run,

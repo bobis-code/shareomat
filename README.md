@@ -60,10 +60,13 @@ may contain real meter IDs, broker addresses, and MQTT credentials.
 | `tariffs.local_rate_chf_kwh` | CHF/kWh for locally shared energy |
 | `tariffs.grid_rate_chf_kwh` | CHF/kWh for grid-sourced energy |
 | `processing.archive_processed` | Move processed files to archive (default `true`) |
+| `email.enabled` | Poll an IMAP mailbox (e.g. a dedicated Gmail account) for meter-data attachments |
+| `email.allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender |
 
-Never commit real passwords or private MQTT credentials. Use the Home Assistant
-add-on options for add-on deployments, or keep local credentials only in the
-ignored `config/leg_config.yaml`.
+Never commit real passwords or private MQTT/email credentials. Use the Home
+Assistant add-on options for add-on deployments, or keep local credentials
+only in the ignored `config/leg_config.yaml`. For Gmail, use an App Password
+(requires 2-Step Verification), never the account password.
 
 ## Matching algorithm
 
@@ -205,17 +208,21 @@ self_leg/                    Python package
   core/
     leg_config.py            YAML config loader + validation
     leg_runner.py            Pipeline orchestration
-    leg_parser.py            CSV / S-DAT / XLSX parser
-    leg_matcher.py           Proportional energy sharing
-    leg_billing.py           Period aggregation & cost calculation
-    leg_report.py            CSV + JSON report writers
-    leg_storage.py           Processed-file state (SHA-256 dedup)
-    leg_import.py            Inbox scan & archive
-    leg_scheduler.py         Cron-based run scheduler
-    leg_watcher.py           Inbox file watcher
-    leg_share_importer.py    Share folder → inbox importer
-    raw/
-      ebl_xlsx.py            EBL Excel format parser
+    collector/                Data intake
+      leg_import.py            Inbox scan & archive
+      leg_scheduler.py         Cron-based run scheduler
+      leg_watcher.py           Inbox file watcher
+      leg_share_importer.py    Share folder → inbox importer
+      leg_storage.py           Processed-file state (SHA-256 dedup)
+    pipeline/                  Settlement processing
+      leg_parser.py            CSV / S-DAT / XLSX parser
+      leg_normalizer.py        Reading normalization
+      leg_matcher.py           Proportional energy sharing
+      leg_billing.py           Period aggregation & cost calculation
+      raw/
+        ebl_xlsx.py            EBL Excel format parser
+    report/
+      leg_report.py            CSV + JSON report writers
   ha/
     mqtt_runtime.py          MQTT client lifecycle
     mqtt_discovery.py        Home Assistant MQTT Discovery
