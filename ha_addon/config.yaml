@@ -2,7 +2,7 @@ name: SELF LEG
 version: "0.1.8"
 slug: self_leg
 description: LEG/ZEV — calculates local energy sharing.
-url: https://github.com/ha-bt-usr/self-leg
+url: https://github.com/bobis-code/self_leg
 startup: application
 boot: auto
 arch:
