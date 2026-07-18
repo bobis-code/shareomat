@@ -27,6 +27,7 @@ _HTML_TEMPLATE = """\
     body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
             background: #f5f7fa; color: #333; padding: 24px; }}
     h1 {{ font-size: 1.5rem; margin-bottom: 24px; color: #1a1a2e; }}
+    .banner {{ max-width: 100%; height: auto; display: block; margin-bottom: 24px; }}
     .card {{ background: white; border-radius: 8px; padding: 20px;
              box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 16px; }}
     .card h2 {{ font-size: .9rem; text-transform: uppercase; letter-spacing: .05em;
@@ -56,7 +57,7 @@ _HTML_TEMPLATE = """\
   </style>
 </head>
 <body>
-  <h1>Shareomat Ledger</h1>
+  <img class="banner" src="{ingress_path}/banner.png" alt="Shareomat">
   <div class="card">
     <h2>System Status</h2>
     <div class="grid">

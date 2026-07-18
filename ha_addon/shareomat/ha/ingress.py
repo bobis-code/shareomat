@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["IngressServer", "IngressState", "get_state"]
 
+_BANNER_PATH = Path(__file__).resolve().parent / "static" / "banner.png"
 _ALLOWED_UPLOAD_EXT = {".csv", ".xml", ".xlsx"}
 _MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 _SOCKET_TIMEOUT_SECONDS = 30
@@ -100,11 +101,31 @@ class _IngressHandler(BaseHTTPRequestHandler):
             shutil.copyfileobj(f, self.wfile, length=1024 * 1024)
         logger.debug("Ingress download: served %s (%d bytes)", safe_name, size)
 
+    def _serve_banner(self) -> None:
+        """Serve the dashboard header banner image."""
+        if not _BANNER_PATH.is_file():
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        size = _BANNER_PATH.stat().st_size
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(size))
+        self.send_header("Cache-Control", "public, max-age=86400")
+        self.end_headers()
+        with _BANNER_PATH.open("rb") as f:
+            shutil.copyfileobj(f, self.wfile, length=1024 * 1024)
+
     def do_GET(self) -> None:
-        """Serve the dashboard or a report file download."""
+        """Serve the dashboard, the header banner, or a report file download."""
         parsed = urlparse(self.path)
         if parsed.path.rstrip("/").endswith("/download"):
             self._serve_download(parsed.query)
+            return
+
+        if parsed.path.rstrip("/").endswith("/banner.png"):
+            self._serve_banner()
             return
 
         query = parse_qs(parsed.query)
