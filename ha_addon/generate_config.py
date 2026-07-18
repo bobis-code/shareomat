@@ -4,12 +4,12 @@ File: generate_config.py
 
 Purpose:
     Reads Home Assistant add-on options from /data/options.json and
-    generates /config/self_leg/leg_config.yaml for SELF LEG.
-    Also writes /tmp/self_leg_env so run.sh can export runtime
+    generates /config/shareomat/leg_config.yaml for Shareomat.
+    Also writes /tmp/shareomat_env so run.sh can export runtime
     environment variables (timezone, log level, dry-run flag).
 
 Part of:
-    SELF LEG — Home Assistant Add-on
+    Shareomat — Home Assistant Add-on
 
 Notes:
     Called once by run.sh at container startup, before the engine starts.
@@ -32,8 +32,8 @@ from pathlib import Path
 import yaml
 
 OPTIONS_PATH = Path("/data/options.json")
-CONFIG_OUTPUT = Path("/config/self_leg/leg_config.yaml")
-ENV_OUTPUT = Path("/tmp/self_leg_env")
+CONFIG_OUTPUT = Path("/config/shareomat/leg_config.yaml")
+ENV_OUTPUT = Path("/tmp/shareomat_env")
 
 # role → participant_type translation.
 # grid meters are modelled as producer_consumer so validate_config accepts them.
@@ -123,10 +123,10 @@ def main() -> None:
             "feed_in_rate_chf_kwh": float(opts["feed_in_rate_chf_kwh"]),
         },
         "paths": {
-            "inbox":        "/config/self_leg/inbox",
-            "archive":      "/config/self_leg/archive",
-            "reports":      "/config/self_leg/reports",
-            "state":        "/config/self_leg/state",
+            "inbox":        "/config/shareomat/inbox",
+            "archive":      "/config/shareomat/archive",
+            "reports":      "/config/shareomat/reports",
+            "state":        "/config/shareomat/state",
             "share_inbox":  str(opts.get("share_inbox", "")),
         },
         "processing": {
@@ -143,8 +143,8 @@ def main() -> None:
             "port":                   int(opts.get("mqtt_port", 1883)),
             "username":               opts.get("mqtt_username", ""),
             "password":               opts.get("mqtt_password", ""),
-            "client_id":              "self_leg",
-            "topic_prefix":           opts.get("base_topic", "self_leg"),
+            "client_id":              "shareomat",
+            "topic_prefix":           opts.get("base_topic", "shareomat"),
             "discovery_prefix":       opts.get("discovery_prefix", "homeassistant"),
             "discovery_enabled":      True,
             "command_topic_enabled":  bool(opts.get("command_topic_enabled", True)),
@@ -178,10 +178,10 @@ def main() -> None:
     timezone = opts.get("timezone", "Europe/Zurich")
     log_level = opts.get("log_level", "info").upper()
     env_lines = [
-        f'export SELF_LEG_CONFIG_PATH="{CONFIG_OUTPUT}"',
-        f'export SELF_LEG_TZ="{timezone}"',
-        f'export SELF_LEG_LOG_LEVEL="{log_level}"',
-        f'export SELF_LEG_DRY_RUN="{str(dry_run).lower()}"',
+        f'export SHAREOMAT_CONFIG_PATH="{CONFIG_OUTPUT}"',
+        f'export SHAREOMAT_TZ="{timezone}"',
+        f'export SHAREOMAT_LOG_LEVEL="{log_level}"',
+        f'export SHAREOMAT_DRY_RUN="{str(dry_run).lower()}"',
     ]
     ENV_OUTPUT.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
     print(f"[INFO] Env file written to {ENV_OUTPUT}")

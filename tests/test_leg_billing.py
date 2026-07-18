@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import pytest
-from self_leg.core.pipeline.leg_billing import compute_billing
-from self_leg.core.leg_config import (
+from shareomat.core.pipeline.leg_billing import compute_billing
+from shareomat.core.leg_config import (
     LegConfig, ParticipantConfig, MeterConfig, TariffConfig,
     PathConfig, ProcessingConfig, MqttConfig,
 )
-from self_leg.models.invoice import MatchResult
+from shareomat.models.invoice import MatchResult
 from pathlib import Path
 
 

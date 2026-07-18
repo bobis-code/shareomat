@@ -50,8 +50,8 @@ mqtt:
   port: 1883
   username: ""
   password: ""
-  client_id: "self_leg"
-  topic_prefix: "self_leg"
+  client_id: "shareomat"
+  topic_prefix: "shareomat"
   discovery_prefix: "homeassistant"
   discovery_enabled: true
   command_topic_enabled: true

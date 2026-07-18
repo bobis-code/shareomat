@@ -4,10 +4,10 @@ File: tests/conftest.py
 
 Purpose:
     Pytest configuration — ensures the project root is on sys.path
-    so that 'self_leg' package imports work without installation.
+    so that 'shareomat' package imports work without installation.
 
 Part of:
-    SELF LEG — Swiss LEG/ZEV Settlement Engine
+    Shareomat — Swiss LEG/ZEV Settlement Engine
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def isolate_ingress_state(monkeypatch):
     This prevents HA web tests from interfering with each other when run in
     any order or in parallel.
     """
-    import self_leg.ha.web_state as _ws
-    from self_leg.ha.web_state import IngressState
+    import shareomat.ha.web_state as _ws
+    from shareomat.ha.web_state import IngressState
 
     monkeypatch.setattr(_ws, "_state", IngressState())

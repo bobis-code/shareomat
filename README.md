@@ -1,4 +1,4 @@
-# self_leg
+# Shareomat
 
 > **🚧 Work in Progress — under active development, not production-ready.**
 
@@ -184,7 +184,7 @@ pytest tests/
 
 ## Home Assistant add-on source
 
-The canonical Python source lives in `self_leg/` and `main.py`. The add-on
+The canonical Python source lives in `shareomat/` and `main.py`. The add-on
 directory contains a build copy so Home Assistant can build the add-on from
 `ha_addon/` as its Docker context.
 
@@ -203,7 +203,7 @@ python tools/prepare_addon.py --check
 ## Project layout
 
 ```
-self_leg/                    Python package
+shareomat/                    Python package
   leg_const.py               Domain constants
   core/
     leg_config.py            YAML config loader + validation

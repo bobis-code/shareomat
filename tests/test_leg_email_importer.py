@@ -7,7 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from unittest.mock import MagicMock, patch
 
-from self_leg.core.collector.leg_email_importer import (
+from shareomat.core.collector.leg_email_importer import (
     EmailImporterThread,
     _extract_attachments,
     _load_last_uid,
