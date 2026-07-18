@@ -1229,6 +1229,51 @@ Bei einem Fehler darf kein automatischer Versand erfolgen.
 - Jahresabschluss;
 - Betreiber-Kennzahlen.
 
+### 23.1 Umsetzungsstand nach Meilenstein (Stand: 18. Juli 2026)
+
+Phase 1 aus Sicht des tatsächlichen Codestands, aufgeteilt in Meilensteine.
+Status: ✅ vorhanden · 🚧 teilweise vorhanden (Basis nutzbar, muss erweitert
+werden) · ⬜ noch nicht begonnen.
+
+**Bereits vorhandene Basisinfrastruktur (wiederverwendbar für vZEV):**
+
+- ✅ Datenimport-Pipeline (`core/pipeline/leg_parser.py`,
+  `leg_normalizer.py`, E-Mail-Import via `core/collector/leg_email_importer.py`)
+  — Grundlage für Kap. 7.
+- ✅ Zeitreihen-Zuordnung je Intervall (`core/pipeline/leg_matcher.py`) —
+  proportionale Verteilung, Grundlage für Kap. 5, aber bisher für
+  Cross-Meter-LEG/ZEV gebaut, nicht für Einzelproduzent-vZEV.
+- ✅ Report-Erzeugung (`core/report/leg_report.py`) — Grundlage für Kap. 10
+  Mengenübersicht.
+- ✅ Betreiber-Dashboard über HA-Ingress (`ha/web_render.py`,
+  `ha/web_reports.py`, `ha/web_state.py`) — Grundlage für Kap. 19.
+
+**Noch offene Meilensteine für v1:**
+
+- ⬜ **vZEV-Datenmodell** (Kap. 0.1, 16.2): `connection_type`
+  (`zev_peer`/`vzev_tenant`) und `TenantContract` fehlen noch komplett —
+  `models/participant.py` ist aktuell nur ein Platzhalter.
+- ⬜ **Referenztarif & 80-%-Pauschalmethode** (Kap. 4.1, 8, 9.3):
+  `core/pipeline/leg_billing.py` rechnet bisher nur mit einem flachen
+  `local_rate_chf`/`grid_rate_chf`, keine Tarifversionierung, kein
+  Referenzprodukt-Vergleich, keine 80-%-Prüfung.
+- ⬜ **Tarif-Snapshot je Rechnung** (Kap. 8.2): unveränderlicher
+  Tarif-Snapshot pro `Invoice` noch nicht im Datenmodell (`models/invoice.py`).
+- ⬜ **Einfache Validierungsfunktion vor Freigabe** (Kap. 22, reduziert):
+  Checkliste (Vertrag vorhanden, Datenlücken, 80-%-Grenze, Rundungstoleranz
+  etc.) existiert noch nicht als Funktion.
+- ⬜ **PDF-Rechnung + statischer TWINT-QR** (Kap. 10, 11 reduziert): keine
+  PDF-Erzeugung im Projekt vorhanden.
+- ⬜ **Mieter-Verbrauchsübersicht** (Kap. 14, reduziert): aktuell existiert
+  nur die Betreiber-Ansicht im Ingress-Dashboard, keine separate,
+  mandantengetrennte Mieteransicht.
+- ⬜ **Manuelle Zahlungsbestätigung / Mahnhinweis** (Kap. 18, reduziert):
+  kein `Payment`-Modell, kein Status-Tracking auf der Rechnung.
+
+Empfohlene Bearbeitungsreihenfolge, da spätere Meilensteine auf früheren
+aufbauen: Datenmodell → Referenztarif/80-%-Methode → Tarif-Snapshot →
+Validierungsfunktion → PDF/QR → Mieteransicht → Zahlungsstatus.
+
 ---
 
 ## 24. Noch zwingend vor Produktivbetrieb zu klären
