@@ -1,0 +1,436 @@
+<title>SELF LEG — Visual Identity</title>
+<style>
+  :root{
+    --ink:#1c231f;
+    --paper:#edefe7;
+    --paper-raised:#e2e5da;
+    --solar:#c97a1f;
+    --solar-strong:#b3690f;
+    --gridblue:#35566b;
+    --line-muted:#8b9184;
+    --rule:#c7cabb;
+    --mono-ink:#4b5147;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --ink:#e9e6dc;
+      --paper:#12160f;
+      --paper-raised:#1b2018;
+      --solar:#e8a33d;
+      --solar-strong:#f0b25b;
+      --gridblue:#6f9cb3;
+      --line-muted:#5c6154;
+      --rule:#33372e;
+      --mono-ink:#9aa08d;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#e9e6dc;
+    --paper:#12160f;
+    --paper-raised:#1b2018;
+    --solar:#e8a33d;
+    --solar-strong:#f0b25b;
+    --gridblue:#6f9cb3;
+    --line-muted:#5c6154;
+    --rule:#33372e;
+    --mono-ink:#9aa08d;
+  }
+  :root[data-theme="light"]{
+    --ink:#1c231f;
+    --paper:#edefe7;
+    --paper-raised:#e2e5da;
+    --solar:#c97a1f;
+    --solar-strong:#b3690f;
+    --gridblue:#35566b;
+    --line-muted:#8b9184;
+    --rule:#c7cabb;
+    --mono-ink:#4b5147;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    padding:clamp(24px,5vw,64px);
+  }
+  .sheet{
+    max-width:920px;
+    margin:0 auto;
+  }
+
+  .eyebrow{
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Consolas,monospace;
+    font-size:12px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--mono-ink);
+    border-bottom:1px solid var(--rule);
+    padding-bottom:14px;
+    margin-bottom:40px;
+    display:flex;
+    justify-content:space-between;
+  }
+
+  /* ── Hero lockup ─────────────────────────────────────────── */
+  .hero{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    gap:32px;
+    align-items:center;
+    padding-bottom:36px;
+    border-bottom:1px solid var(--rule);
+    margin-bottom:36px;
+  }
+  .mark{width:132px;height:132px;flex:none;}
+  .wordmark{
+    font-weight:800;
+    font-size:clamp(40px,7vw,64px);
+    line-height:.92;
+    letter-spacing:-.02em;
+    text-wrap:balance;
+    margin:0;
+  }
+  .wordmark .leg{
+    font-weight:300;
+    color:var(--gridblue);
+  }
+  .tagline{
+    margin:10px 0 0;
+    font-size:15px;
+    color:var(--mono-ink);
+    max-width:46ch;
+  }
+  .maker{
+    margin-top:14px;
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Consolas,monospace;
+    font-size:13px;
+    color:var(--mono-ink);
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .maker::before{
+    content:"";
+    width:14px;height:1px;
+    background:var(--line-muted);
+    display:inline-block;
+  }
+  .maker b{color:var(--solar-strong);font-weight:700;}
+
+  /* ── Specimen row ────────────────────────────────────────── */
+  h2.section-title{
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Consolas,monospace;
+    font-size:12px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--mono-ink);
+    font-weight:500;
+    margin:0 0 18px;
+  }
+  .specimens{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+    gap:1px;
+    background:var(--rule);
+    border:1px solid var(--rule);
+    margin-bottom:40px;
+  }
+  .specimen{
+    background:var(--paper);
+    padding:20px 12px 14px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:12px;
+  }
+  .specimen svg{display:block;}
+  .specimen .label{
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Consolas,monospace;
+    font-size:11px;
+    color:var(--mono-ink);
+    letter-spacing:.02em;
+  }
+  .specimen.on-dark{background:#12160f;}
+  .specimen.on-dark .label{color:#9aa08d;}
+  .specimen.on-light{background:#edefe7;}
+  .specimen.on-light .label{color:#4b5147;}
+
+  /* ── Rationale ───────────────────────────────────────────── */
+  .rationale{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:32px;
+    margin-bottom:40px;
+  }
+  .rationale h3{
+    font-size:13px;
+    text-transform:uppercase;
+    letter-spacing:.08em;
+    margin:0 0 8px;
+    color:var(--mono-ink);
+    font-weight:600;
+  }
+  .rationale p{
+    margin:0;
+    font-size:15px;
+    line-height:1.55;
+    max-width:38ch;
+  }
+  .swatch-row{display:flex;gap:8px;margin-top:12px;}
+  .swatch{width:28px;height:28px;border:1px solid var(--rule);}
+
+  /* ── Export ──────────────────────────────────────────────── */
+  .export{
+    border:1px solid var(--rule);
+    padding:24px;
+  }
+  .export-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+    gap:20px;
+  }
+  .export-item{display:flex;flex-direction:column;gap:10px;}
+  .export-item .fname{
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Consolas,monospace;
+    font-size:13px;
+  }
+  .export-item .spec{
+    font-size:12px;
+    color:var(--mono-ink);
+  }
+  button.dl{
+    font-family:inherit;
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.02em;
+    background:var(--ink);
+    color:var(--paper);
+    border:none;
+    padding:10px 16px;
+    cursor:pointer;
+    width:fit-content;
+  }
+  button.dl:hover{background:var(--solar-strong);}
+  button.dl:focus-visible{outline:2px solid var(--gridblue);outline-offset:2px;}
+
+  footer{
+    margin-top:40px;
+    font-family:ui-monospace,"SF Mono","Cascadia Mono","Roboto Mono",Consolas,monospace;
+    font-size:11px;
+    color:var(--mono-ink);
+    border-top:1px solid var(--rule);
+    padding-top:14px;
+  }
+
+  @media (max-width:560px){
+    .hero{grid-template-columns:1fr;}
+    .rationale{grid-template-columns:1fr;}
+  }
+</style>
+
+<div class="sheet">
+
+  <div class="eyebrow">
+    <span>bobis code — visual identity</span>
+    <span>v1 · 2026-07</span>
+  </div>
+
+  <div class="hero">
+    <svg class="mark" viewBox="0 0 64 64" role="img" aria-label="SELF LEG mark">
+      <g fill="none" stroke="var(--solar)" stroke-width="1.6" stroke-linecap="round">
+        <line x1="30" y1="20" x2="18" y2="42"/>
+        <line x1="34" y1="20" x2="46" y2="42"/>
+      </g>
+      <line x1="20" y1="46" x2="44" y2="46" stroke="var(--gridblue)" stroke-width="1.6" stroke-linecap="round"/>
+      <g stroke="var(--ink)" stroke-width="1.8" stroke-linejoin="round" fill="var(--paper)">
+        <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+        <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z" transform="translate(0,0)"/>
+        <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+      </g>
+    </svg>
+
+    <div>
+      <p class="wordmark">SELF<span class="leg"> LEG</span></p>
+      <p class="tagline">Ein Haus liefert nie an sich selbst — lokale Solarenergie, proportional geteilt zwischen Nachbarn.</p>
+      <p class="maker">built by <b>bobis code</b></p>
+    </div>
+  </div>
+
+  <h2 class="section-title">Mark bei Einsatzgröße</h2>
+  <div class="specimens">
+    <div class="specimen">
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <g fill="none" stroke="var(--solar)" stroke-width="1.6" stroke-linecap="round">
+          <line x1="30" y1="20" x2="18" y2="42"/>
+          <line x1="34" y1="20" x2="46" y2="42"/>
+        </g>
+        <line x1="20" y1="46" x2="44" y2="46" stroke="var(--gridblue)" stroke-width="1.6" stroke-linecap="round"/>
+        <g stroke="var(--ink)" stroke-width="1.8" stroke-linejoin="round" fill="var(--paper)">
+          <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+          <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+          <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+        </g>
+      </svg>
+      <span class="label">64px · Add-on Icon</span>
+    </div>
+    <div class="specimen">
+      <svg width="40" height="40" viewBox="0 0 64 64">
+        <g fill="none" stroke="var(--solar)" stroke-width="2.4" stroke-linecap="round">
+          <line x1="30" y1="20" x2="18" y2="42"/>
+          <line x1="34" y1="20" x2="46" y2="42"/>
+        </g>
+        <line x1="20" y1="46" x2="44" y2="46" stroke="var(--gridblue)" stroke-width="2.4" stroke-linecap="round"/>
+        <g stroke="var(--ink)" stroke-width="2.6" stroke-linejoin="round" fill="var(--paper)">
+          <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+          <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+          <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+        </g>
+      </svg>
+      <span class="label">40px · Toolbar</span>
+    </div>
+    <div class="specimen">
+      <svg width="20" height="20" viewBox="0 0 64 64">
+        <g fill="none" stroke="var(--solar)" stroke-width="4" stroke-linecap="round">
+          <line x1="30" y1="20" x2="18" y2="42"/>
+          <line x1="34" y1="20" x2="46" y2="42"/>
+        </g>
+        <line x1="20" y1="46" x2="44" y2="46" stroke="var(--gridblue)" stroke-width="4" stroke-linecap="round"/>
+        <g stroke="var(--ink)" stroke-width="4.2" stroke-linejoin="round" fill="var(--paper)">
+          <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+          <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+          <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+        </g>
+      </svg>
+      <span class="label">20px · Favicon</span>
+    </div>
+    <div class="specimen on-dark">
+      <svg width="48" height="48" viewBox="0 0 64 64">
+        <g fill="none" stroke="#e8a33d" stroke-width="1.6" stroke-linecap="round">
+          <line x1="30" y1="20" x2="18" y2="42"/>
+          <line x1="34" y1="20" x2="46" y2="42"/>
+        </g>
+        <line x1="20" y1="46" x2="44" y2="46" stroke="#6f9cb3" stroke-width="1.6" stroke-linecap="round"/>
+        <g stroke="#e9e6dc" stroke-width="1.8" stroke-linejoin="round" fill="#12160f">
+          <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+          <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+          <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+        </g>
+      </svg>
+      <span class="label">auf Dunkel</span>
+    </div>
+    <div class="specimen on-light">
+      <svg width="48" height="48" viewBox="0 0 64 64">
+        <g fill="none" stroke="#c97a1f" stroke-width="1.6" stroke-linecap="round">
+          <line x1="30" y1="20" x2="18" y2="42"/>
+          <line x1="34" y1="20" x2="46" y2="42"/>
+        </g>
+        <line x1="20" y1="46" x2="44" y2="46" stroke="#35566b" stroke-width="1.6" stroke-linecap="round"/>
+        <g stroke="#1c231f" stroke-width="1.8" stroke-linejoin="round" fill="#edefe7">
+          <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+          <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+          <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+        </g>
+      </svg>
+      <span class="label">auf Hell</span>
+    </div>
+  </div>
+
+  <div class="rationale">
+    <div>
+      <h3>Motiv</h3>
+      <p>Drei Häuser, die sich gegenseitig beliefern — nie ein Haus, das an sich selbst zurückliefert. Genau die Kernregel deines Matching-Algorithmus, als Zeichen gebaut statt als generisches Netzwerk-Icon.</p>
+    </div>
+    <div>
+      <h3>Farbe</h3>
+      <p>Amber steht für lokal geteilte Energie, Schiefer-Blau für Netzbezug — dieselbe Unterscheidung, die auch in deinen Tarifen (<code>local_rate</code> / <code>grid_rate</code>) steckt.</p>
+      <div class="swatch-row">
+        <div class="swatch" style="background:var(--solar)"></div>
+        <div class="swatch" style="background:var(--gridblue)"></div>
+        <div class="swatch" style="background:var(--ink)"></div>
+        <div class="swatch" style="background:var(--paper-raised)"></div>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="section-title">Export für ha_addon/</h2>
+  <div class="export">
+    <p class="spec" style="margin:0 0 16px;">Rechtsklick auf das Bild → <b>„Bild speichern unter…“</b> — Downloads über einen Button sind im Vorschau-Frame blockiert, das hier funktioniert unabhängig davon.</p>
+    <div class="export-grid">
+      <div class="export-item">
+        <span class="fname">icon.png</span>
+        <span class="spec">128 × 128 — Add-on Store Kachel</span>
+        <img id="icon-out" width="128" height="128" style="border:1px solid var(--rule);image-rendering:pixelated;" alt="icon.png Vorschau — Rechtsklick zum Speichern"/>
+      </div>
+      <div class="export-item">
+        <span class="fname">logo.png</span>
+        <span class="spec">250 × 100 — Add-on Store Header</span>
+        <img id="logo-out" width="250" height="100" style="border:1px solid var(--rule);" alt="logo.png Vorschau — Rechtsklick zum Speichern"/>
+      </div>
+    </div>
+  </div>
+
+  <footer>self_leg · visual identity draft · feedback welcome, jede Farbe/Form ist verhandelbar</footer>
+</div>
+
+<!-- Fixed-palette export sources (not theme-reactive — these become static files) -->
+<svg id="icon-svg" viewBox="0 0 64 64" width="64" height="64" style="position:absolute;left:-9999px;">
+  <rect width="64" height="64" fill="#edefe7"/>
+  <g fill="none" stroke="#c97a1f" stroke-width="1.6" stroke-linecap="round">
+    <line x1="30" y1="20" x2="18" y2="42"/>
+    <line x1="34" y1="20" x2="46" y2="42"/>
+  </g>
+  <line x1="20" y1="46" x2="44" y2="46" stroke="#35566b" stroke-width="1.6" stroke-linecap="round"/>
+  <g stroke="#1c231f" stroke-width="1.8" stroke-linejoin="round" fill="#edefe7">
+    <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+    <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+    <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+  </g>
+</svg>
+
+<svg id="logo-svg" viewBox="0 0 250 100" width="250" height="100" style="position:absolute;left:-9999px;">
+  <rect width="250" height="100" fill="#edefe7"/>
+  <g transform="translate(10,18) scale(1.05)">
+    <g fill="none" stroke="#c97a1f" stroke-width="1.6" stroke-linecap="round">
+      <line x1="30" y1="20" x2="18" y2="42"/>
+      <line x1="34" y1="20" x2="46" y2="42"/>
+    </g>
+    <line x1="20" y1="46" x2="44" y2="46" stroke="#35566b" stroke-width="1.6" stroke-linecap="round"/>
+    <g stroke="#1c231f" stroke-width="1.8" stroke-linejoin="round" fill="#edefe7">
+      <path d="M32 8 L44 18 L44 30 L20 30 L20 18 Z"/>
+      <path d="M10 40 L18 46 L18 56 L2 56 L2 46 Z"/>
+      <path d="M46 40 L54 46 L54 56 L38 56 L38 46 Z"/>
+    </g>
+  </g>
+  <text x="86" y="52" font-family="Helvetica, Arial, sans-serif" font-weight="800" font-size="30" letter-spacing="-0.5" fill="#1c231f">SELF<tspan font-weight="300" fill="#35566b"> LEG</tspan></text>
+  <text x="86" y="72" font-family="Consolas, monospace" font-size="11" fill="#4b5147">built by bobis code</text>
+</svg>
+
+<script>
+  function renderToImg(svgId, outId, w, h) {
+    var svgEl = document.getElementById(svgId);
+    var svgData = new XMLSerializer().serializeToString(svgEl);
+    var svg64 = btoa(unescape(encodeURIComponent(svgData)));
+    var img = new Image();
+    img.onload = function () {
+      try {
+        var canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        document.getElementById(outId).src = canvas.toDataURL('image/png');
+      } catch (err) {
+        document.getElementById(outId).alt = 'Render fehlgeschlagen: ' + err.message;
+      }
+    };
+    img.onerror = function () {
+      document.getElementById(outId).alt = 'Bild konnte nicht geladen werden (' + svgId + ')';
+    };
+    img.src = 'data:image/svg+xml;base64,' + svg64;
+  }
+
+  renderToImg('icon-svg', 'icon-out', 128, 128);
+  renderToImg('logo-svg', 'logo-out', 250, 100);
+</script>
