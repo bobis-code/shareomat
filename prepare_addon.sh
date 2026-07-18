@@ -1,7 +1,7 @@
 #!/bin/bash
-# Sync the canonical SELF LEG source into the Home Assistant add-on build
-# directory. The Python implementation is developed in ./self_leg and ./main.py;
-# ha_addon/self_leg and ha_addon/main.py are release/build copies.
+# Sync the canonical Shareomat source into the Home Assistant add-on build
+# directory. The Python implementation is developed in ./shareomat and ./main.py;
+# ha_addon/shareomat and ha_addon/main.py are release/build copies.
 
 set -e
 

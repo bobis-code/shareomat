@@ -3,25 +3,25 @@
 File: main.py
 
 Purpose:
-    Entry point for the SELF LEG settlement engine.
+    Entry point for the Shareomat settlement engine.
     Configures logging, sets up optional MQTT, runs the settlement
     cycle, and optionally enters daemon mode for command-triggered runs.
 
 Part of:
-    SELF LEG — Swiss LEG/ZEV Settlement Engine
+    Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
     Daemon mode activates automatically when mqtt.enabled = true
     and mqtt.command_topic_enabled = true in leg_config.yaml, OR when
     cron_schedule or auto_scan_enabled is set in processing config.
     In daemon mode the container stays alive and listens on
-    self_leg/cmd/run_once for manual trigger messages.
+    shareomat/cmd/run_once for manual trigger messages.
     Without MQTT or with command_topic_enabled = false the process
     runs once and exits — identical to the original behaviour.
 
     Environment variables (set by the HA add-on run.sh, optional otherwise):
-        SELF_LEG_CONFIG_PATH  Override default config path (config/leg_config.yaml)
-        SELF_LEG_LOG_LEVEL    Log verbosity: DEBUG / INFO / WARNING / ERROR
+        SHAREOMAT_CONFIG_PATH  Override default config path (config/leg_config.yaml)
+        SHAREOMAT_LOG_LEVEL    Log verbosity: DEBUG / INFO / WARNING / ERROR
 """
 
 from __future__ import annotations
@@ -34,23 +34,23 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from self_leg.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
-from self_leg.ha.ingress import IngressServer, get_state as get_ingress_state
-from self_leg.core.leg_config import LegConfig, load_config
-from self_leg.core.leg_runner import run
+from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.ha.ingress import IngressServer, get_state as get_ingress_state
+from shareomat.core.leg_config import LegConfig, load_config
+from shareomat.core.leg_runner import run
 
-_CONFIG_PATH = Path(os.environ.get("SELF_LEG_CONFIG_PATH", "config/leg_config.yaml"))
+_CONFIG_PATH = Path(os.environ.get("SHAREOMAT_CONFIG_PATH", "config/leg_config.yaml"))
 
 logger = logging.getLogger(__name__)
 _RUN_LOCK = threading.Lock()
-_ERROR_DASHBOARD_ENABLED = os.environ.get("SELF_LEG_ERROR_DASHBOARD", "").lower() in {
+_ERROR_DASHBOARD_ENABLED = os.environ.get("SHAREOMAT_ERROR_DASHBOARD", "").lower() in {
     "1", "true", "yes", "on",
 }
 
 
 def setup_logging() -> None:
-    """Configure stdout logging with level from SELF_LEG_LOG_LEVEL (default: INFO)."""
-    log_level = getattr(logging, os.environ.get("SELF_LEG_LOG_LEVEL", "INFO"), logging.INFO)
+    """Configure stdout logging with level from SHAREOMAT_LOG_LEVEL (default: INFO)."""
+    log_level = getattr(logging, os.environ.get("SHAREOMAT_LOG_LEVEL", "INFO"), logging.INFO)
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
@@ -108,7 +108,7 @@ def _run_safe_cycle(config_path: Path, config: LegConfig, mqtt_client: object | 
     except Exception as exc:
         logger.error("Settlement run failed: %s", exc)
         if mqtt_client is not None:
-            from self_leg.ha.mqtt_runtime import publish_status
+            from shareomat.ha.mqtt_runtime import publish_status
             publish_status(mqtt_client, "error", config.mqtt)
         _update_ingress_state(config, error=str(exc))
         return True
@@ -127,12 +127,12 @@ def _run_daemon(
 
     # MQTT command subscription (non-blocking setup)
     if mqtt_client is not None and config.mqtt.command_topic_enabled:
-        from self_leg.ha.mqtt_runtime import setup_command_subscription
+        from shareomat.ha.mqtt_runtime import setup_command_subscription
         setup_command_subscription(mqtt_client, on_run, config.mqtt)
 
     # Cron scheduler
     if config.processing.cron_schedule:
-        from self_leg.core.collector.leg_scheduler import SchedulerThread
+        from shareomat.core.collector.leg_scheduler import SchedulerThread
         t = SchedulerThread(config.processing.cron_schedule, on_run)
         t.start()
         threads.append(t)
@@ -140,7 +140,7 @@ def _run_daemon(
 
     # Share folder importer
     if config.paths.share_inbox:
-        from self_leg.core.collector.leg_share_importer import ShareImporterThread
+        from shareomat.core.collector.leg_share_importer import ShareImporterThread
         share_t = ShareImporterThread(
             share_path=Path(config.paths.share_inbox),
             inbox_path=config.paths.inbox,
@@ -152,7 +152,7 @@ def _run_daemon(
 
     # Email importer (IMAP mailbox, e.g. a dedicated Gmail inbox)
     if config.email.enabled:
-        from self_leg.core.collector.leg_email_importer import EmailImporterThread
+        from shareomat.core.collector.leg_email_importer import EmailImporterThread
         email_t = EmailImporterThread(
             imap_host=config.email.imap_host,
             imap_port=config.email.imap_port,
@@ -171,7 +171,7 @@ def _run_daemon(
     # File watcher
     watcher = None
     if config.processing.auto_scan_enabled:
-        from self_leg.core.collector.leg_watcher import WatcherThread
+        from shareomat.core.collector.leg_watcher import WatcherThread
         watcher = WatcherThread(
             config.paths.inbox,
             on_run,
@@ -181,7 +181,7 @@ def _run_daemon(
         threads.append(watcher)
         # Wire watcher to MQTT runtime for switch control
         if mqtt_client is not None:
-            from self_leg.ha.mqtt_runtime import register_watcher
+            from shareomat.ha.mqtt_runtime import register_watcher
             register_watcher(watcher)
         # Publish initial auto_scan state
         if mqtt_client is not None:
@@ -205,7 +205,7 @@ def _run_daemon(
         for t in threads:
             t.stop()
         if mqtt_client is not None:
-            from self_leg.ha.mqtt_runtime import shutdown_mqtt as _shutdown
+            from shareomat.ha.mqtt_runtime import shutdown_mqtt as _shutdown
             _shutdown(mqtt_client)
 
 
@@ -228,11 +228,11 @@ def _serve_startup_error(message: str, *, port: int = 8099) -> None:
         last_error=message,
     )
     state.add_warning(
-        "SELF LEG could not start because the configuration is incomplete or invalid. "
+        "Shareomat could not start because the configuration is incomplete or invalid. "
         "Open the add-on Configuration tab, fix the items below, then restart the add-on."
     )
-    state.register_inbox(Path("/config/self_leg/inbox"))
-    state.register_reports(Path("/config/self_leg/reports"))
+    state.register_inbox(Path("/config/shareomat/inbox"))
+    state.register_reports(Path("/config/shareomat/reports"))
     state.register_meters([])
 
     try:
@@ -244,9 +244,9 @@ def _serve_startup_error(message: str, *, port: int = 8099) -> None:
 
 
 def main() -> None:
-    """Start the SELF LEG application."""
+    """Start the Shareomat application."""
     setup_logging()
-    logger.info("self_leg starting up")
+    logger.info("shareomat starting up")
 
     if not _CONFIG_PATH.exists():
         _serve_startup_error(f"Config file not found: {_CONFIG_PATH}")
@@ -261,7 +261,7 @@ def main() -> None:
     startup_warnings: list[str] = []
     if config.mqtt.enabled and mqtt_client is None:
         startup_warnings.append(
-            "MQTT is enabled but SELF LEG could not connect to the broker. "
+            "MQTT is enabled but Shareomat could not connect to the broker. "
             f"Check mqtt_host '{config.mqtt.broker}', port {config.mqtt.port}, "
             "credentials, and whether the broker is running."
         )
@@ -288,7 +288,7 @@ def main() -> None:
         )
     else:
         shutdown_mqtt(mqtt_client)
-        logger.info("self_leg done")
+        logger.info("shareomat done")
 
 
 if __name__ == "__main__":

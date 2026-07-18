@@ -1,5 +1,5 @@
 services:
-  self_leg:
+  shareomat:
     build: .
     volumes:
       - ./data:/app/data:Z

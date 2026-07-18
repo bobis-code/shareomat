@@ -6,11 +6,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy SELF LEG application source from the add-on build context.
-# The canonical source is ./self_leg and ./main.py in the project root.
+# Copy Shareomat application source from the add-on build context.
+# The canonical source is ./shareomat and ./main.py in the project root.
 # Run ./prepare_addon.sh before building or publishing the add-on so the
 # generated add-on copy is current.
-COPY self_leg/ ./self_leg/
+COPY shareomat/ ./shareomat/
 COPY main.py generate_config.py ./
 
 # Entrypoint

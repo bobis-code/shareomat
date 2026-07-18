@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import logging
 
-from self_leg.ha.web_render import render_dashboard
-from self_leg.ha.web_state import get_state
+from shareomat.ha.web_render import render_dashboard
+from shareomat.ha.web_state import get_state
 
 
 def test_render_dashboard_logs_unknown_status(caplog) -> None:
@@ -57,7 +57,7 @@ def test_render_dashboard_shows_startup_warnings() -> None:
     )
     state.register_meters([])
     state.register_reports(None)
-    state.add_warning("MQTT is enabled but SELF LEG could not connect to the broker.")
+    state.add_warning("MQTT is enabled but Shareomat could not connect to the broker.")
 
     html = render_dashboard("", "")
     assert "Startup warning" in html

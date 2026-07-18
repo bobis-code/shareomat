@@ -7,7 +7,7 @@ Purpose:
     proportional energy sharing algorithm and its invariants.
 
 Part of:
-    SELF LEG — Swiss LEG/ZEV Settlement Engine
+    Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
     No rounding is applied in the matcher, so invariants are
@@ -22,8 +22,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from self_leg.core.pipeline.leg_matcher import match_all, match_slot
-from self_leg.models.meter import EnergySlot
+from shareomat.core.pipeline.leg_matcher import match_all, match_slot
+from shareomat.models.meter import EnergySlot
 
 TS  = datetime(2024, 6, 1, 12,  0, 0, tzinfo=timezone.utc)
 TS2 = datetime(2024, 6, 1, 12, 15, 0, tzinfo=timezone.utc)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 import yaml
 from pathlib import Path
-from self_leg.core.leg_config import load_config, validate_config
+from shareomat.core.leg_config import load_config, validate_config
 
 
 def _write_yaml(tmp_path, data):

@@ -3,7 +3,7 @@
 Prepare the Home Assistant add-on build directory.
 
 The canonical application source lives in the project root:
-  - self_leg/
+  - shareomat/
   - main.py
 
 The Home Assistant Supervisor builds add-ons from the add-on directory as its
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ADDON = ROOT / "ha_addon"
 
 SYNC_PATHS = (
-    (ROOT / "self_leg", ADDON / "self_leg"),
+    (ROOT / "shareomat", ADDON / "shareomat"),
     (ROOT / "main.py", ADDON / "main.py"),
 )
 

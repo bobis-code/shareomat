@@ -6,7 +6,7 @@ from __future__ import annotations
 import threading
 import time
 
-from self_leg.ha.web_state import IngressState
+from shareomat.ha.web_state import IngressState
 
 
 def test_trigger_run_rejects_parallel_runs() -> None:

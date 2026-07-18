@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-from self_leg.ha.web_reports import _render_report_section, list_billing_reports, report_path
-from self_leg.ha.web_state import get_state
+from shareomat.ha.web_reports import _render_report_section, list_billing_reports, report_path
+from shareomat.ha.web_state import get_state
 
 
 def test_list_billing_reports_ignores_empty_suffix(tmp_path) -> None:

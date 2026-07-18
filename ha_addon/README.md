@@ -1,4 +1,4 @@
-# SELF LEG — Home Assistant Add-on
+# Shareomat — Home Assistant Add-on
 
 Swiss LEG/ZEV settlement engine running as a standalone Home Assistant Add-on.
 
@@ -11,12 +11,12 @@ via MQTT Discovery — no HA Python dependency, no custom component.
 ## Architecture
 
 ```
-SELF LEG Add-on Container
+Shareomat Add-on Container
         ↓ MQTT Discovery
 Home Assistant (Mosquitto broker)
 ```
 
-SELF LEG remains fully independent. HA only sees MQTT sensors.
+Shareomat remains fully independent. HA only sees MQTT sensors.
 
 ---
 
@@ -24,8 +24,8 @@ SELF LEG remains fully independent. HA only sees MQTT sensors.
 
 1. In Home Assistant: **Settings → Add-ons → Add-on Store**
 2. Click the three-dot menu → **Repositories**
-3. Add: `https://github.com/bobis-code/self_leg`
-4. Find **SELF LEG** and click **Install**
+3. Add: `https://github.com/bobis-code/shareomat`
+4. Find **Shareomat** and click **Install**
 
 ---
 
@@ -37,9 +37,9 @@ SELF LEG remains fully independent. HA only sees MQTT sensors.
 | `mqtt_port` | MQTT broker port | `1883` |
 | `mqtt_username` | MQTT username (optional) | |
 | `mqtt_password` | MQTT password (optional) | |
-| `base_topic` | Root MQTT topic prefix | `self_leg` |
+| `base_topic` | Root MQTT topic prefix | `shareomat` |
 | `discovery_prefix` | HA MQTT Discovery prefix | `homeassistant` |
-| `command_topic_enabled` | Listen on `self_leg/cmd/run_once` for manual trigger | `true` |
+| `command_topic_enabled` | Listen on `shareomat/cmd/run_once` for manual trigger | `true` |
 | `community_id` | Unique ZEV/LEG community identifier | `ZEV-001` |
 | `community_name` | Display name in HA device registry | |
 | `local_rate_chf_kwh` | Local energy tariff in CHF/kWh | `0.12` |
@@ -65,7 +65,7 @@ Use a mailbox dedicated to meter data only — e.g. if your grid operator sends
 readings by email, or you want to forward them yourself. The mailbox is
 never modified: messages are read via `BODY.PEEK[]` (no `\Seen` flag set) and
 nothing is deleted. Already-seen messages are tracked locally by IMAP UID in
-`/config/self_leg/state/email_import_state.json`.
+`/config/shareomat/state/email_import_state.json`.
 
 For Gmail: enable 2-Step Verification on the account, then create an
 **App Password** under Google Account → Security → App passwords, and use
@@ -94,7 +94,7 @@ Roles: `producer` · `consumer` · `producer_consumer` · `grid`
 All runtime data is persisted in the HA config area (survives add-on updates):
 
 ```
-/config/self_leg/
+/config/shareomat/
 ├── leg_config.yaml   ← auto-generated from add-on options on each start
 ├── inbox/            ← drop CSV or S-DAT XML files here
 ├── archive/          ← processed input files moved here
@@ -102,9 +102,9 @@ All runtime data is persisted in the HA config area (survives add-on updates):
 └── state/            ← processed_files.json (SHA-256 deduplication)
 ```
 
-Drop meter data files into `/config/self_leg/inbox/` via SSH or the
-HA File Editor add-on. SELF LEG scans inbox on each startup and on
-every `self_leg/cmd/run_once` MQTT command.
+Drop meter data files into `/config/shareomat/inbox/` via SSH or the
+HA File Editor add-on. Shareomat scans inbox on each startup and on
+every `shareomat/cmd/run_once` MQTT command.
 
 ---
 
@@ -112,19 +112,19 @@ every `self_leg/cmd/run_once` MQTT command.
 
 | Topic | Retained | Description |
 |-------|----------|-------------|
-| `self_leg/status` | yes | `starting` · `ok` · `error` · `offline` (LWT) |
-| `self_leg/last_run` | yes | ISO timestamp of last successful run |
-| `self_leg/billing/{mpid}/total_cost_chf` | yes | Total billing cost |
-| `self_leg/billing/{mpid}/local_share_kwh` | yes | Locally shared energy |
-| `self_leg/billing/{mpid}/grid_import_kwh` | yes | Grid-sourced energy |
-| `self_leg/cmd/run_once` | **no** | Publish any payload to trigger a run |
+| `shareomat/status` | yes | `starting` · `ok` · `error` · `offline` (LWT) |
+| `shareomat/last_run` | yes | ISO timestamp of last successful run |
+| `shareomat/billing/{mpid}/total_cost_chf` | yes | Total billing cost |
+| `shareomat/billing/{mpid}/local_share_kwh` | yes | Locally shared energy |
+| `shareomat/billing/{mpid}/grid_import_kwh` | yes | Grid-sourced energy |
+| `shareomat/cmd/run_once` | **no** | Publish any payload to trigger a run |
 
 ---
 
 ## Manual Trigger
 
 ```bash
-mosquitto_pub -h core-mosquitto -t "self_leg/cmd/run_once" -m "run"
+mosquitto_pub -h core-mosquitto -t "shareomat/cmd/run_once" -m "run"
 ```
 
 ---

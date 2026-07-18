@@ -3,12 +3,12 @@
 File: tests/test_pipeline_integration.py
 
 Purpose:
-    End-to-end integration test for the complete SELF LEG settlement pipeline.
+    End-to-end integration test for the complete Shareomat settlement pipeline.
     Runs the full cycle — inbox → parse → match → bill → report → archive —
     with synthetic CSV meter data covering all sharing scenarios.
 
 Part of:
-    SELF LEG — Swiss LEG/ZEV Settlement Engine
+    Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
     Test data covers four 15-minute slots:
@@ -39,7 +39,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from self_leg.core.leg_runner import run
+from shareomat.core.leg_runner import run
 
 # ── Meter identifiers ─────────────────────────────────────────────────────────
 

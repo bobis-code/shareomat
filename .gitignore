@@ -220,7 +220,7 @@ __marimo__/
 # Claude Code IDE settings
 .claude/
 
-# self_leg runtime data — never commit inbox files, generated reports, or state
+# Shareomat runtime data — never commit inbox files, generated reports, or state
 data/inbox/*
 data/archive/*
 data/reports/*
