@@ -1,0 +1,6 @@
+{% macro tile(label, value, status='') %}
+<div class="tile{% if status %} tile-{{ status }}{% endif %}">
+  <div class="tile-value">{{ value }}</div>
+  <div class="tile-label">{{ label }}</div>
+</div>
+{% endmacro %}

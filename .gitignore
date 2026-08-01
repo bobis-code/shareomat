@@ -230,5 +230,13 @@ data/state/*
 !data/reports/.gitkeep
 !data/state/.gitkeep
 
+# Shareomat admin database — contains community/participant/meter/tariff data
+data/shareomat.db
+data/shareomat.db-wal
+data/shareomat.db-shm
+
 # local config with credentials — never commit
 config/leg_config.yaml
+
+# local working status/todo list — not for the public repo
+TODO.md

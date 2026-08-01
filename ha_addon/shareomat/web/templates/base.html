@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Übersicht{% endblock %} — Shareomat</title>
+  <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}">
+</head>
+<body>
+  <div class="layout">
+    {% include "components/sidebar.html" %}
+    <main class="content">
+      <h1>{% block heading %}{% endblock %}</h1>
+      {% include "components/messages.html" %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</body>
+</html>

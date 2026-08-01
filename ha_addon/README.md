@@ -31,6 +31,11 @@ Shareomat remains fully independent. HA only sees MQTT sensors.
 
 ## Configuration
 
+The add-on options below cover technical infrastructure only. **Gemeinschaft,
+Teilnehmer, Messpunkte, Tarife, and automation settings are configured in the
+Shareomat web interface itself** (open the add-on's Web UI / Ingress panel),
+not here — see "Ersteinrichtung" below.
+
 | Option | Description | Default |
 |--------|-------------|---------|
 | `mqtt_host` | MQTT broker hostname or IP | `core-mosquitto` |
@@ -40,16 +45,11 @@ Shareomat remains fully independent. HA only sees MQTT sensors.
 | `base_topic` | Root MQTT topic prefix | `shareomat` |
 | `discovery_prefix` | HA MQTT Discovery prefix | `homeassistant` |
 | `command_topic_enabled` | Listen on `shareomat/cmd/run_once` for manual trigger | `true` |
-| `community_id` | Unique ZEV/LEG community identifier | `ZEV-001` |
-| `community_name` | Display name in HA device registry | |
-| `local_rate_chf_kwh` | Local energy tariff in CHF/kWh | `0.12` |
-| `grid_rate_chf_kwh` | Grid energy tariff in CHF/kWh | `0.28` |
-| `feed_in_rate_chf_kwh` | Feed-in tariff in CHF/kWh | `0.08` |
 | `timezone` | Timezone for report timestamps | `Europe/Zurich` |
 | `log_level` | Log verbosity (`debug/info/warning/error`) | `info` |
-| `dry_run` | Parse and match without archiving inbox files | `false` |
-| `unknown_meter_policy` | What to do with meter IDs in the data not found in config: `fail` stops the run, `skip` ignores them | `skip` |
-| `metering_points` | List of MPIDs with label and role | |
+| `mqtt_tls` / `mqtt_ca_cert` | MQTT broker TLS | `false` / |
+| `ingress_enabled` | Enable the Shareomat web interface | `true` |
+| `share_inbox` | External share folder to watch for meter files | |
 | `email_enabled` | Poll an IMAP mailbox for meter-data attachments | `false` |
 | `email_imap_host` | IMAP server hostname | `imap.gmail.com` |
 | `email_imap_port` | IMAP server port (TLS) | `993` |
@@ -58,6 +58,15 @@ Shareomat remains fully independent. HA only sees MQTT sensors.
 | `email_folder` | IMAP folder to watch | `INBOX` |
 | `email_allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender | `[]` |
 | `email_poll_interval_seconds` | How often to check the mailbox | `300` |
+
+## Ersteinrichtung
+
+Nach der Installation öffnen Sie die Shareomat Weboberfläche (Ingress-Panel
+des Add-ons). Beim ersten Start ist die Datenbank leer und ein
+Einrichtungsassistent führt durch: Gemeinschaft → Teilnehmer → Messpunkte →
+Tarif. Danach lassen sich Teilnehmer, Messpunkte, Tarife und die Automatik
+jederzeit über die Weboberfläche verwalten — Änderungen gelten sofort, ohne
+Add-on-Neustart.
 
 ### Email import
 
@@ -71,18 +80,6 @@ For Gmail: enable 2-Step Verification on the account, then create an
 **App Password** under Google Account → Security → App passwords, and use
 that as `email_password`.
 
-### `metering_points` format
-
-```yaml
-metering_points:
-  - mpid: "CH0012345678901234500000000000001"
-    label: "PV Roof"
-    role: "producer"
-  - mpid: "CH0012345678901234500000000000002"
-    label: "Apartment 1"
-    role: "producer_consumer"
-```
-
 Roles: `producer` · `consumer` · `producer_consumer` · `grid`
 
 `role` is used only as a startup plausibility check (at least one producer and one consumer must exist). Matching and billing are fully data-driven based on measured import/export direction per slot.
@@ -91,15 +88,19 @@ Roles: `producer` · `consumer` · `producer_consumer` · `grid`
 
 ## Data Storage
 
-All runtime data is persisted in the HA config area (survives add-on updates):
+Runtime data is persisted in the HA config area, and admin data in the
+add-on's own persistent `/data` (both survive add-on updates):
 
 ```
 /config/shareomat/
-├── leg_config.yaml   ← auto-generated from add-on options on each start
+├── leg_config.yaml   ← auto-generated technical config from add-on options
 ├── inbox/            ← drop CSV or S-DAT XML files here
 ├── archive/          ← processed input files moved here
 ├── reports/          ← billing_*.csv, billing_*.json, match_detail_*.csv
 └── state/            ← processed_files.json (SHA-256 deduplication)
+
+/data/
+└── shareomat.db       ← Gemeinschaft/Teilnehmer/Messpunkte/Tarife/Automatik
 ```
 
 Drop meter data files into `/config/shareomat/inbox/` via SSH or the

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Messdaten{% endblock %}
+{% block heading %}Messdaten{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Eingang</h2>
+  {% if inbox_files %}
+  <table>
+    <thead><tr><th>Datei</th></tr></thead>
+    <tbody>
+      {% for f in inbox_files %}<tr><td style="font-family:monospace;font-size:.82rem">{{ f }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="ts">Eingang ist leer.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Datei hochladen</h2>
+  <form method="post" action="{{ url_for('meter_data', suffix='/upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="file-row">
+      <input type="file" name="file" accept=".csv,.xml,.xlsx" required>
+      <button type="submit" class="btn-secondary">&#8679; Hochladen</button>
+    </div>
+    <div class="ts" style="margin-top:8px">Akzeptiert: .csv &nbsp;·&nbsp; .xml &nbsp;·&nbsp; .xlsx &nbsp;&nbsp;|&nbsp;&nbsp; Max. 100 MB</div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Verarbeitung</h2>
+  <form method="post" action="{{ url_for('run') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">&#9654; Jetzt ausführen</button>
+  </form>
+</div>
+{% endblock %}

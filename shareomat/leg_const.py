@@ -46,6 +46,14 @@ PARTICIPANT_TYPE_PRODUCER_CONSUMER: str = "producer_consumer"
 UNKNOWN_METER_POLICY_FAIL: str = "fail"
 UNKNOWN_METER_POLICY_SKIP: str = "skip"
 
+# ── Billing run lifecycle ─────────────────────────────────────────────────────
+# A released billing run is an immutable snapshot; only draft -> released and
+# draft|released -> cancelled transitions are allowed (see shareomat.database.billing).
+
+BILLING_STATUS_DRAFT: str = "draft"
+BILLING_STATUS_RELEASED: str = "released"
+BILLING_STATUS_CANCELLED: str = "cancelled"
+
 # ── MQTT status values ────────────────────────────────────────────────────────
 
 MQTT_STATUS_STARTING: str = "starting"

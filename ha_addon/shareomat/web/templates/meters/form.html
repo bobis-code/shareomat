@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Messpunkte{% endblock %}
+{% block heading %}{{ 'Messpunkt bearbeiten' if meter else 'Messpunkt anlegen' }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="form-card" method="post"
+        action="{{ url_for('meters', suffix='/' + (meter.meter_id if meter else 'new') + ('/edit' if meter else '')) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="meter_id">Messpunkt-ID (MPID)</label>
+      <input type="text" id="meter_id" name="meter_id" required
+             value="{{ meter.meter_id if meter else '' }}">
+      <div class="field-hint">Offizielle Messpunkt-ID des Netzbetreibers.</div>
+    </div>
+    <div class="field">
+      <label for="label">Bezeichnung</label>
+      <input type="text" id="label" name="label" required value="{{ meter.label if meter else '' }}">
+    </div>
+    <div class="field">
+      <label for="participant_id">Teilnehmer</label>
+      <select id="participant_id" name="participant_id">
+        {% for p in participants %}
+        <option value="{{ p.participant_id }}" {{ 'selected' if meter and meter.participant_id == p.participant_id }}>
+          {{ p.label }} ({{ p.participant_id }})
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="role">Rolle</label>
+      <select id="role" name="role">
+        {% for value, label in meter_roles %}
+        <option value="{{ value }}" {{ 'selected' if meter and meter.role == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="valid_from">Gültig ab</label>
+      <input type="date" id="valid_from" name="valid_from" value="{{ meter.valid_from if meter else '' }}">
+    </div>
+    <div class="field">
+      <label for="valid_until">Gültig bis</label>
+      <input type="date" id="valid_until" name="valid_until" value="{{ meter.valid_until if meter else '' }}">
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="active" name="active" {{ 'checked' if meter is none or meter.active }}>
+      <label for="active" style="margin:0">Aktiv</label>
+    </div>
+    <div class="actions-row">
+      <button type="submit">Speichern</button>
+      <a class="btn btn-muted" href="{{ url_for('meters') }}">Abbrechen</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

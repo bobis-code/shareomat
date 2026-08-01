@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Neue Abrechnung{% endblock %}
+{% block heading %}Neue Abrechnung{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>1. Zeitraum wählen</h2>
+  <form class="form-card" method="get" action="{{ url_for('billing', suffix='/preview') }}">
+    <div class="field">
+      <label for="period_start">Von</label>
+      <input type="date" id="period_start" name="period_start" required value="{{ today[:8] }}01">
+    </div>
+    <div class="field">
+      <label for="period_end">Bis</label>
+      <input type="date" id="period_end" name="period_end" required value="{{ today }}">
+    </div>
+    <div class="actions-row">
+      <button type="submit" class="btn-secondary">Verfügbare Daten prüfen &amp; Vorschau</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

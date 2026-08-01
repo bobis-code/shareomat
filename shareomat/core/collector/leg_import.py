@@ -22,7 +22,7 @@ import shutil
 from pathlib import Path
 
 from shareomat.leg_const import FILE_EXT_CSV, FILE_EXT_SDAT, FILE_EXT_XLSX, FILE_EXT_XML
-from shareomat.models.meter import ImportFile
+from shareomat.models.meter_data import ImportFile
 
 logger = logging.getLogger(__name__)
 

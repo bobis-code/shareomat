@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 import pytest
 
 from shareomat.core.pipeline.leg_matcher import match_all, match_slot
-from shareomat.models.meter import EnergySlot
+from shareomat.models.meter_data import EnergySlot
 
 TS  = datetime(2024, 6, 1, 12,  0, 0, tzinfo=timezone.utc)
 TS2 = datetime(2024, 6, 1, 12, 15, 0, tzinfo=timezone.utc)

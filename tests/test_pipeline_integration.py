@@ -25,6 +25,11 @@ Notes:
     Community audit invariants:
         Σ local_supplied = Σ local_received = 1.3 kWh
         balance_export = balance_import = settlement_balance = 0.0
+
+    Master data (community/participants/meters/tariff) is seeded directly
+    into a temp SQLite database via shareomat.database.* and assembled
+    into a LegConfig with build_leg_config() — this is the same path
+    main.py uses for every real settlement run.
 """
 
 from __future__ import annotations
@@ -34,12 +39,24 @@ import hashlib
 import json
 import shutil
 import types
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
-import yaml
 
+from shareomat.config import LegConfig, PathConfig, RuntimeConfig
 from shareomat.core.leg_runner import run
+from shareomat.database.config_builder import build_leg_config
+from shareomat.database.community import save_community
+from shareomat.database.meters import create_meter
+from shareomat.database.participants import create_participant
+from shareomat.database.sqlite import init_db
+from shareomat.database.tariffs import create_tariff
+from shareomat.models.community import Community
+from shareomat.models.meter import Meter
+from shareomat.models.participant import Participant
+from shareomat.models.tariff import Tariff
 
 # ── Meter identifiers ─────────────────────────────────────────────────────────
 
@@ -47,8 +64,8 @@ METER_PROD = "CH_METER_PROD_001"
 METER_A    = "CH_METER_CONS_A"
 METER_B    = "CH_METER_CONS_B"
 
-_LOCAL_RATE = 0.10
-_GRID_RATE  = 0.25
+_LOCAL_RATE = Decimal("0.10")
+_GRID_RATE  = Decimal("0.25")
 
 # ── Test CSV rows ─────────────────────────────────────────────────────────────
 # (timestamp, meter_id, value_kwh, direction)
@@ -131,7 +148,7 @@ def _sha256(path: Path) -> str:
 
 
 def _make_env(root: Path) -> types.SimpleNamespace:
-    """Create temp directories, test CSV, and config YAML for one pipeline run."""
+    """Create temp directories, test CSV, a seeded SQLite database, and a LegConfig."""
     inbox   = root / "inbox"
     archive = root / "archive"
     reports = root / "reports"
@@ -146,41 +163,27 @@ def _make_env(root: Path) -> types.SimpleNamespace:
         for row in _CSV_ROWS:
             writer.writerow(row)
 
-    config = {
-        "leg": {"community_id": "TEST-ZEV-001", "name": "Test Community"},
-        "participants": [
-            {"participant_id": "solar",  "label": "Solar PV",   "participant_type": "producer", "active": True},
-            {"participant_id": "cons_a", "label": "Consumer A", "participant_type": "consumer", "active": True},
-            {"participant_id": "cons_b", "label": "Consumer B", "participant_type": "consumer", "active": True},
-        ],
-        "meters": [
-            {"meter_id": METER_PROD, "participant_id": "solar",  "label": "PV Meter", "role": "producer", "active": True},
-            {"meter_id": METER_A,    "participant_id": "cons_a", "label": "Meter A",  "role": "consumer", "active": True},
-            {"meter_id": METER_B,    "participant_id": "cons_b", "label": "Meter B",  "role": "consumer", "active": True},
-        ],
-        "tariffs": {
-            "local_rate_chf_kwh": _LOCAL_RATE,
-            "grid_rate_chf_kwh":  _GRID_RATE,
-            "feed_in_rate_chf_kwh": 0.05,
-        },
-        "paths": {
-            "inbox":   str(inbox),
-            "archive": str(archive),
-            "reports": str(reports),
-            "state":   str(state),
-        },
-        "processing": {
-            "slot_minutes":         15,
-            "archive_processed":    True,
-            "unknown_meter_policy": "fail",
-        },
-    }
-    config_path = root / "leg_config.yaml"
-    with config_path.open("w", encoding="utf-8") as f:
-        yaml.dump(config, f, allow_unicode=True)
+    db_path = root / "shareomat.db"
+    init_db(db_path)
+    save_community(db_path, Community(community_id="TEST-ZEV-001", name="Test Community"))
+    create_participant(db_path, Participant("solar", "Solar PV", "producer"))
+    create_participant(db_path, Participant("cons_a", "Consumer A", "consumer"))
+    create_participant(db_path, Participant("cons_b", "Consumer B", "consumer"))
+    create_meter(db_path, Meter(METER_PROD, "solar", "PV Meter", "producer"))
+    create_meter(db_path, Meter(METER_A, "cons_a", "Meter A", "consumer"))
+    create_meter(db_path, Meter(METER_B, "cons_b", "Meter B", "consumer"))
+    create_tariff(db_path, Tariff(
+        local_rate_chf_kwh=_LOCAL_RATE, grid_rate_chf_kwh=_GRID_RATE,
+        feed_in_rate_chf_kwh=Decimal("0.05"), valid_from=date(2020, 1, 1),
+    ))
+
+    runtime = RuntimeConfig(paths=PathConfig(inbox=inbox, archive=archive, reports=reports, state=state))
+    config = build_leg_config(db_path, runtime)
 
     return types.SimpleNamespace(
-        config_path=config_path,
+        config=config,
+        db_path=db_path,
+        runtime=runtime,
         inbox=inbox,
         archive=archive,
         reports=reports,
@@ -197,7 +200,7 @@ def _make_env(root: Path) -> types.SimpleNamespace:
 def after_first_run(tmp_path_factory):
     """Run the full pipeline once; all tests in the class share the resulting state."""
     env = _make_env(tmp_path_factory.mktemp("integration"))
-    run(env.config_path)
+    run(env.config)
     return env
 
 
@@ -362,14 +365,14 @@ def test_second_run_with_same_file_produces_no_new_reports(tmp_path):
     """Re-delivering an identical file (same SHA-256) produces no additional reports."""
     env = _make_env(tmp_path)
 
-    run(env.config_path)
+    run(env.config)
     reports_after_first = {p.name for p in env.reports.iterdir()}
     assert len(reports_after_first) == 6
 
     archived = next(env.archive.iterdir())
     shutil.copy(archived, env.inbox / archived.name)
 
-    run(env.config_path)
+    run(env.config)
     reports_after_second = {p.name for p in env.reports.iterdir()}
 
     assert reports_after_first == reports_after_second

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Gemeinschaft{% endblock %}
+{% block heading %}Gemeinschaft{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Stammdaten</h2>
+  <form class="form-card" method="post" action="{{ url_for('community') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="community_id">Gemeinschafts-ID</label>
+      <input type="text" id="community_id" name="community_id" required
+             value="{{ community.community_id if community else '' }}">
+      <div class="field-hint">Eindeutige Kennung, z. B. ZEV-001.</div>
+    </div>
+    <div class="field">
+      <label for="name">Name</label>
+      <input type="text" id="name" name="name" required
+             value="{{ community.name if community else '' }}">
+    </div>
+    <div class="field">
+      <label for="address_line">Adresse</label>
+      <input type="text" id="address_line" name="address_line"
+             value="{{ community.address_line if community else '' }}">
+    </div>
+    <div class="field">
+      <label for="postal_code">PLZ</label>
+      <input type="text" id="postal_code" name="postal_code"
+             value="{{ community.postal_code if community else '' }}">
+    </div>
+    <div class="field">
+      <label for="city">Ort</label>
+      <input type="text" id="city" name="city"
+             value="{{ community.city if community else '' }}">
+    </div>
+    <div class="actions-row">
+      <button type="submit">Speichern</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

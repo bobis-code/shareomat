@@ -23,20 +23,24 @@ Notes:
       9. Publish via MQTT (if client provided)
     Files are never archived before reports are safely written.
     MQTT publish failure does not roll back the settlement cycle.
+
+    run() takes an already-built LegConfig rather than a path — the
+    caller (main.py) builds a fresh one from SQLite before every run via
+    shareomat.database.config_builder.build_leg_config(), so edits made
+    in the admin web UI take effect on the very next run.
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from shareomat.core.pipeline.leg_billing import compute_billing
-from shareomat.core.leg_config import LegConfig, load_config
+from shareomat.config import LegConfig
 from shareomat.leg_const import UNKNOWN_METER_POLICY_FAIL
 from shareomat.core.collector.leg_import import move_to_archive, scan_inbox
 from shareomat.core.pipeline.leg_matcher import match_all
-from shareomat.models.meter import ImportFile, IntervalReading
+from shareomat.models.meter_data import ImportFile, IntervalReading
 from shareomat.core.pipeline.leg_parser import parse_csv, parse_sdat, readings_to_slots
 from shareomat.core.report.leg_report import (
     write_billing_csv,
@@ -51,12 +55,17 @@ from shareomat.core.collector.leg_storage import is_processed, mark_processed
 logger = logging.getLogger(__name__)
 
 
-def _parse_file(
+def parse_file(
     imp: ImportFile,
     slot_minutes: int,
-    known_meter_ids: set[str],
+    known_meter_ids: set[str] | None,
 ) -> list[IntervalReading]:
-    """Parse one inbox file into meter readings, choosing the right parser by type."""
+    """Parse one file into meter readings, choosing the right parser by type.
+
+    Public (not prefixed `_`) because shareomat.database.billing reuses it
+    to parse inbox/archive files on demand for an arbitrary billing period,
+    outside the automatic scan-new-files-only cycle below.
+    """
     if imp.file_type == "csv":
         return parse_csv(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
     if imp.file_type == "sdat":
@@ -82,10 +91,11 @@ def _filter_readings(
     return [r for r in readings if r.meter_id in known_meter_ids]
 
 
-def run(config_path: Path, mqtt_client: object = None) -> None:
+def run(config: LegConfig, mqtt_client: object = None) -> None:
     """Execute a full settlement cycle: scan → parse → match → bill → report → archive."""
-    config: LegConfig = load_config(config_path)
-    logger.info("Settlement run started — %s (%s)", config.name, config.community_id)
+    logger.info(
+        "Settlement run started — %s (%s)", config.community.name, config.community.community_id
+    )
 
     inbox = config.paths.inbox
     archive = config.paths.archive
@@ -110,7 +120,7 @@ def run(config_path: Path, mqtt_client: object = None) -> None:
             logger.info("Already processed, skipping: %s", imp.path.name)
             continue
         try:
-            readings = _parse_file(imp, slot_minutes, known_meter_ids)
+            readings = parse_file(imp, slot_minutes, known_meter_ids)
             all_readings.extend(readings)
             newly_processed.append(imp)
         except Exception as exc:
@@ -159,7 +169,7 @@ def run(config_path: Path, mqtt_client: object = None) -> None:
         write_match_csv(match_results, reports, period_start),
         write_community_audit_csv(billing_records, reports, period_start),
         write_community_summary_json(
-            billing_records, config.community_id, config.name, reports, period_start
+            billing_records, config.community.community_id, config.community.name, reports, period_start
         ),
         write_ledger_csv(match_results, reports, period_start, meter_labels=meter_labels),
     ]
@@ -198,7 +208,7 @@ def run(config_path: Path, mqtt_client: object = None) -> None:
             if config.mqtt.discovery_enabled:
                 publish_ha_discovery(
                     mqtt_client, billing_records,
-                    config.community_id, config.name, config.mqtt,
+                    config.community.community_id, config.community.name, config.mqtt,
                 )
         except Exception as exc:
             logger.error("MQTT publish failed (settlement cycle completed): %s", exc)

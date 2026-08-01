@@ -56,8 +56,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from shareomat.models.meter import EnergySlot
-from shareomat.models.invoice import MatchResult
+from shareomat.models.meter_data import EnergySlot
+from shareomat.models.billing import MatchResult
 
 logger = logging.getLogger(__name__)
 

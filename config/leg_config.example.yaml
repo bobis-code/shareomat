@@ -1,33 +1,9 @@
-leg:
-  community_id: "ZEV-001"
-  name: "Example Solar Community"
-
-participants:
-  - participant_id: "house_1"
-    label: "House 1"
-    participant_type: "producer_consumer"
-    active: true
-  - participant_id: "house_2"
-    label: "House 2"
-    participant_type: "consumer"
-    active: true
-
-meters:
-  - meter_id: "CH0000000000000000000000000000001"
-    participant_id: "house_1"
-    label: "House 1 main meter"
-    role: "producer_consumer"
-    active: true
-  - meter_id: "CH0000000000000000000000000000002"
-    participant_id: "house_2"
-    label: "House 2 main meter"
-    role: "consumer"
-    active: true
-
-tariffs:
-  local_rate_chf_kwh: 0.12
-  grid_rate_chf_kwh: 0.28
-  feed_in_rate_chf_kwh: 0.08
+# Shareomat runtime configuration — technical settings only.
+#
+# Gemeinschaft, Teilnehmer, Messpunkte, Tarife und Automatik werden NICHT
+# hier eingetragen. Sie werden beim ersten Start über die Shareomat-
+# Weboberfläche eingerichtet (Einrichtungsassistent) und in der SQLite-
+# Datenbank data/shareomat.db verwaltet.
 
 paths:
   inbox: "data/inbox"
@@ -35,14 +11,6 @@ paths:
   reports: "data/reports"
   state: "data/state"
   share_inbox: ""
-
-processing:
-  slot_minutes: 15
-  archive_processed: true
-  unknown_meter_policy: "fail"
-  cron_schedule: ""
-  auto_scan_enabled: false
-  scan_interval_seconds: 60
 
 mqtt:
   enabled: false
@@ -70,6 +38,6 @@ email:
   allowed_senders: []
   poll_interval_seconds: 300
 
-ingress:
-  enabled: false
+web:
+  enabled: true
   port: 8099

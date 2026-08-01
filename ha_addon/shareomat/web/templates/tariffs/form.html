@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Tarife{% endblock %}
+{% block heading %}{{ 'Tarif bearbeiten' if tariff else 'Tarif anlegen' }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="form-card" method="post"
+        action="{{ url_for('tariffs', suffix='/' + (tariff.id|string if tariff else 'new') + ('/edit' if tariff else '')) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="name">Bezeichnung</label>
+      <input type="text" id="name" name="name" required value="{{ tariff.name if tariff else 'Standard' }}">
+    </div>
+    <div class="field">
+      <label for="local_rate_chf_kwh">Lokaltarif (CHF/kWh)</label>
+      <input type="text" id="local_rate_chf_kwh" name="local_rate_chf_kwh" required
+             value="{{ tariff.local_rate_chf_kwh if tariff else '' }}">
+    </div>
+    <div class="field">
+      <label for="grid_rate_chf_kwh">Netztarif (CHF/kWh)</label>
+      <input type="text" id="grid_rate_chf_kwh" name="grid_rate_chf_kwh" required
+             value="{{ tariff.grid_rate_chf_kwh if tariff else '' }}">
+    </div>
+    <div class="field">
+      <label for="feed_in_rate_chf_kwh">Einspeisetarif (CHF/kWh)</label>
+      <input type="text" id="feed_in_rate_chf_kwh" name="feed_in_rate_chf_kwh" required
+             value="{{ tariff.feed_in_rate_chf_kwh if tariff else '' }}">
+      <div class="field-hint">Nur informativ — die Einspeisevergütung wird direkt mit dem Netzbetreiber abgerechnet.</div>
+    </div>
+    <div class="field">
+      <label for="valid_from">Gültig ab</label>
+      <input type="date" id="valid_from" name="valid_from" required value="{{ tariff.valid_from if tariff else '' }}">
+    </div>
+    <div class="field">
+      <label for="valid_until">Gültig bis</label>
+      <input type="date" id="valid_until" name="valid_until" value="{{ tariff.valid_until if tariff else '' }}">
+      <div class="field-hint">Leer lassen für "bis auf Weiteres".</div>
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="active" name="active" {{ 'checked' if tariff is none or tariff.active }}>
+      <label for="active" style="margin:0">Aktiv</label>
+    </div>
+    <div class="actions-row">
+      <button type="submit">Speichern</button>
+      <a class="btn btn-muted" href="{{ url_for('tariffs') }}">Abbrechen</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

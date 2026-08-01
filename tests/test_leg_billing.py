@@ -3,26 +3,30 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-import pytest
-from shareomat.core.pipeline.leg_billing import compute_billing
-from shareomat.core.leg_config import (
-    LegConfig, ParticipantConfig, MeterConfig, TariffConfig,
-    PathConfig, ProcessingConfig, MqttConfig,
-)
-from shareomat.models.invoice import MatchResult
+from decimal import Decimal
 from pathlib import Path
+
+import pytest
+
+from shareomat.config import LegConfig, MqttConfig, PathConfig, ProcessingConfig
+from shareomat.core.pipeline.leg_billing import compute_billing
+from shareomat.models.billing import MatchResult
+from shareomat.models.community import Community
+from shareomat.models.meter import Meter
+from shareomat.models.participant import Participant
+from shareomat.models.tariff import Tariff
 
 
 def _config(participants, meters):
     return LegConfig(
-        community_id="TEST-001",
-        name="Test Community",
+        community=Community(community_id="TEST-001", name="Test Community"),
         participants=participants,
         meters=meters,
-        tariffs=TariffConfig(
-            local_rate_chf_kwh=0.12,
-            grid_rate_chf_kwh=0.28,
-            feed_in_rate_chf_kwh=0.08,
+        tariff=Tariff(
+            local_rate_chf_kwh=Decimal("0.12"),
+            grid_rate_chf_kwh=Decimal("0.28"),
+            feed_in_rate_chf_kwh=Decimal("0.08"),
+            valid_from=None,
         ),
         paths=PathConfig(
             inbox=Path("/tmp/inbox"),
@@ -55,12 +59,12 @@ def _slot(meter_id, local_kwh, grid_kwh, ts=None):
 def simple_config():
     return _config(
         participants=[
-            ParticipantConfig("P1", "Solar", "producer_consumer"),
-            ParticipantConfig("P2", "Flat 1", "consumer"),
+            Participant("P1", "Solar", "producer_consumer"),
+            Participant("P2", "Flat 1", "consumer"),
         ],
         meters=[
-            MeterConfig("M1", "P1", "Solar Meter", "producer_consumer"),
-            MeterConfig("M2", "P2", "Flat 1 Meter", "consumer"),
+            Meter("M1", "P1", "Solar Meter", "producer_consumer"),
+            Meter("M2", "P2", "Flat 1 Meter", "consumer"),
         ],
     )
 
@@ -91,6 +95,7 @@ def test_billing_costs(simple_config):
     assert p2.local_cost_chf == pytest.approx(1.0 * 0.12)
     assert p2.grid_cost_chf == pytest.approx(1.0 * 0.28)
     assert p2.total_cost_chf == pytest.approx(0.12 + 0.28)
+    assert isinstance(p2.total_cost_chf, float)
 
 
 def test_zero_consumption(simple_config):

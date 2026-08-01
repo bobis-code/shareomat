@@ -1,0 +1,22 @@
+<nav class="sidebar">
+  <a class="brand" href="{{ url_for('dashboard') }}">
+    <img class="brand-logo" src="{{ url_for('banner') }}" alt="Shareomat">
+  </a>
+  {% for section_title, items in nav_sections %}
+    {% if section_title %}<div class="nav-section-title">{{ section_title }}</div>{% endif %}
+    <ul class="nav-list">
+      {% for route_name, label in items %}
+        <li>
+          <a href="{{ url_for(route_name) }}"
+             class="nav-link{% if route_name == active_route %} active{% endif %}">
+            <span>{{ label }}</span>
+            {% if route_name in placeholder_routes %}<span class="badge-soon">bald</span>{% endif %}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endfor %}
+  {% if community_name %}
+    <div class="sidebar-footer">{{ community_name }}</div>
+  {% endif %}
+</nav>

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "components/status_card.html" import tile %}
+{% block title %}Übersicht{% endblock %}
+{% block heading %}Übersicht{% endblock %}
+{% block content %}
+{% if setup_incomplete %}
+<div class="card">
+  <h2>Einrichtung</h2>
+  <p class="ts">Die Ersteinrichtung ist noch nicht abgeschlossen.</p>
+  <div class="actions-row"><a class="btn" href="{{ url_for('setup') }}">Einrichtung fortsetzen</a></div>
+</div>
+{% endif %}
+<div class="card">
+  <h2>Systemstatus</h2>
+  <div class="grid">
+    {{ tile("Status", status, 'ok' if status == 'ok' else ('error' if status == 'error' else ('offline' if status == 'offline' else 'warn'))) }}
+    {{ tile("Teilnehmer", participants_active ~ " / " ~ participants_total ~ " aktiv", 'ok' if participants_active > 0 else 'warn') }}
+    {{ tile("Messpunkte", meters_active ~ " / " ~ meters_total ~ " aktiv", 'ok' if meters_active > 0 else 'warn') }}
+    {{ tile("Messdaten im Eingang", inbox_count, 'ok' if inbox_count == 0 else 'warn') }}
+    {{ tile("Berichte", report_count) }}
+    {{ tile("Tarif", "gültig" if tariff_ok else "fehlt", 'ok' if tariff_ok else 'error') }}
+    {{ tile("Automatik", "aktiv" if automation_active else "aus", 'ok' if automation_active else '') }}
+  </div>
+  <div class="ts" style="margin-top:12px">Letzter Lauf: {{ last_run }}</div>
+</div>
+
+<div class="card">
+  <h2>Offene Aufgaben</h2>
+  {% if open_tasks %}
+  <ul style="margin-left:18px">
+    {% for task in open_tasks %}<li>{{ task }}</li>{% endfor %}
+  </ul>
+  {% else %}
+  <p class="ts">Keine offenen Aufgaben.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Schnellzugriff</h2>
+  <div class="actions-row" style="margin-top:0">
+    <a class="btn" href="{{ url_for('meter_data') }}">Messdaten / Lauf starten</a>
+    <a class="btn btn-muted" href="{{ url_for('reports') }}">Berichte ansehen</a>
+  </div>
+</div>
+{% endblock %}

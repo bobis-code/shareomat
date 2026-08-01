@@ -28,8 +28,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from shareomat.core.leg_config import LegConfig
-from shareomat.models.invoice import BillingRecord, MatchResult
+from shareomat.config import LegConfig
+from shareomat.models.billing import BillingRecord, MatchResult
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +82,10 @@ def compute_billing(
             pid = meter_to_participant.get(meter_id, meter_id)
             totals_grid_export[pid] = totals_grid_export.get(pid, 0.0) + kwh
 
-    local_rate = config.tariffs.local_rate_chf_kwh
-    grid_rate = config.tariffs.grid_rate_chf_kwh
+    # Tariff rates are Decimal at rest (database round-trip precision); the
+    # settlement math itself stays float, matching every other kWh/CHF value here.
+    local_rate = float(config.tariff.local_rate_chf_kwh)
+    grid_rate = float(config.tariff.grid_rate_chf_kwh)
     now = datetime.now(timezone.utc)
 
     all_pids = sorted(

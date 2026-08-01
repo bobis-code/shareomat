@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Abrechnungen{% endblock %}
+{% block heading %}Abrechnungen{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions-row" style="margin-top:0;margin-bottom:16px">
+    <a class="btn" href="{{ url_for('billing', suffix='/new') }}">+ Neue Abrechnung</a>
+  </div>
+  {% if runs %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Zeitraum</th><th>Status</th><th>Version</th><th>Erstellt am</th><th>Freigegeben am</th>
+          <th>Teilnehmer</th><th>Lokal kWh</th><th>Gesamtbetrag CHF</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td>{{ r.period_start }} – {{ r.period_end }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-active' if r.status == 'released' else 'status-pill-inactive' }}">
+              {{ {'draft': 'Entwurf', 'released': 'Freigegeben', 'cancelled': 'Storniert'}.get(r.status, r.status) }}
+            </span>
+          </td>
+          <td>{{ r.version }}</td>
+          <td>{{ r.computed_at.strftime("%Y-%m-%d %H:%M") }}</td>
+          <td>{{ r.released_at.strftime("%Y-%m-%d %H:%M") if r.released_at else '–' }}</td>
+          <td>{{ r.participant_count }}</td>
+          <td>{{ r.total_local_kwh }}</td>
+          <td>{{ r.total_leg_amount_chf }}</td>
+          <td><a class="btn btn-muted btn-small" href="{{ url_for('billing', suffix='/' + r.id|string) }}">Öffnen</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Abrechnungen erstellt.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Berichte{% endblock %}
+{% block heading %}Berichte{% endblock %}
+{% block content %}
+<div class="card">
+  {% if report_list %}
+  <form method="get" action="{{ url_for('reports') }}">
+    <div class="file-row">
+      <select name="report" style="flex:1;padding:8px 10px;border:1px solid #ddd;border-radius:4px;font-size:.9rem;background:white">
+        <option value="">– Bericht wählen –</option>
+        {% for stem, label in report_list %}
+        <option value="{{ stem }}" {{ 'selected' if stem == selected }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">&#128196; Ansehen</button>
+    </div>
+  </form>
+  {{ content_html | safe }}
+  {% else %}
+  <p class="ts">Noch keine Berichte vorhanden – zuerst einen Abrechnungslauf ausführen (Seite "Messdaten").</p>
+  {% endif %}
+</div>
+{% endblock %}

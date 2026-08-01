@@ -39,7 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from shareomat.models.invoice import BillingRecord, MatchResult
+from shareomat.models.billing import BillingRecord, MatchResult
 
 logger = logging.getLogger(__name__)
 
