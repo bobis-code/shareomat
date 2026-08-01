@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Externe Daten{% endblock %}
+{% block heading %}Externe Daten{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>ENTSO-E API-Token</h2>
+  <p class="ts">Für Day-Ahead-Preise und Erzeugungsprofile (Marktprognose). Kostenlos, Registrierung unter
+    <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener">transparency.entsoe.eu</a>.</p>
+  <form class="form-card" method="post" action="{{ url_for('external_data', suffix='/token') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="entsoe_api_token">Token</label>
+      <input type="text" id="entsoe_api_token" name="entsoe_api_token"
+             value="{{ settings.entsoe_api_token }}" placeholder="noch nicht hinterlegt">
+    </div>
+    <div class="actions-row"><button type="submit">Speichern</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>ElCom-Tarifabgleich</h2>
+  <p class="ts">Fragt die öffentlichen ElCom-Tarifdaten (LINDAS) für eine Gemeinde/Jahr ab — zum Vergleich, nicht zur Abrechnung.</p>
+  <form class="form-card" method="post" action="{{ url_for('external_data', suffix='/elcom') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="municipality_bfs_number">BFS-Gemeindenummer</label>
+      <input type="number" id="municipality_bfs_number" name="municipality_bfs_number" required placeholder="z. B. 5250">
+    </div>
+    <div class="field">
+      <label for="year">Jahr</label>
+      <input type="number" id="year" name="year" required value="{{ now_year }}">
+    </div>
+    <div class="actions-row"><button type="submit" class="btn-secondary">Abrufen</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>SNB-Wechselkurs (EUR/CHF)</h2>
+  <p class="ts">Monatsdurchschnitt, für die Marktprognose.</p>
+  <form class="form-card" method="post" action="{{ url_for('external_data', suffix='/snb') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="from_period">Von (JJJJ-MM)</label>
+      <input type="text" id="from_period" name="from_period" required placeholder="2026-01">
+    </div>
+    <div class="field">
+      <label for="to_period">Bis (JJJJ-MM)</label>
+      <input type="text" id="to_period" name="to_period" required placeholder="2026-06">
+    </div>
+    <div class="actions-row"><button type="submit" class="btn-secondary">Abrufen</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>BFE-Referenzmarktpreis (offiziell, Art. 15 EnFV)</h2>
+  <p class="ts">Für die endgültige Rückliefervergütung. Ein fehlgeschlagener Abruf überschreibt
+    nie die zuletzt erfolgreich geladenen Werte unten.</p>
+  <form class="form-card" method="post" action="{{ url_for('external_data', suffix='/bfe') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="period_type">Zeitraum</label>
+      <select id="period_type" name="period_type">
+        <option value="quarterly">Quartal</option>
+        <option value="monthly">Monat</option>
+      </select>
+    </div>
+    <div class="actions-row"><button type="submit" class="btn-secondary">Abrufen</button></div>
+  </form>
+  {% if pv_reference_prices %}
+  <table style="margin-top:16px">
+    <thead><tr><th>Zeitraum</th><th>PV-Referenzpreis CHF/kWh</th><th>Stand</th></tr></thead>
+    <tbody>
+      {% for p in pv_reference_prices %}
+      <tr>
+        <td>{{ p.period_start }} – {{ p.period_end }}</td>
+        <td>{{ p.price_chf_kwh }}</td>
+        <td>{{ p.published_at or '–' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="ts" style="margin-top:12px">Noch keine BFE-Referenzpreise gespeichert.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Letzte Abrufe</h2>
+  {% if imports %}
+  <table>
+    <thead><tr><th>Quelle</th><th>Typ</th><th>Zeitpunkt</th><th>Status</th><th>Details</th></tr></thead>
+    <tbody>
+      {% for imp in imports %}
+      <tr>
+        <td>{{ imp.source }}</td>
+        <td>{{ imp.data_type }}</td>
+        <td>{{ imp.fetched_at.strftime("%Y-%m-%d %H:%M") if imp.fetched_at else '–' }}</td>
+        <td><span class="status-pill {{ 'status-pill-active' if imp.status == 'ok' else 'status-pill-inactive' }}">{{ imp.status }}</span></td>
+        <td>{{ imp.detail }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="ts">Noch keine externen Daten abgerufen.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

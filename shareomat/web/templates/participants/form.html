@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Teilnehmer{% endblock %}
+{% block heading %}{{ 'Teilnehmer bearbeiten' if participant else 'Teilnehmer anlegen' }}{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="form-card" method="post"
+        action="{{ url_for('participants', suffix='/' + (participant.participant_id if participant else 'new') + ('/edit' if participant else '')) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="participant_id">Teilnehmer-ID</label>
+      <input type="text" id="participant_id" name="participant_id" required
+             value="{{ participant.participant_id if participant else '' }}">
+      <div class="field-hint">Frei wählbare, eindeutige Kennung (z. B. Wohnungsnummer).</div>
+    </div>
+    <div class="field">
+      <label for="label">Bezeichnung</label>
+      <input type="text" id="label" name="label" required value="{{ participant.label if participant else '' }}">
+    </div>
+    <div class="field">
+      <label for="participant_type">Typ</label>
+      <select id="participant_type" name="participant_type">
+        {% for value, label in participant_types %}
+        <option value="{{ value }}" {{ 'selected' if participant and participant.participant_type == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="email">E-Mail</label>
+      <input type="email" id="email" name="email" value="{{ participant.email if participant else '' }}">
+    </div>
+    <div class="field">
+      <label for="address_line">Adresse</label>
+      <input type="text" id="address_line" name="address_line" value="{{ participant.address_line if participant else '' }}">
+    </div>
+    <div class="field">
+      <label for="postal_code">PLZ</label>
+      <input type="text" id="postal_code" name="postal_code" value="{{ participant.postal_code if participant else '' }}">
+    </div>
+    <div class="field">
+      <label for="city">Ort</label>
+      <input type="text" id="city" name="city" value="{{ participant.city if participant else '' }}">
+    </div>
+    <div class="field">
+      <label for="valid_from">Gültig ab</label>
+      <input type="date" id="valid_from" name="valid_from" value="{{ participant.valid_from if participant else '' }}">
+    </div>
+    <div class="field">
+      <label for="valid_until">Gültig bis</label>
+      <input type="date" id="valid_until" name="valid_until" value="{{ participant.valid_until if participant else '' }}">
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="active" name="active" {{ 'checked' if participant is none or participant.active }}>
+      <label for="active" style="margin:0">Aktiv</label>
+    </div>
+    <div class="actions-row">
+      <button type="submit">Speichern</button>
+      <a class="btn btn-muted" href="{{ url_for('participants') }}">Abbrechen</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

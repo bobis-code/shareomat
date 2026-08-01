@@ -1,0 +1,14 @@
+{% if flash_message %}
+  <div class="notice-{{ 'ok' if flash_ok else 'err' }}">{{ flash_message | safe }}</div>
+{% endif %}
+{% if warnings %}
+  <div class="error-box">
+    <strong>Hinweise</strong>
+    <ul>
+      {% for w in warnings %}<li>{{ w }}</li>{% endfor %}
+    </ul>
+  </div>
+{% endif %}
+{% if error_message %}
+  <div class="error-box">{{ error_message }}</div>
+{% endif %}

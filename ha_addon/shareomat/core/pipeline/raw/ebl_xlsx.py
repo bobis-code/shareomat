@@ -34,7 +34,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shareomat.leg_const import SLOT_MINUTES
-from shareomat.models.meter import IntervalReading
+from shareomat.models.meter_data import IntervalReading
 from shareomat.core.pipeline.leg_normalizer import normalize_ebl_row
 
 logger = logging.getLogger(__name__)

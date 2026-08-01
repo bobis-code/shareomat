@@ -11,7 +11,7 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Run ./prepare_addon.sh before building or publishing the add-on so the
 # generated add-on copy is current.
 COPY shareomat/ ./shareomat/
-COPY main.py generate_config.py ./
+COPY main.py generate_runtime_config.py ./
 
 # Entrypoint
 COPY run.sh /run.sh

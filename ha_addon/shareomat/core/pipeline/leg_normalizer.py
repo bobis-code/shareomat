@@ -33,7 +33,7 @@ from shareomat.leg_const import (
     QUALITY_VALID,
     SLOT_MINUTES,
 )
-from shareomat.models.meter import IntervalReading
+from shareomat.models.meter_data import IntervalReading
 
 if TYPE_CHECKING:
     from shareomat.core.pipeline.raw.ebl_xlsx import EblRow

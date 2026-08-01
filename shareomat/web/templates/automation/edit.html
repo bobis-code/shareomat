@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Automatisierung{% endblock %}
+{% block heading %}Automatisierung{% endblock %}
+{% block content %}
+<div class="card">
+  <form class="form-card" method="post" action="{{ url_for('automation') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="cron_schedule">Zeitplan (Cron-Ausdruck)</label>
+      <input type="text" id="cron_schedule" name="cron_schedule" value="{{ settings.cron_schedule }}" placeholder="0 6 * * *">
+      <div class="field-hint">Leer lassen zum Deaktivieren. Beispiel: "0 6 * * *" = täglich 06:00 Uhr.</div>
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="auto_scan_enabled" name="auto_scan_enabled" {{ 'checked' if settings.auto_scan_enabled }}>
+      <label for="auto_scan_enabled" style="margin:0">Eingang automatisch überwachen</label>
+    </div>
+    <div class="field">
+      <label for="scan_interval_seconds">Scan-Intervall (Sekunden)</label>
+      <input type="number" id="scan_interval_seconds" name="scan_interval_seconds" min="5"
+             value="{{ settings.scan_interval_seconds }}">
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="auto_create_billing" name="auto_create_billing" {{ 'checked' if settings.auto_create_billing }}>
+      <label for="auto_create_billing" style="margin:0">Abrechnungen automatisch erstellen</label>
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="auto_create_invoices" name="auto_create_invoices" {{ 'checked' if settings.auto_create_invoices }}>
+      <label for="auto_create_invoices" style="margin:0">Rechnungen automatisch erstellen</label>
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="auto_send_invoices" name="auto_send_invoices" {{ 'checked' if settings.auto_send_invoices }}>
+      <label for="auto_send_invoices" style="margin:0">Rechnungen automatisch versenden</label>
+    </div>
+    <div class="field-hint">
+      Die letzten drei Optionen werden bereits gespeichert, aber noch nicht ausgeführt —
+      Rechnungserstellung und -versand sind in Vorbereitung.
+    </div>
+    <div class="actions-row">
+      <button type="submit">Speichern</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% macro errors(error_list) %}
+{% if error_list %}
+<div class="error-box">
+  <ul>
+    {% for e in error_list %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}

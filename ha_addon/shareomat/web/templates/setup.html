@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Einrichtung{% endblock %}
+{% block heading %}Einrichtung{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>1. Gemeinschaft</h2>
+  {% if status.has_community %}
+    <p class="ts">&#10003; Gemeinschaft eingerichtet.</p>
+  {% else %}
+    <form class="form-card" method="post" action="{{ url_for('setup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="community">
+      <div class="field">
+        <label for="community_id">Gemeinschafts-ID</label>
+        <input type="text" id="community_id" name="community_id" required placeholder="ZEV-001">
+      </div>
+      <div class="field">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required placeholder="Meine Solargemeinschaft">
+      </div>
+      <div class="actions-row"><button type="submit">Weiter</button></div>
+    </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>2. Erster Teilnehmer</h2>
+  {% if status.has_participants %}
+    <p class="ts">&#10003; {{ participants | length }} Teilnehmer angelegt.</p>
+  {% elif not status.has_community %}
+    <p class="ts">Zuerst Schritt 1 abschliessen.</p>
+  {% else %}
+    <form class="form-card" method="post" action="{{ url_for('setup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="participant">
+      <div class="field">
+        <label for="participant_id">Teilnehmer-ID</label>
+        <input type="text" id="participant_id" name="participant_id" required placeholder="wohnung_1">
+      </div>
+      <div class="field">
+        <label for="label">Bezeichnung</label>
+        <input type="text" id="label" name="label" required placeholder="Wohnung 1">
+      </div>
+      <div class="actions-row"><button type="submit">Weiter</button></div>
+    </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>3. Messpunkte</h2>
+  {% if status.has_meters %}
+    <p class="ts">&#10003; {{ meters | length }} Messpunkt(e) angelegt.</p>
+  {% elif not status.has_participants %}
+    <p class="ts">Zuerst Schritt 2 abschliessen.</p>
+  {% else %}
+    <form class="form-card" method="post" action="{{ url_for('setup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="meter">
+      <div class="field">
+        <label for="meter_id">Messpunkt-ID (MPID)</label>
+        <input type="text" id="meter_id" name="meter_id" required>
+      </div>
+      <div class="field">
+        <label for="label">Bezeichnung</label>
+        <input type="text" id="label" name="label" required placeholder="Hauptzähler">
+      </div>
+      <div class="field">
+        <label for="participant_id">Teilnehmer</label>
+        <select id="participant_id" name="participant_id">
+          {% for p in participants %}
+          <option value="{{ p.participant_id }}">{{ p.label }} ({{ p.participant_id }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-hint">Rolle wird zunächst auf "Erzeuger &amp; Verbraucher" gesetzt — bei Bedarf später unter "Messpunkte" anpassen.</div>
+      <div class="actions-row"><button type="submit">Weiter</button></div>
+    </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>4. Tarif</h2>
+  {% if status.has_tariff %}
+    <p class="ts">&#10003; Tarif eingerichtet.</p>
+  {% elif not status.has_meters %}
+    <p class="ts">Zuerst Schritt 3 abschliessen.</p>
+  {% else %}
+    <form class="form-card" method="post" action="{{ url_for('setup') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="tariff">
+      <div class="field">
+        <label for="local_rate_chf_kwh">Lokaltarif (CHF/kWh)</label>
+        <input type="text" id="local_rate_chf_kwh" name="local_rate_chf_kwh" required placeholder="0.12">
+      </div>
+      <div class="field">
+        <label for="grid_rate_chf_kwh">Netztarif (CHF/kWh)</label>
+        <input type="text" id="grid_rate_chf_kwh" name="grid_rate_chf_kwh" required placeholder="0.28">
+      </div>
+      <div class="field">
+        <label for="feed_in_rate_chf_kwh">Einspeisetarif (CHF/kWh)</label>
+        <input type="text" id="feed_in_rate_chf_kwh" name="feed_in_rate_chf_kwh" required placeholder="0.08">
+      </div>
+      <div class="actions-row"><button type="submit">Abschliessen</button></div>
+    </form>
+  {% endif %}
+</div>
+
+{% if status.is_complete %}
+<div class="card">
+  <h2>Fertig</h2>
+  <p class="ts">Die Einrichtung ist abgeschlossen.</p>
+  <div class="actions-row"><a class="btn" href="{{ url_for('dashboard') }}">Zur Übersicht</a></div>
+</div>
+{% endif %}
+
+{% endblock %}

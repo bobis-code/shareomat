@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Tarife{% endblock %}
+{% block heading %}Tarife{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions-row" style="margin-top:0;margin-bottom:16px">
+    <a class="btn" href="{{ url_for('tariffs_new') }}">+ Tarif anlegen</a>
+  </div>
+  {% if current %}
+    <p class="ts">Aktuell gültig ({{ today }}): <strong>{{ current.name }}</strong> —
+      {{ current.local_rate_chf_kwh }} / {{ current.grid_rate_chf_kwh }} / {{ current.feed_in_rate_chf_kwh }} CHF/kWh
+      (lokal / Netz / Einspeisung)</p>
+  {% else %}
+    <div class="error-box" style="margin-top:0">Kein für {{ today }} gültiger Tarif vorhanden — die Abrechnung kann nicht laufen.</div>
+  {% endif %}
+  {% if tariffs %}
+  <div class="table-wrap" style="margin-top:16px">
+    <table>
+      <thead>
+        <tr>
+          <th>Bezeichnung</th><th>Lokal CHF/kWh</th><th>Netz CHF/kWh</th><th>Einspeisung CHF/kWh</th>
+          <th>Gültig ab</th><th>Gültig bis</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tariffs %}
+        <tr>
+          <td>{{ t.name }}</td>
+          <td>{{ t.local_rate_chf_kwh }}</td>
+          <td>{{ t.grid_rate_chf_kwh }}</td>
+          <td>{{ t.feed_in_rate_chf_kwh }}</td>
+          <td>{{ t.valid_from }}</td>
+          <td>{{ t.valid_until or '–' }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-active' if t.active else 'status-pill-inactive' }}">
+              {{ 'aktiv' if t.active else 'inaktiv' }}
+            </span>
+          </td>
+          <td>
+            <a class="btn btn-muted btn-small" href="{{ url_for('tariffs', suffix='/' + t.id|string + '/edit') }}">Bearbeiten</a>
+            <form method="post" style="display:inline" action="{{ url_for('tariffs', suffix='/' + t.id|string + '/toggle') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-small {{ 'btn-danger' if t.active else 'btn-secondary' }}">
+                {{ 'Deaktivieren' if t.active else 'Aktivieren' }}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Tarife angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -23,10 +23,18 @@ LEG/ZEV — calculates local energy sharing.
 # First-time local setup:
 cp config/leg_config.example.yaml config/leg_config.yaml
 
-# Drop CSV or S-DAT files into data/inbox/, then:
 docker compose up --build
 ```
 
+Open the web interface at `http://localhost:8099` and complete the setup
+wizard (Gemeinschaft → Teilnehmer → Messpunkte → Tarif). Gemeinschaft,
+Teilnehmer, Messpunkte, Tarife, and automation settings are managed entirely
+through this web interface — not through `leg_config.yaml` — and are stored
+in a SQLite database at `data/shareomat.db`. `leg_config.yaml` only holds
+technical runtime settings (paths, MQTT, e-mail import, web port).
+
+Once set up, drop CSV or S-DAT files into `data/inbox/` (or upload them
+through the "Messdaten" page) and trigger a run from the web interface.
 Reports are written to `data/reports/`. Processed files move to `data/archive/`.
 
 ## Input formats
@@ -47,26 +55,38 @@ Standard Swiss S-DAT metering data exchange format. Both namespaced (`xmlns="htt
 
 ## Configuration
 
-Copy `config/leg_config.example.yaml` to `config/leg_config.yaml` and edit the
-local file. `config/leg_config.yaml` is intentionally ignored by Git because it
-may contain real meter IDs, broker addresses, and MQTT credentials.
+Shareomat splits configuration into two places, deliberately:
 
-| Key | Description |
+- **`leg_config.yaml`** (technical runtime settings only) — paths, MQTT
+  broker, e-mail import, web server port. Copy
+  `config/leg_config.example.yaml` to `config/leg_config.yaml` and edit the
+  local file. It is intentionally ignored by Git because it may contain
+  broker addresses and MQTT/IMAP credentials.
+- **The admin web interface** (`http://localhost:8099`, backed by
+  `data/shareomat.db`) — Gemeinschaft, Teilnehmer, Messpunkte, Tarife, and
+  automation settings. This is the data that actually changes as a LEG/ZEV
+  community grows, so it is managed live in the UI instead of a config file
+  that requires a restart.
+
+| `leg_config.yaml` key | Description |
 |-----|-------------|
-| `leg.community_id` | Unique ID for the ZEV/LEG community |
-| `participants[].participant_id` | Business/billing identity such as house, flat, or tenant |
-| `meters[].meter_id` | Official meter ID from the grid/operator data |
-| `meters[].role` | `producer`, `consumer`, `producer_consumer`, or `grid` |
-| `tariffs.local_rate_chf_kwh` | CHF/kWh for locally shared energy |
-| `tariffs.grid_rate_chf_kwh` | CHF/kWh for grid-sourced energy |
-| `processing.archive_processed` | Move processed files to archive (default `true`) |
+| `paths.inbox` / `archive` / `reports` / `state` | Runtime filesystem paths |
+| `paths.share_inbox` | External share folder to watch for meter files; empty = disabled |
+| `mqtt.enabled` / `broker` / `port` | MQTT broker connection for Home Assistant integration |
 | `email.enabled` | Poll an IMAP mailbox (e.g. a dedicated Gmail account) for meter-data attachments |
 | `email.allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender |
+| `web.enabled` / `port` | Admin web interface (standalone or behind Home Assistant Ingress) |
 
 Never commit real passwords or private MQTT/email credentials. Use the Home
 Assistant add-on options for add-on deployments, or keep local credentials
 only in the ignored `config/leg_config.yaml`. For Gmail, use an App Password
 (requires 2-Step Verification), never the account password.
+
+Upgrading from a version where `leg_config.yaml` still contained
+`participants`/`meters`/`tariffs`/`leg`? Those sections are imported into
+`data/shareomat.db` automatically, once, the first time you start the new
+version — after that, the database is authoritative and those YAML sections
+are ignored.
 
 ## Matching algorithm
 
@@ -205,9 +225,9 @@ python tools/prepare_addon.py --check
 ```
 shareomat/                    Python package
   leg_const.py               Domain constants
+  config.py                  Technical runtime config (paths/MQTT/e-mail/web) + LegConfig + validation
   core/
-    leg_config.py            YAML config loader + validation
-    leg_runner.py            Pipeline orchestration
+    leg_runner.py            Pipeline orchestration — run(config: LegConfig)
     collector/                Data intake
       leg_import.py            Inbox scan & archive
       leg_scheduler.py         Cron-based run scheduler
@@ -223,23 +243,36 @@ shareomat/                    Python package
         ebl_xlsx.py            EBL Excel format parser
     report/
       leg_report.py            CSV + JSON report writers
+  database/                   SQLite admin database (source of truth for master data)
+    sqlite.py                  Connection, schema, migrations
+    community.py / participants.py / meters.py / tariffs.py / settings.py
+    config_builder.py          Combines RuntimeConfig + database into a LegConfig
+    yaml_import.py             One-time import of a pre-existing leg_config.yaml
+  models/                     Domain dataclasses
+    community.py / participant.py / meter.py / tariff.py / settings.py
+    meter_data.py               IntervalReading / EnergySlot / ImportFile
+    billing.py                  MatchResult / BillingRecord
+  web/                        Admin web interface (standalone or behind HA Ingress)
+    server.py                  HTTP server, routing, upload/download, CSRF
+    state.py                   Shared engine <-> web state
+    navigation.py               Sidebar structure + URL generation
+    reports.py                  Report discovery/rendering helpers
+    pages/                      One module per page (dashboard, participants, meters, ...)
+    templates/                  Jinja2 templates
+    static/                     app.css, banner.png
   ha/
     mqtt_runtime.py          MQTT client lifecycle
     mqtt_discovery.py        Home Assistant MQTT Discovery
     mqtt_entities.py         HA entity definitions
-    ingress.py               HA Ingress web dashboard
-  models/
-    invoice.py               BillingRecord dataclass
-    meter.py                 ImportFile / IntervalReading
-    participant.py           Participant dataclass
 ha_addon/                    Home Assistant Add-on
-  config.yaml                Add-on manifest
-  Dockerfile                 Multi-arch container image
-  run.sh                     Container entrypoint
-  generate_config.py         options.json → leg_config.yaml
+  config.yaml                 Add-on manifest (technical options only)
+  Dockerfile                  Multi-arch container image
+  run.sh                      Container entrypoint
+  generate_runtime_config.py  options.json → technical leg_config.yaml
 main.py                      Entry point
 data/inbox/                  Drop input files here
 data/archive/                Processed files land here
 data/reports/                billing_*.csv/json, match_detail_*.csv
 data/state/                  processed_files.json
+data/shareomat.db            Admin database (Gemeinschaft/Teilnehmer/Messpunkte/Tarife)
 ```

@@ -1,0 +1,291 @@
+# -*- coding: utf-8 -*-
+"""
+File: shareomat/database/sqlite.py
+
+Purpose:
+    SQLite connection handling, schema creation, and migrations for the
+    Shareomat administrative database.
+
+Part of:
+    Shareomat — Swiss LEG/ZEV Settlement Engine
+
+Notes:
+    Every call opens and closes its own short-lived connection — the
+    database is shared between the settlement engine thread and the web
+    server's request threads, and SQLite connections must not be shared
+    across threads.
+
+    Money values (tariff rates) are stored as TEXT (decimal string), never
+    as REAL, so round-tripping through the database never loses precision
+    to float rounding.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+from contextlib import contextmanager
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Iterator
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_DB_PATH = Path("data/shareomat.db")
+
+_SCHEMA_VERSION = 3
+
+_SCHEMA_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS communities (
+        id INTEGER PRIMARY KEY,
+        community_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        address_line TEXT NOT NULL DEFAULT '',
+        postal_code TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS participants (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER NOT NULL REFERENCES communities(id),
+        participant_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        participant_type TEXT NOT NULL,
+        email TEXT NOT NULL DEFAULT '',
+        address_line TEXT NOT NULL DEFAULT '',
+        postal_code TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL DEFAULT '',
+        valid_from TEXT,
+        valid_until TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(community_id, participant_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS meters (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER NOT NULL REFERENCES communities(id),
+        participant_id INTEGER REFERENCES participants(id),
+        meter_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        role TEXT NOT NULL,
+        valid_from TEXT,
+        valid_until TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(community_id, meter_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tariffs (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER NOT NULL REFERENCES communities(id),
+        name TEXT NOT NULL DEFAULT 'Standard',
+        local_rate_chf_kwh TEXT NOT NULL,
+        grid_rate_chf_kwh TEXT NOT NULL,
+        feed_in_rate_chf_kwh TEXT NOT NULL,
+        valid_from TEXT NOT NULL,
+        valid_until TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS settings (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER REFERENCES communities(id),
+        setting_key TEXT NOT NULL,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(community_id, setting_key)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS supplier_tariffs (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER NOT NULL REFERENCES communities(id),
+        source TEXT NOT NULL,
+        energy_rate_ht_chf_kwh TEXT,
+        energy_rate_nt_chf_kwh TEXT,
+        grid_rate_ht_chf_kwh TEXT,
+        grid_rate_nt_chf_kwh TEXT,
+        base_price_chf_year TEXT,
+        metering_price_chf_year TEXT,
+        feed_in_rate_chf_kwh TEXT,
+        hkn_rate_chf_kwh TEXT,
+        valid_from TEXT NOT NULL,
+        valid_until TEXT,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS reference_prices (
+        id INTEGER PRIMARY KEY,
+        technology TEXT NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        price_chf_kwh TEXT NOT NULL,
+        source TEXT NOT NULL,
+        is_official INTEGER NOT NULL DEFAULT 1,
+        published_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(technology, period_start, source)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS price_forecasts (
+        id INTEGER PRIMARY KEY,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        forecast_price_chf_kwh TEXT NOT NULL,
+        completeness_pct TEXT,
+        sources TEXT NOT NULL,
+        computed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS data_imports (
+        id INTEGER PRIMARY KEY,
+        source TEXT NOT NULL,
+        data_type TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        valid_from TEXT,
+        status TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        checksum TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS billing_periods (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER NOT NULL REFERENCES communities(id),
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        UNIQUE(community_id, period_start, period_end)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS billing_runs (
+        id INTEGER PRIMARY KEY,
+        billing_period_id INTEGER NOT NULL REFERENCES billing_periods(id),
+        version INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        community_id TEXT NOT NULL,
+        community_name TEXT NOT NULL,
+        tariff_name TEXT NOT NULL,
+        local_rate_chf_kwh TEXT NOT NULL,
+        grid_rate_chf_kwh TEXT NOT NULL,
+        feed_in_rate_chf_kwh TEXT NOT NULL,
+        participant_count INTEGER NOT NULL DEFAULT 0,
+        total_local_kwh TEXT NOT NULL DEFAULT '0',
+        total_leg_amount_chf TEXT NOT NULL DEFAULT '0',
+        total_grid_kwh TEXT NOT NULL DEFAULT '0',
+        total_grid_amount_chf TEXT NOT NULL DEFAULT '0',
+        computed_at TEXT NOT NULL,
+        released_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(billing_period_id, version)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS billing_records (
+        id INTEGER PRIMARY KEY,
+        billing_run_id INTEGER NOT NULL REFERENCES billing_runs(id),
+        participant_id TEXT NOT NULL,
+        participant_label TEXT NOT NULL,
+        meter_ids TEXT NOT NULL DEFAULT '',
+        local_received_kwh TEXT NOT NULL DEFAULT '0',
+        local_amount_chf TEXT NOT NULL DEFAULT '0',
+        grid_import_kwh TEXT NOT NULL DEFAULT '0',
+        grid_amount_chf TEXT NOT NULL DEFAULT '0',
+        local_supplied_kwh TEXT NOT NULL DEFAULT '0',
+        grid_export_kwh TEXT NOT NULL DEFAULT '0',
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS billing_sources (
+        id INTEGER PRIMARY KEY,
+        billing_run_id INTEGER NOT NULL REFERENCES billing_runs(id),
+        filename TEXT NOT NULL,
+        sha256 TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL
+    )
+    """,
+]
+
+
+def resolve_db_path() -> Path:
+    """Return the configured database path (SHAREOMAT_DB_PATH env var, else the default)."""
+    return Path(os.environ.get("SHAREOMAT_DB_PATH", str(DEFAULT_DB_PATH)))
+
+
+def now_iso() -> str:
+    """Return the current UTC timestamp as an ISO-8601 string for created_at/updated_at columns."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def date_to_str(value: date | None) -> str | None:
+    """Serialize a date to 'YYYY-MM-DD' for storage, or None."""
+    return value.isoformat() if value else None
+
+
+def str_to_date(value: str | None) -> date | None:
+    """Parse a 'YYYY-MM-DD' column value back into a date, or None."""
+    return date.fromisoformat(value) if value else None
+
+
+@contextmanager
+def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Open a short-lived connection with the project's standard pragmas and row factory."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=5)
+    try:
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 5000")
+        yield conn
+    finally:
+        conn.close()
+
+
+def init_db(db_path: Path) -> None:
+    """Create tables if missing and record the current schema version. Idempotent."""
+    with connect(db_path) as conn:
+        with conn:
+            for statement in _SCHEMA_STATEMENTS:
+                conn.execute(statement)
+            applied = conn.execute(
+                "SELECT 1 FROM schema_migrations WHERE version = ?", (_SCHEMA_VERSION,)
+            ).fetchone()
+            if applied is None:
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (_SCHEMA_VERSION, now_iso()),
+                )
+                logger.info("Database schema initialized at %s (version %d)", db_path, _SCHEMA_VERSION)

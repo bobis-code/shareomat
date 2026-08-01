@@ -1,5 +1,5 @@
 name: Shareomat
-version: "0.1.10"
+version: "0.2.0"
 slug: shareomat
 description: LEG/ZEV — calculates local energy sharing.
 url: https://github.com/bobis-code/shareomat
@@ -21,6 +21,9 @@ map:
 services:
   - mqtt:want
 
+# NOTE: Gemeinschaft, Teilnehmer, Messpunkte, Tarife und Automatik werden NICHT
+# mehr hier gepflegt, sondern in der Shareomat-Weboberfläche selbst (SQLite-
+# Datenbank unter /data/shareomat.db). Diese Optionen sind rein technisch.
 options:
   mqtt_host: "core-mosquitto"
   mqtt_port: 1883
@@ -29,20 +32,10 @@ options:
   base_topic: "shareomat"
   discovery_prefix: "homeassistant"
   command_topic_enabled: true
-  community_id: "ZEV-001"
-  community_name: "My Solar Community"
-  local_rate_chf_kwh: 0.12
-  grid_rate_chf_kwh: 0.28
-  feed_in_rate_chf_kwh: 0.08
   timezone: "Europe/Zurich"
   log_level: "info"
-  dry_run: false
-  unknown_meter_policy: "skip"
   mqtt_tls: false
   mqtt_ca_cert: ""
-  cron_schedule: ""
-  auto_scan_enabled: false
-  scan_interval_seconds: 60
   ingress_enabled: true
   share_inbox: ""
   email_enabled: false
@@ -53,13 +46,6 @@ options:
   email_folder: "INBOX"
   email_allowed_senders: []
   email_poll_interval_seconds: 300
-  metering_points:
-    - mpid: "CH0012345678901234500000000000001"
-      label: "PV Roof"
-      role: "producer"
-    - mpid: "CH0012345678901234500000000000002"
-      label: "Apartment 1"
-      role: "producer_consumer"
 
 schema:
   mqtt_host: str
@@ -69,20 +55,10 @@ schema:
   base_topic: str
   discovery_prefix: str
   command_topic_enabled: bool
-  community_id: str
-  community_name: str
-  local_rate_chf_kwh: float
-  grid_rate_chf_kwh: float
-  feed_in_rate_chf_kwh: float
   timezone: str
   log_level: list(debug|info|warning|error)
-  dry_run: bool
-  unknown_meter_policy: list(fail|skip)
   mqtt_tls: bool
   mqtt_ca_cert: str
-  cron_schedule: str
-  auto_scan_enabled: bool
-  scan_interval_seconds: int
   ingress_enabled: bool
   share_inbox: str
   email_enabled: bool
@@ -94,7 +70,3 @@ schema:
   email_allowed_senders:
     - str
   email_poll_interval_seconds: int
-  metering_points:
-    - mpid: str
-      label: str
-      role: list(producer|consumer|producer_consumer)

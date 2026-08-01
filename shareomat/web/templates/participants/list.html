@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Teilnehmer{% endblock %}
+{% block heading %}Teilnehmer{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions-row" style="margin-top:0;margin-bottom:16px">
+    <a class="btn" href="{{ url_for('participants_new') }}">+ Teilnehmer anlegen</a>
+  </div>
+  {% if participants %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Bezeichnung</th><th>Typ</th><th>Gültig ab</th><th>Gültig bis</th>
+          <th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in participants %}
+        <tr>
+          <td style="font-family:monospace">{{ p.participant_id }}</td>
+          <td>{{ p.label }}</td>
+          <td>{{ p.participant_type }}</td>
+          <td>{{ p.valid_from or '–' }}</td>
+          <td>{{ p.valid_until or '–' }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-active' if p.active else 'status-pill-inactive' }}">
+              {{ 'aktiv' if p.active else 'inaktiv' }}
+            </span>
+          </td>
+          <td>
+            <a class="btn btn-muted btn-small" href="{{ url_for('participants', suffix='/' + p.participant_id + '/edit') }}">Bearbeiten</a>
+            <form method="post" style="display:inline" action="{{ url_for('participants', suffix='/' + p.participant_id + '/toggle') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-small {{ 'btn-danger' if p.active else 'btn-secondary' }}">
+                {{ 'Deaktivieren' if p.active else 'Aktivieren' }}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Teilnehmer angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

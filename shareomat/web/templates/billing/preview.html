@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Abrechnung – Vorschau{% endblock %}
+{% block heading %}Vorschau: {{ preview.period_start }} – {{ preview.period_end }}{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>2. Verfügbare Messdaten</h2>
+  <div class="grid">
+    <div class="tile tile-ok"><div class="tile-value">{{ preview.availability.meters_with_data | length }}</div><div class="tile-label">Messpunkte mit Daten</div></div>
+    <div class="tile {{ 'tile-warn' if preview.availability.meters_missing_data else '' }}"><div class="tile-value">{{ preview.availability.meters_missing_data | length }}</div><div class="tile-label">Ohne Daten</div></div>
+    <div class="tile {{ 'tile-warn' if preview.availability.unknown_meter_ids else '' }}"><div class="tile-value">{{ preview.availability.unknown_meter_ids | length }}</div><div class="tile-label">Unbekannte Messpunkte</div></div>
+    <div class="tile"><div class="tile-value">{{ preview.availability.reading_count }}</div><div class="tile-label">Messwerte gesamt</div></div>
+  </div>
+
+  {% if preview.availability.meters_missing_data %}
+  <div class="error-box" style="margin-top:16px">
+    <strong>Messpunkte ohne Daten in diesem Zeitraum:</strong>
+    <ul>{% for m in preview.availability.meters_missing_data %}<li>{{ m }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if preview.availability.unknown_meter_ids %}
+  <div class="error-box">
+    <strong>Unbekannte Messpunkte in den Dateien (nicht in der Abrechnung berücksichtigt):</strong>
+    <ul>{% for m in preview.availability.unknown_meter_ids %}<li>{{ m }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if preview.availability.sources %}
+  <div class="ts" style="margin-top:12px">Quelldateien:
+    {% for s in preview.availability.sources %}{{ s.filename }} ({{ s.origin }}){{ ", " if not loop.last }}{% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>3. Tarif</h2>
+  <p class="ts">{{ preview.tariff_name }}: {{ preview.local_rate_chf_kwh }} CHF/kWh lokal &middot;
+    {{ preview.grid_rate_chf_kwh }} CHF/kWh Netz (Kontrollwert) &middot;
+    {{ preview.feed_in_rate_chf_kwh }} CHF/kWh Einspeisung</p>
+</div>
+
+<div class="card">
+  <h2>4. Berechnete Beträge je Teilnehmer</h2>
+  {% if preview.line_items %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Teilnehmer</th><th>Messpunkte</th>
+          <th>Lokal kWh</th><th>LEG-Betrag CHF</th>
+          <th>Netzbezug kWh (Info)</th><th>Netzbetrag CHF (Info)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in preview.line_items %}
+        <tr>
+          <td>{{ item.participant_label }}</td>
+          <td style="font-family:monospace;font-size:.8rem">{{ item.meter_ids | join(", ") }}</td>
+          <td>{{ item.local_received_kwh }}</td>
+          <td><strong>{{ item.local_amount_chf }}</strong></td>
+          <td class="ts">{{ item.grid_import_kwh }}</td>
+          <td class="ts">{{ item.grid_amount_chf }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="font-weight:bold;border-top:2px solid #e5e7eb">
+          <td colspan="2">Summe</td>
+          <td>{{ preview.total_local_kwh }}</td>
+          <td>{{ preview.total_leg_amount_chf }}</td>
+          <td class="ts">{{ preview.total_grid_kwh }}</td>
+          <td class="ts">{{ preview.total_grid_amount_chf }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="field-hint" style="margin-top:8px">
+    Nur die LEG-Beträge (lokal) werden von Shareomat in Rechnung gestellt. Der Netzbezug ist ein
+    Kontrollwert — dieser wird direkt von EBL verrechnet.
+  </div>
+  {% else %}
+  <p class="ts">Für diesen Zeitraum liegen keine abrechenbaren Messdaten vor.</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('billing', suffix='/save') }}" style="margin-top:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="period_start" value="{{ preview.period_start }}">
+    <input type="hidden" name="period_end" value="{{ preview.period_end }}">
+    <div class="actions-row">
+      <button type="submit" {{ 'disabled' if not preview.line_items }}>Als Entwurf speichern</button>
+      <a class="btn btn-muted" href="{{ url_for('billing', suffix='/new') }}">Anderer Zeitraum</a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

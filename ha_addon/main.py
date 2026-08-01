@@ -3,25 +3,36 @@
 File: main.py
 
 Purpose:
-    Entry point for the Shareomat settlement engine.
-    Configures logging, sets up optional MQTT, runs the settlement
-    cycle, and optionally enters daemon mode for command-triggered runs.
+    Entry point for the Shareomat settlement engine and admin web
+    interface. Loads the technical runtime configuration, opens (and if
+    needed initializes/imports) the SQLite administrative database, runs
+    the settlement cycle, and optionally enters daemon mode for
+    scheduled/command-triggered runs.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
-    Daemon mode activates automatically when mqtt.enabled = true
-    and mqtt.command_topic_enabled = true in leg_config.yaml, OR when
-    cron_schedule or auto_scan_enabled is set in processing config.
-    In daemon mode the container stays alive and listens on
-    shareomat/cmd/run_once for manual trigger messages.
-    Without MQTT or with command_topic_enabled = false the process
-    runs once and exits — identical to the original behaviour.
+    Master data (community, participants, meters, tariff, operating
+    settings) lives in SQLite, not in the runtime YAML — see
+    SHAREOMAT_UMBAU_STRUKTUR.md. A fresh installation with an empty
+    database is not an error: the web UI shows a setup wizard, and
+    settlement runs are skipped (not crashed) until setup is complete.
 
-    Environment variables (set by the HA add-on run.sh, optional otherwise):
-        SHAREOMAT_CONFIG_PATH  Override default config path (config/leg_config.yaml)
-        SHAREOMAT_LOG_LEVEL    Log verbosity: DEBUG / INFO / WARNING / ERROR
+    Every settlement run rebuilds LegConfig fresh from SQLite
+    (shareomat.database.config_builder.build_leg_config) immediately
+    before calling shareomat.core.leg_runner.run(), so edits made in the
+    admin web UI take effect on the very next run.
+
+    Environment variables:
+        SHAREOMAT_RUNTIME_CONFIG_PATH / SHAREOMAT_CONFIG_PATH
+            Path to the technical runtime YAML (paths/mqtt/email/web).
+            Default: config/leg_config.yaml
+        SHAREOMAT_DB_PATH
+            Path to the SQLite administrative database.
+            Default: data/shareomat.db
+        SHAREOMAT_LOG_LEVEL
+            Log verbosity: DEBUG / INFO / WARNING / ERROR
 """
 
 from __future__ import annotations
@@ -34,18 +45,23 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
-from shareomat.ha.ingress import IngressServer, get_state as get_ingress_state
-from shareomat.core.leg_config import LegConfig, load_config
+from shareomat.config import RuntimeConfig, load_runtime_config, validate_leg_config
 from shareomat.core.leg_runner import run
+from shareomat.database.config_builder import IncompleteConfigError, build_leg_config
+from shareomat.database.settings import OperationSettings, get_operation_settings
+from shareomat.database.sqlite import init_db, resolve_db_path
+from shareomat.database.yaml_import import import_legacy_yaml_if_empty
+from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.web.server import WebServer, get_state as get_web_state
 
-_CONFIG_PATH = Path(os.environ.get("SHAREOMAT_CONFIG_PATH", "config/leg_config.yaml"))
+_RUNTIME_CONFIG_PATH = Path(
+    os.environ.get("SHAREOMAT_RUNTIME_CONFIG_PATH")
+    or os.environ.get("SHAREOMAT_CONFIG_PATH")
+    or "config/leg_config.yaml"
+)
 
 logger = logging.getLogger(__name__)
 _RUN_LOCK = threading.Lock()
-_ERROR_DASHBOARD_ENABLED = os.environ.get("SHAREOMAT_ERROR_DASHBOARD", "").lower() in {
-    "1", "true", "yes", "on",
-}
 
 
 def setup_logging() -> None:
@@ -59,137 +75,143 @@ def setup_logging() -> None:
     )
 
 
-def _update_ingress_state(config: LegConfig, error: str = "") -> None:
-    """Update the ingress dashboard state after a settlement run."""
+def _update_web_state(runtime: RuntimeConfig, status: str, error: str = "") -> None:
+    """Update the admin dashboard state after a settlement run attempt."""
     try:
         from datetime import datetime, timezone
-        state = get_ingress_state()
+        state = get_web_state()
         inbox_count = (
-            sum(1 for f in config.paths.inbox.iterdir() if f.is_file())
-            if config.paths.inbox.exists() else 0
+            sum(1 for f in runtime.paths.inbox.iterdir() if f.is_file())
+            if runtime.paths.inbox.exists() else 0
         )
         report_count = (
-            sum(1 for f in config.paths.reports.iterdir() if f.is_file())
-            if config.paths.reports.exists() else 0
+            sum(1 for f in runtime.paths.reports.iterdir() if f.is_file())
+            if runtime.paths.reports.exists() else 0
         )
         state.update(
-            status="error" if error else "ok",
+            status=status,
             last_run=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             inbox_count=inbox_count,
             report_count=report_count,
             last_error=error,
         )
     except Exception as exc:
-        logger.warning("Ingress state update failed: %s", exc)
+        logger.warning("Web state update failed: %s", exc)
 
 
-def _run_safe_cycle(config_path: Path, config: LegConfig, mqtt_client: object | None) -> bool:
-    """Run one settlement cycle unless another cycle is already active.
+def _run_safe_cycle(runtime: RuntimeConfig, db_path: Path, mqtt_client: object | None) -> bool:
+    """Build a fresh LegConfig from SQLite and run one settlement cycle, unless one is active.
 
-    Every trigger path (startup, MQTT command, cron, file watcher, share importer,
-    and Ingress) goes through this function, so the lock protects the inbox,
-    archive, reports, and processed-file state from concurrent settlement runs.
+    Every trigger path (startup, MQTT command, cron, file watcher, share
+    importer, and the web UI) goes through this function, so the lock
+    protects the inbox, archive, reports, and processed-file state from
+    concurrent settlement runs.
     """
     if not _RUN_LOCK.acquire(blocking=False):
         logger.warning("Settlement run skipped: another run is already active")
         try:
-            get_ingress_state().set_upload_result(
-                "Run skipped: another settlement run is already active.",
-                ok=False,
+            get_web_state().set_flash(
+                "Lauf übersprungen: Es läuft bereits ein Abrechnungslauf.", ok=False,
             )
         except Exception as exc:
-            logger.debug("Could not publish skipped-run notice to Ingress: %s", exc)
+            logger.debug("Could not publish skipped-run notice to web UI: %s", exc)
         return False
 
     try:
-        run(config_path, mqtt_client=mqtt_client)
-        _update_ingress_state(config, error="")
-        return True
-    except Exception as exc:
-        logger.error("Settlement run failed: %s", exc)
-        if mqtt_client is not None:
-            from shareomat.ha.mqtt_runtime import publish_status
-            publish_status(mqtt_client, "error", config.mqtt)
-        _update_ingress_state(config, error=str(exc))
-        return True
+        try:
+            config = build_leg_config(db_path, runtime)
+            validate_leg_config(config)
+        except IncompleteConfigError as exc:
+            logger.info("Settlement run skipped: %s", exc)
+            _update_web_state(runtime, "starting", str(exc))
+            return False
+        except ValueError as exc:
+            logger.error("Settlement run skipped: invalid configuration: %s", exc)
+            _update_web_state(runtime, "error", str(exc))
+            return False
+
+        try:
+            run(config, mqtt_client=mqtt_client)
+            _update_web_state(runtime, "ok", "")
+            return True
+        except Exception as exc:
+            logger.error("Settlement run failed: %s", exc)
+            if mqtt_client is not None:
+                from shareomat.ha.mqtt_runtime import publish_status
+                publish_status(mqtt_client, "error", runtime.mqtt)
+            _update_web_state(runtime, "error", str(exc))
+            return True
     finally:
         _RUN_LOCK.release()
 
 
 def _run_daemon(
-    config: LegConfig,
+    runtime: RuntimeConfig,
     mqtt_client: object | None,
+    settings: OperationSettings,
     on_run: Callable[[], None],
 ) -> None:
     """Start all background daemon services and block until stopped."""
-    import time
     threads = []
 
-    # MQTT command subscription (non-blocking setup)
-    if mqtt_client is not None and config.mqtt.command_topic_enabled:
+    if mqtt_client is not None and runtime.mqtt.command_topic_enabled:
         from shareomat.ha.mqtt_runtime import setup_command_subscription
-        setup_command_subscription(mqtt_client, on_run, config.mqtt)
+        setup_command_subscription(mqtt_client, on_run, runtime.mqtt)
 
-    # Cron scheduler
-    if config.processing.cron_schedule:
+    if settings.cron_schedule:
         from shareomat.core.collector.leg_scheduler import SchedulerThread
-        t = SchedulerThread(config.processing.cron_schedule, on_run)
+        t = SchedulerThread(settings.cron_schedule, on_run)
         t.start()
         threads.append(t)
-        logger.info("Cron scheduler started: %s", config.processing.cron_schedule)
+        logger.info("Cron scheduler started: %s", settings.cron_schedule)
 
-    # Share folder importer
-    if config.paths.share_inbox:
+    if runtime.paths.share_inbox:
         from shareomat.core.collector.leg_share_importer import ShareImporterThread
         share_t = ShareImporterThread(
-            share_path=Path(config.paths.share_inbox),
-            inbox_path=config.paths.inbox,
-            interval=config.processing.scan_interval_seconds,
+            share_path=Path(runtime.paths.share_inbox),
+            inbox_path=runtime.paths.inbox,
+            interval=settings.scan_interval_seconds,
         )
         share_t.start()
         threads.append(share_t)
-        logger.info("Share importer started: %s", config.paths.share_inbox)
+        logger.info("Share importer started: %s", runtime.paths.share_inbox)
 
-    # Email importer (IMAP mailbox, e.g. a dedicated Gmail inbox)
-    if config.email.enabled:
+    if runtime.email.enabled:
         from shareomat.core.collector.leg_email_importer import EmailImporterThread
         email_t = EmailImporterThread(
-            imap_host=config.email.imap_host,
-            imap_port=config.email.imap_port,
-            username=config.email.username,
-            password=config.email.password,
-            folder=config.email.folder,
-            allowed_senders=config.email.allowed_senders,
-            inbox_path=config.paths.inbox,
-            state_dir=config.paths.state,
-            interval=config.email.poll_interval_seconds,
+            imap_host=runtime.email.imap_host,
+            imap_port=runtime.email.imap_port,
+            username=runtime.email.username,
+            password=runtime.email.password,
+            folder=runtime.email.folder,
+            allowed_senders=runtime.email.allowed_senders,
+            inbox_path=runtime.paths.inbox,
+            state_dir=runtime.paths.state,
+            interval=runtime.email.poll_interval_seconds,
         )
         email_t.start()
         threads.append(email_t)
-        logger.info("Email importer started: %s@%s", config.email.username, config.email.imap_host)
+        logger.info("Email importer started: %s@%s", runtime.email.username, runtime.email.imap_host)
 
-    # File watcher
     watcher = None
-    if config.processing.auto_scan_enabled:
+    if settings.auto_scan_enabled:
         from shareomat.core.collector.leg_watcher import WatcherThread
         watcher = WatcherThread(
-            config.paths.inbox,
+            runtime.paths.inbox,
             on_run,
-            interval=config.processing.scan_interval_seconds,
+            interval=settings.scan_interval_seconds,
         )
         watcher.start()
         threads.append(watcher)
-        # Wire watcher to MQTT runtime for switch control
         if mqtt_client is not None:
             from shareomat.ha.mqtt_runtime import register_watcher
             register_watcher(watcher)
-        # Publish initial auto_scan state
         if mqtt_client is not None:
-            prefix = config.mqtt.topic_prefix
-            mqtt_client.publish(f"{prefix}/auto_scan/state", "ON", qos=config.mqtt.qos, retain=True)
+            prefix = runtime.mqtt.topic_prefix
+            mqtt_client.publish(f"{prefix}/auto_scan/state", "ON", qos=runtime.mqtt.qos, retain=True)
 
     service_count = len(threads)
-    if mqtt_client is not None and config.mqtt.command_topic_enabled:
+    if mqtt_client is not None and runtime.mqtt.command_topic_enabled:
         service_count += 1
     if service_count == 0:
         logger.warning("Daemon mode requested but no services configured — exiting")
@@ -205,42 +227,34 @@ def _run_daemon(
         for t in threads:
             t.stop()
         if mqtt_client is not None:
-            from shareomat.ha.mqtt_runtime import shutdown_mqtt as _shutdown
-            _shutdown(mqtt_client)
+            shutdown_mqtt(mqtt_client)
 
 
-def _serve_startup_error(message: str, *, port: int = 8099) -> None:
-    """Start a minimal Ingress dashboard that explains why startup stopped."""
-    if not _ERROR_DASHBOARD_ENABLED:
-        logger.error("%s", message)
-        sys.exit(1)
+def _serve_degraded(message: str, *, port: int = 8099) -> None:
+    """Start the admin web server without a working runtime config, showing the fatal error.
 
-    logger.error("Startup failed; serving Ingress error dashboard: %s", message)
-    ingress_server = IngressServer(port=port)
-    ingress_server.start()
+    Even a broken technical configuration should not leave the operator
+    staring at a crashed container with no way to see why — the web UI
+    still starts and surfaces the error as a persistent warning banner.
+    """
+    logger.error("Startup failed; serving degraded web UI: %s", message)
+    web_server = WebServer(port=port)
+    web_server.start()
 
-    state = get_ingress_state()
-    state.update(
-        status="error",
-        last_run="-",
-        inbox_count=0,
-        report_count=0,
-        last_error=message,
-    )
+    state = get_web_state()
+    state.update(status="error", last_run="-", inbox_count=0, report_count=0, last_error=message)
     state.add_warning(
-        "Shareomat could not start because the configuration is incomplete or invalid. "
-        "Open the add-on Configuration tab, fix the items below, then restart the add-on."
+        "Shareomat konnte nicht vollständig starten, weil die technische Konfiguration "
+        "fehlerhaft oder unvollständig ist. Bitte die Add-on-Konfiguration bzw. "
+        "leg_config.yaml prüfen und Shareomat neu starten."
     )
-    state.register_inbox(Path("/config/shareomat/inbox"))
-    state.register_reports(Path("/config/shareomat/reports"))
-    state.register_meters([])
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        ingress_server.stop()
-        logger.info("Startup error dashboard stopped")
+        web_server.stop()
+        logger.info("Degraded web UI stopped")
 
 
 def main() -> None:
@@ -248,44 +262,68 @@ def main() -> None:
     setup_logging()
     logger.info("shareomat starting up")
 
-    if not _CONFIG_PATH.exists():
-        _serve_startup_error(f"Config file not found: {_CONFIG_PATH}")
+    if not _RUNTIME_CONFIG_PATH.exists():
+        _serve_degraded(f"Config file not found: {_RUNTIME_CONFIG_PATH}")
         return
 
     try:
-        config = load_config(_CONFIG_PATH)
+        runtime = load_runtime_config(_RUNTIME_CONFIG_PATH)
     except Exception as exc:
-        _serve_startup_error(str(exc))
+        _serve_degraded(str(exc))
         return
-    mqtt_client = setup_mqtt(config)
+
+    for directory in (runtime.paths.inbox, runtime.paths.archive, runtime.paths.reports, runtime.paths.state):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    db_path = resolve_db_path()
+    init_db(db_path)
+    try:
+        if import_legacy_yaml_if_empty(db_path, _RUNTIME_CONFIG_PATH):
+            logger.info("Legacy configuration imported into %s", db_path)
+    except Exception as exc:
+        logger.error("Legacy YAML import failed (continuing with an empty database): %s", exc)
+
+    mqtt_client = setup_mqtt(runtime.mqtt)
     startup_warnings: list[str] = []
-    if config.mqtt.enabled and mqtt_client is None:
+    if runtime.mqtt.enabled and mqtt_client is None:
         startup_warnings.append(
             "MQTT is enabled but Shareomat could not connect to the broker. "
-            f"Check mqtt_host '{config.mqtt.broker}', port {config.mqtt.port}, "
+            f"Check mqtt_host '{runtime.mqtt.broker}', port {runtime.mqtt.port}, "
             "credentials, and whether the broker is running."
         )
 
-    # Start ingress server if enabled
-    ingress_server = None
-    if config.ingress.enabled:
-        ingress_server = IngressServer(port=config.ingress.port)
-        ingress_server.start()
-        _ingress = get_ingress_state()
-        _ingress.register_on_run(lambda: _run_safe_cycle(_CONFIG_PATH, config, mqtt_client))
-        _ingress.register_inbox(config.paths.inbox)
-        _ingress.register_reports(config.paths.reports)
-        _ingress.register_meters([(m.meter_id, m.label) for m in config.meters])
+    web_server = None
+    if runtime.web.enabled:
+        web_server = WebServer(port=runtime.web.port)
+        web_server.start()
+        state = get_web_state()
+        state.register_db(db_path)
+        state.register_runtime(runtime)
+        state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client))
         for warning in startup_warnings:
-            _ingress.add_warning(warning)
+            state.add_warning(warning)
 
-    _run_safe_cycle(_CONFIG_PATH, config, mqtt_client)
+    _run_safe_cycle(runtime, db_path, mqtt_client)
 
-    if should_run_daemon(config, mqtt_client):
+    settings = get_operation_settings(db_path)
+    if should_run_daemon(
+        runtime.mqtt, mqtt_client,
+        cron_schedule=settings.cron_schedule, auto_scan_enabled=settings.auto_scan_enabled,
+    ):
         _run_daemon(
-            config, mqtt_client,
-            on_run=lambda: _run_safe_cycle(_CONFIG_PATH, config, mqtt_client),
+            runtime, mqtt_client, settings,
+            on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client),
         )
+    elif web_server is not None:
+        # No daemon services, but the admin web UI must keep running.
+        logger.info("No daemon services configured — web UI stays up")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            web_server.stop()
+            shutdown_mqtt(mqtt_client)
+            logger.info("shareomat stopped")
     else:
         shutdown_mqtt(mqtt_client)
         logger.info("shareomat done")

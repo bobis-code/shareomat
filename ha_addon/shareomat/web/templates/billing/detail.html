@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Abrechnung{% endblock %}
+{% block heading %}Abrechnung {{ detail.run.period_start }} – {{ detail.run.period_end }} (Version {{ detail.run.version }}){% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="grid">
+    <div class="tile"><div class="tile-value">
+      <span class="status-pill {{ 'status-pill-active' if detail.run.status == 'released' else 'status-pill-inactive' }}">
+        {{ {'draft': 'Entwurf', 'released': 'Freigegeben', 'cancelled': 'Storniert'}.get(detail.run.status, detail.run.status) }}
+      </span>
+    </div><div class="tile-label">Status</div></div>
+    <div class="tile"><div class="tile-value">{{ detail.run.participant_count }}</div><div class="tile-label">Teilnehmer</div></div>
+    <div class="tile"><div class="tile-value">{{ detail.run.total_local_kwh }}</div><div class="tile-label">Lokal kWh</div></div>
+    <div class="tile"><div class="tile-value">{{ detail.run.total_leg_amount_chf }}</div><div class="tile-label">Gesamtbetrag CHF</div></div>
+  </div>
+  <div class="ts" style="margin-top:12px">
+    Gemeinschaft: {{ detail.run.community_name }} ({{ detail.run.community_id }}) &middot;
+    Tarif: {{ detail.run.tariff_name }} ({{ detail.run.local_rate_chf_kwh }} / {{ detail.run.grid_rate_chf_kwh }} / {{ detail.run.feed_in_rate_chf_kwh }} CHF/kWh) &middot;
+    Berechnet am {{ detail.run.computed_at.strftime("%Y-%m-%d %H:%M") }}
+    {% if detail.run.released_at %} &middot; Freigegeben am {{ detail.run.released_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
+  </div>
+
+  {% if detail.run.status == 'draft' %}
+  <div class="actions-row">
+    <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/release') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Freigeben</button>
+    </form>
+    <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/cancel') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-danger">Verwerfen</button>
+    </form>
+  </div>
+  {% elif detail.run.status == 'released' %}
+  <div class="actions-row">
+    <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/cancel') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-danger">Stornieren</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Beträge je Teilnehmer</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Teilnehmer</th><th>Messpunkte</th>
+          <th>Lokal kWh</th><th>LEG-Betrag CHF</th>
+          <th>Netzbezug kWh (Info)</th><th>Netzbetrag CHF (Info)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in detail.line_items %}
+        <tr>
+          <td>{{ item.participant_label }}</td>
+          <td style="font-family:monospace;font-size:.8rem">{{ item.meter_ids | join(", ") }}</td>
+          <td>{{ item.local_received_kwh }}</td>
+          <td><strong>{{ item.local_amount_chf }}</strong></td>
+          <td class="ts">{{ item.grid_import_kwh }}</td>
+          <td class="ts">{{ item.grid_amount_chf }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Quelldateien</h2>
+  {% if detail.sources %}
+  <table>
+    <thead><tr><th>Datei</th><th>Herkunft</th><th>SHA-256</th></tr></thead>
+    <tbody>
+      {% for s in detail.sources %}
+      <tr><td>{{ s.filename }}</td><td>{{ s.origin }}</td><td style="font-family:monospace;font-size:.75rem">{{ s.sha256 }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="ts">Keine Quelldateien erfasst.</p>
+  {% endif %}
+</div>
+
+{% endblock %}

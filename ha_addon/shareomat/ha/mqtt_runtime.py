@@ -52,14 +52,14 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Callable
 
-from shareomat.core.leg_config import MqttConfig, LegConfig
+from shareomat.config import MqttConfig
 from shareomat.leg_const import (
     MQTT_STATUS_ERROR,
     MQTT_STATUS_OFFLINE,
     MQTT_STATUS_OK,
     MQTT_STATUS_STARTING,
 )
-from shareomat.models.invoice import BillingRecord
+from shareomat.models.billing import BillingRecord
 from shareomat.ha.mqtt_entities import _topic_safe
 
 if TYPE_CHECKING:
@@ -339,36 +339,48 @@ def start_command_listener(
 # ── Lifecycle orchestration ───────────────────────────────────────────────────
 
 
-def setup_mqtt(config: LegConfig) -> object | None:
+def setup_mqtt(mqtt_config: MqttConfig) -> object | None:
     """Connect to the MQTT broker when enabled in config, or return None."""
-    if not config.mqtt.enabled:
+    if not mqtt_config.enabled:
         return None
-    client = create_client(config.mqtt)
+    client = create_client(mqtt_config)
     if client is None:
         logger.warning("MQTT requested but client could not connect — running without MQTT")
     return client
 
 
-def should_run_daemon(config: LegConfig, mqtt_client: object | None) -> bool:
-    """Return True when at least one daemon service is configured."""
+def should_run_daemon(
+    mqtt_config: MqttConfig,
+    mqtt_client: object | None,
+    *,
+    cron_schedule: str,
+    auto_scan_enabled: bool,
+) -> bool:
+    """Return True when at least one daemon service is configured.
+
+    Takes cron_schedule/auto_scan_enabled explicitly (rather than a full
+    LegConfig) because they are only known once the database-backed
+    OperationSettings can be read — which does not require a complete
+    setup (community/participants/meters/tariff), unlike a full LegConfig.
+    """
     return (
-        (mqtt_client is not None and config.mqtt.command_topic_enabled)
-        or bool(config.processing.cron_schedule)
-        or config.processing.auto_scan_enabled
+        (mqtt_client is not None and mqtt_config.command_topic_enabled)
+        or bool(cron_schedule)
+        or auto_scan_enabled
     )
 
 
 def run_mqtt_daemon(
-    config: LegConfig,
+    mqtt_config: MqttConfig,
     mqtt_client: object,
     on_run: Callable[[], None],
 ) -> None:
     """Enter daemon mode: block and wait for run commands from the MQTT broker."""
     logger.info(
         "Daemon mode — publish any payload to %s/cmd/run_once to trigger a run",
-        config.mqtt.topic_prefix,
+        mqtt_config.topic_prefix,
     )
-    start_command_listener(mqtt_client, on_run=on_run, config=config.mqtt)
+    start_command_listener(mqtt_client, on_run=on_run, config=mqtt_config)
 
 
 def shutdown_mqtt(mqtt_client: object | None) -> None:

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block heading %}Einstellungen{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Grundeinstellungen</h2>
+  <form class="form-card" method="post" action="{{ url_for('settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="unknown_meter_policy">Umgang mit unbekannten Messpunkten</label>
+      <select id="unknown_meter_policy" name="unknown_meter_policy">
+        {% for value, label in policies %}
+        <option value="{{ value }}" {{ 'selected' if settings.unknown_meter_policy == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="archive_processed" name="archive_processed" {{ 'checked' if settings.archive_processed }}>
+      <label for="archive_processed" style="margin:0">Verarbeitete Dateien ins Archiv verschieben</label>
+    </div>
+    <div class="actions-row">
+      <button type="submit">Speichern</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Technische Konfiguration</h2>
+  <p class="ts">Diese Werte werden über die Docker- bzw. Home-Assistant-Add-on-Optionen verwaltet, nicht hier.</p>
+  {% if runtime %}
+  <table style="margin-top:12px">
+    <tbody>
+      <tr><td>Eingang</td><td style="font-family:monospace">{{ runtime.paths.inbox }}</td></tr>
+      <tr><td>Archiv</td><td style="font-family:monospace">{{ runtime.paths.archive }}</td></tr>
+      <tr><td>Berichte</td><td style="font-family:monospace">{{ runtime.paths.reports }}</td></tr>
+      <tr><td>MQTT</td><td>{{ 'aktiviert (' + runtime.mqtt.broker + ':' + runtime.mqtt.port|string + ')' if runtime.mqtt.enabled else 'deaktiviert' }}</td></tr>
+      <tr><td>E-Mail-Import</td><td>{{ 'aktiviert (' + runtime.email.imap_host + ')' if runtime.email.enabled else 'deaktiviert' }}</td></tr>
+      <tr><td>Web-Port</td><td>{{ runtime.web.port }}</td></tr>
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

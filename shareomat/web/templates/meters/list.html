@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Messpunkte{% endblock %}
+{% block heading %}Messpunkte{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="actions-row" style="margin-top:0;margin-bottom:16px">
+    <a class="btn" href="{{ url_for('meters_new') }}">+ Messpunkt anlegen</a>
+  </div>
+  {% if meters %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>MPID</th><th>Bezeichnung</th><th>Teilnehmer</th><th>Rolle</th>
+          <th>Gültig ab</th><th>Gültig bis</th><th>Status</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in meters %}
+        <tr>
+          <td style="font-family:monospace;font-size:.8rem">{{ m.meter_id }}</td>
+          <td>{{ m.label }}</td>
+          <td>{{ m.participant_id or '–' }}</td>
+          <td>{{ m.role }}</td>
+          <td>{{ m.valid_from or '–' }}</td>
+          <td>{{ m.valid_until or '–' }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-active' if m.active else 'status-pill-inactive' }}">
+              {{ 'aktiv' if m.active else 'inaktiv' }}
+            </span>
+          </td>
+          <td>
+            <a class="btn btn-muted btn-small" href="{{ url_for('meters', suffix='/' + m.meter_id + '/edit') }}">Bearbeiten</a>
+            <form method="post" style="display:inline" action="{{ url_for('meters', suffix='/' + m.meter_id + '/toggle') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-small {{ 'btn-danger' if m.active else 'btn-secondary' }}">
+                {{ 'Deaktivieren' if m.active else 'Aktivieren' }}
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="ts" style="margin-top:10px">
+    Rollen: <b>Erzeuger</b> = nur PV &nbsp;·&nbsp; <b>Verbraucher</b> = nur Verbrauch &nbsp;·&nbsp;
+    <b>Erzeuger &amp; Verbraucher</b> = beides. Es wird mindestens ein aktiver Erzeuger und ein aktiver Verbraucher benötigt.
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Messpunkte angelegt.</p>
+  {% endif %}
+</div>
+{% endblock %}

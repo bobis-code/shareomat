@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from shareomat.leg_const import DIRECTION_EXPORT, DIRECTION_IMPORT, SLOT_MINUTES
-from shareomat.models.meter import EnergySlot, IntervalReading
+from shareomat.models.meter_data import EnergySlot, IntervalReading
 from shareomat.core.pipeline.leg_normalizer import snap_to_slot as _snap_to_slot
 
 logger = logging.getLogger(__name__)

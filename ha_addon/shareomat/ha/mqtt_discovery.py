@@ -35,9 +35,9 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from shareomat.core.leg_config import MqttConfig
+from shareomat.config import MqttConfig
 from shareomat.leg_const import MQTT_STATUS_OFFLINE, MQTT_STATUS_OK
-from shareomat.models.invoice import BillingRecord
+from shareomat.models.billing import BillingRecord
 from shareomat.ha.mqtt_entities import (
     _HA_BILLING_SENSORS,
     _HA_BUTTONS,
