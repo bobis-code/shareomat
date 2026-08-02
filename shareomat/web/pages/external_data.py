@@ -50,11 +50,12 @@ def handle_get(ctx: RequestContext) -> str:
 def handle_post(ctx: RequestContext) -> str | None:
     action = ctx.segments[0] if ctx.segments else ""
 
-    if action == "token":
+    if action == "settings":
         save_external_data_settings(ctx.db_path, ExternalDataSettings(
             entsoe_api_token=(ctx.form.get("entsoe_api_token") or "").strip(),
+            municipality_bfs_number=(ctx.form.get("municipality_bfs_number") or "").strip(),
         ))
-        get_state().set_flash("ENTSO-E-Token gespeichert.", ok=True)
+        get_state().set_flash("Grundeinstellungen gespeichert.", ok=True)
         return None
 
     if action == "elcom":
@@ -63,6 +64,15 @@ def handle_post(ctx: RequestContext) -> str | None:
             year = int(ctx.form.get("year", ""))
         except ValueError:
             raise FormError("Gemeindenummer und Jahr müssen Zahlen sein.")
+
+        # Using this municipality for a lookup also makes it the new remembered default —
+        # that's the "feste Ortschaft hinterlegen" behaviour: use once, stays pre-filled next time.
+        current_settings = get_external_data_settings(ctx.db_path)
+        if current_settings.municipality_bfs_number != str(municipality):
+            save_external_data_settings(ctx.db_path, ExternalDataSettings(
+                entsoe_api_token=current_settings.entsoe_api_token,
+                municipality_bfs_number=str(municipality),
+            ))
 
         try:
             tariffs = download_elcom_tariffs(municipality, year)

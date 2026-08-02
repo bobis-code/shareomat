@@ -75,6 +75,7 @@ class ExternalDataSettings:
     """Credentials/settings for external data sources, entered via the web UI (never YAML)."""
 
     entsoe_api_token: str = ""
+    municipality_bfs_number: str = ""  # default municipality for the ElCom tariff lookup
 
 
 @dataclass
