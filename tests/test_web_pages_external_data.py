@@ -29,10 +29,27 @@ def test_get_renders_page(db_path):
     assert "ENTSO-E" in html
 
 
-def test_post_token_saves_setting(db_path):
-    ctx = RequestContext(method="POST", ingress_path="", segments=["token"], form={"entsoe_api_token": "  my-token  "})
+def test_post_settings_saves_token_and_municipality(db_path):
+    ctx = RequestContext(
+        method="POST", ingress_path="", segments=["settings"],
+        form={"entsoe_api_token": "  my-token  ", "municipality_bfs_number": "5250"},
+    )
     assert external_data.handle_post(ctx) is None
-    assert get_external_data_settings(db_path).entsoe_api_token == "my-token"
+    settings = get_external_data_settings(db_path)
+    assert settings.entsoe_api_token == "my-token"
+    assert settings.municipality_bfs_number == "5250"
+
+
+def test_elcom_fetch_remembers_municipality_as_new_default(db_path, monkeypatch):
+    monkeypatch.setattr("shareomat.web.pages.external_data.download_elcom_tariffs", lambda *a, **k: [])
+
+    assert get_external_data_settings(db_path).municipality_bfs_number == ""
+    ctx = RequestContext(
+        method="POST", ingress_path="", segments=["elcom"],
+        form={"municipality_bfs_number": "261", "year": "2024"},
+    )
+    external_data.handle_post(ctx)
+    assert get_external_data_settings(db_path).municipality_bfs_number == "261"
 
 
 def test_post_elcom_invalid_number_raises_form_error(db_path):

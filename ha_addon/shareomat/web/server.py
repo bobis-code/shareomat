@@ -71,13 +71,13 @@ _PAGE_MODULES = {
     "participants": participants,
     "meters": meters,
     "tariffs": tariffs,
-    "meter-data": meter_data,
+    "meter_data": meter_data,
     "billing": billing,
     "invoices": invoices,
     "automation": automation,
     "reports": reports_page,
     "settings": settings_page,
-    "external-data": external_data,
+    "external_data": external_data,
 }
 
 
@@ -186,7 +186,10 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         segments = [s for s in path.split("/") if s]
-        route = segments[0] if segments else ""
+        # URLs use hyphens ("meter-data"), but route names (_PAGE_MODULES keys,
+        # ROUTE_PATHS keys, url_for() arguments) use underscores throughout —
+        # normalize once here so route always means the same thing everywhere.
+        route = segments[0].replace("-", "_") if segments else ""
         page = _PAGE_MODULES.get(route)
         if page is None:
             self.send_response(404)
@@ -199,7 +202,20 @@ class _Handler(BaseHTTPRequestHandler):
             segments=segments[1:],
             query=_flatten_qs(parsed.query),
         )
-        html = page.handle_get(ctx)
+        try:
+            html = page.handle_get(ctx)
+        except Exception:
+            # Never let an unexpected exception kill the connection with no response at
+            # all — behind a reverse proxy (e.g. HA Ingress) that shows up as a bare
+            # "502 Bad Gateway" with no clue what happened. Log the real traceback and
+            # return a page that at least explains something broke.
+            logger.exception("Unhandled error rendering GET %s", path)
+            self._send_html(
+                "<h1>Interner Fehler</h1><p>Beim Laden der Seite ist ein unerwarteter Fehler "
+                "aufgetreten. Details stehen im Add-on-Log.</p>",
+                status=500,
+            )
+            return
         self._send_html(html)
 
     # ── POST ─────────────────────────────────────────────────────────────
@@ -240,7 +256,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         segments = [s for s in path.split("/") if s]
-        route = segments[0] if segments else ""
+        route = segments[0].replace("-", "_") if segments else ""
         page = _PAGE_MODULES.get(route)
         if page is None or not hasattr(page, "handle_post"):
             self.send_response(404)
@@ -258,6 +274,16 @@ class _Handler(BaseHTTPRequestHandler):
             redirect_to = None
         except Redirect as exc:
             redirect_to = exc.location
+        except Exception:
+            # Same reasoning as do_GET: an unhandled exception here must never just
+            # drop the connection (looks like "502 Bad Gateway" through a proxy) — turn
+            # it into a normal flash-and-redirect so the user sees *something* and the
+            # real cause is in the log.
+            logger.exception("Unhandled error handling POST %s", path)
+            get_state().set_flash(
+                "Unerwarteter Fehler — Details stehen im Add-on-Log.", ok=False,
+            )
+            redirect_to = None
 
         if redirect_to is None:
             redirect_to = url_for(ingress_path, route)
