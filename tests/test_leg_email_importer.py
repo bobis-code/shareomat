@@ -87,7 +87,7 @@ def test_import_new_messages_saves_matching_attachment(tmp_path):
         importer = EmailImporterThread(
             imap_host="imap.gmail.com",
             imap_port=993,
-            username="energieverteiler1@gmail.com",
+            username="shareomat-inbox@example.com",
             password="app-password",
             folder="INBOX",
             allowed_senders=["grid@operator.ch"],

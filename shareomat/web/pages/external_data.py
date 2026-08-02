@@ -59,7 +59,7 @@ def _summarize(items: list[_T], formatter: Callable[[_T], str], *, limit: int = 
 def handle_get(ctx: RequestContext) -> str:
     settings = get_external_data_settings(ctx.db_path)
     imports = list_recent_imports(ctx.db_path)
-    pv_reference_prices = list_reference_prices(ctx.db_path, technology="pv")[:8]
+    pv_reference_prices = list_reference_prices(ctx.db_path, technology="pv")
     exchange_rates = list_exchange_rates(ctx.db_path, currency="EUR")
     elcom_tariffs = list_elcom_tariffs(
         ctx.db_path,
