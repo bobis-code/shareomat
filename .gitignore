@@ -240,3 +240,6 @@ config/leg_config.yaml
 
 # local working status/todo list — not for the public repo
 TODO.md
+
+# personal deployment helper — hardcodes the maintainer's LAN IP
+deploy_local_addon.bat

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 4
 
 _SCHEMA_STATEMENTS = [
     """
@@ -154,6 +154,36 @@ _SCHEMA_STATEMENTS = [
         sources TEXT NOT NULL,
         computed_at TEXT NOT NULL,
         created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS exchange_rates (
+        id INTEGER PRIMARY KEY,
+        currency TEXT NOT NULL,
+        period TEXT NOT NULL,
+        rate_chf TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'SNB',
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(currency, period)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS elcom_tariffs (
+        id INTEGER PRIMARY KEY,
+        municipality_bfs_number TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        category TEXT NOT NULL,
+        energy_chf_kwh TEXT NOT NULL,
+        grid_chf_kwh TEXT NOT NULL,
+        aidfee_chf_kwh TEXT NOT NULL,
+        community_fees_chf_kwh TEXT NOT NULL,
+        total_chf_kwh TEXT NOT NULL,
+        fixcosts_chf_year TEXT NOT NULL,
+        operator_name TEXT NOT NULL DEFAULT '',
+        fetched_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(municipality_bfs_number, year, category)
     )
     """,
     """

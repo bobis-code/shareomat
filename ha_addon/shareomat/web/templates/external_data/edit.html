@@ -40,6 +40,28 @@
     </div>
     <div class="actions-row"><button type="submit" class="btn-secondary">Abrufen</button></div>
   </form>
+  {% if elcom_tariffs %}
+  <div class="table-wrap" style="margin-top:16px">
+    <table>
+      <thead><tr><th>Gemeinde</th><th>Jahr</th><th>Kategorie</th><th>Energie CHF/kWh</th><th>Netz CHF/kWh</th><th>Total CHF/kWh</th><th>Netzbetreiber</th></tr></thead>
+      <tbody>
+        {% for municipality, year, t in elcom_tariffs %}
+        <tr>
+          <td>{{ municipality }}</td>
+          <td>{{ year }}</td>
+          <td>{{ t.category }}</td>
+          <td>{{ t.energy_chf_kwh }}</td>
+          <td>{{ t.grid_chf_kwh }}</td>
+          <td><strong>{{ t.total_chf_kwh }}</strong></td>
+          <td>{{ t.operator_name or '–' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts" style="margin-top:12px">Noch keine ElCom-Tarife abgerufen.</p>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -57,6 +79,20 @@
     </div>
     <div class="actions-row"><button type="submit" class="btn-secondary">Abrufen</button></div>
   </form>
+  {% if exchange_rates %}
+  <div class="table-wrap" style="margin-top:16px">
+    <table>
+      <thead><tr><th>Monat</th><th>EUR/CHF</th></tr></thead>
+      <tbody>
+        {% for r in exchange_rates %}
+        <tr><td>{{ r.period }}</td><td>{{ r.rate_chf_per_eur }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts" style="margin-top:12px">Noch keine Wechselkurse abgerufen.</p>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -94,21 +130,24 @@
 
 <div class="card">
   <h2>Letzte Abrufe</h2>
+  <p class="ts">Verlauf/Audit-Trail — die aktuellen Werte selbst stehen in den Tabellen oben.</p>
   {% if imports %}
-  <table>
-    <thead><tr><th>Quelle</th><th>Typ</th><th>Zeitpunkt</th><th>Status</th><th>Details</th></tr></thead>
-    <tbody>
-      {% for imp in imports %}
-      <tr>
-        <td>{{ imp.source }}</td>
-        <td>{{ imp.data_type }}</td>
-        <td>{{ imp.fetched_at.strftime("%Y-%m-%d %H:%M") if imp.fetched_at else '–' }}</td>
-        <td><span class="status-pill {{ 'status-pill-active' if imp.status == 'ok' else 'status-pill-inactive' }}">{{ imp.status }}</span></td>
-        <td>{{ imp.detail }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Quelle</th><th>Typ</th><th>Zeitpunkt</th><th>Status</th><th>Details</th></tr></thead>
+      <tbody>
+        {% for imp in imports %}
+        <tr>
+          <td>{{ imp.source }}</td>
+          <td>{{ imp.data_type }}</td>
+          <td>{{ imp.fetched_at.strftime("%Y-%m-%d %H:%M") if imp.fetched_at else '–' }}</td>
+          <td><span class="status-pill {{ 'status-pill-active' if imp.status == 'ok' else 'status-pill-inactive' }}">{{ imp.status }}</span></td>
+          <td style="font-family:monospace;font-size:.8rem;white-space:normal;word-break:break-word">{{ imp.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
   <p class="ts">Noch keine externen Daten abgerufen.</p>
   {% endif %}
