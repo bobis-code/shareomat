@@ -28,16 +28,18 @@
   <h2>Technische Konfiguration</h2>
   <p class="ts">Diese Werte werden über die Docker- bzw. Home-Assistant-Add-on-Optionen verwaltet, nicht hier.</p>
   {% if runtime %}
-  <table style="margin-top:12px">
-    <tbody>
-      <tr><td>Eingang</td><td style="font-family:monospace">{{ runtime.paths.inbox }}</td></tr>
-      <tr><td>Archiv</td><td style="font-family:monospace">{{ runtime.paths.archive }}</td></tr>
-      <tr><td>Berichte</td><td style="font-family:monospace">{{ runtime.paths.reports }}</td></tr>
-      <tr><td>MQTT</td><td>{{ 'aktiviert (' + runtime.mqtt.broker + ':' + runtime.mqtt.port|string + ')' if runtime.mqtt.enabled else 'deaktiviert' }}</td></tr>
-      <tr><td>E-Mail-Import</td><td>{{ 'aktiviert (' + runtime.email.imap_host + ')' if runtime.email.enabled else 'deaktiviert' }}</td></tr>
-      <tr><td>Web-Port</td><td>{{ runtime.web.port }}</td></tr>
-    </tbody>
-  </table>
+  <div class="table-wrap">
+    <table style="margin-top:12px">
+      <tbody>
+        <tr><td>Eingang</td><td style="font-family:monospace">{{ runtime.paths.inbox }}</td></tr>
+        <tr><td>Archiv</td><td style="font-family:monospace">{{ runtime.paths.archive }}</td></tr>
+        <tr><td>Berichte</td><td style="font-family:monospace">{{ runtime.paths.reports }}</td></tr>
+        <tr><td>MQTT</td><td>{{ 'aktiviert (' + runtime.mqtt.broker + ':' + runtime.mqtt.port|string + ')' if runtime.mqtt.enabled else 'deaktiviert' }}</td></tr>
+        <tr><td>E-Mail-Import</td><td>{{ 'aktiviert (' + runtime.email.imap_host + ')' if runtime.email.enabled else 'deaktiviert' }}</td></tr>
+        <tr><td>Web-Port</td><td>{{ runtime.web.port }}</td></tr>
+      </tbody>
+    </table>
+  </div>
   {% endif %}
 </div>
 {% endblock %}

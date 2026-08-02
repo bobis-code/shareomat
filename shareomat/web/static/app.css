@@ -194,8 +194,49 @@ form.form-card { max-width: 480px; }
 .status-pill-inactive { background: #f3f4f6; color: #6b7280; }
 
 @media (max-width: 720px) {
+  /* The desktop sidebar is a fixed-width column beside the content. On a
+     phone (incl. the HA Companion App's Ingress webview) that has to become
+     a normal top-to-bottom stack — previously .sidebar itself was set to
+     flex-direction:row + wrap, which wrapped whole <ul> blocks (each a
+     multi-line vertical list) as single flex items instead of wrapping the
+     individual links, producing a squashed, misaligned mess. Fixed: the
+     sidebar stays a vertical stack; only each section's *links* wrap into a
+     compact horizontal chip row. */
   .layout { flex-direction: column; }
-  .sidebar { width: 100%; flex-direction: row; flex-wrap: wrap; padding: 8px; }
-  .nav-section-title { display: none; }
+
+  .sidebar {
+    width: 100%;
+    flex-direction: column;
+    padding: 8px 0 4px;
+  }
+  .brand { padding: 0 12px 8px; }
+  .brand-logo { max-height: 60px; }
+
+  .nav-section-title { padding: 10px 12px 4px; }
+
+  .nav-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .nav-link {
+    padding: 7px 12px;
+    border-radius: 999px;
+    border-left: none;
+  }
+  .nav-link.active { border-left: none; }
+
   .sidebar-footer { display: none; }
+
+  .content { padding: 14px; }
+  .card { padding: 14px; }
+
+  .grid { grid-template-columns: repeat(auto-fit, minmax(130px,1fr)); gap: 10px; }
+  .tile-value { font-size: 1.5rem; }
+
+  table { font-size: .8rem; }
+
+  .actions-row { flex-wrap: wrap; }
+  form.form-card { max-width: 100%; }
 }
