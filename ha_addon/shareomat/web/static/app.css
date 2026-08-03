@@ -181,6 +181,11 @@ form.form-card { max-width: 480px; }
 .field input[type=date], .field select {
   width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: .9rem;
 }
+.field input[type=text]::placeholder, .field input[type=email]::placeholder,
+.field input[type=number]::placeholder, .field input[type=date]::placeholder {
+  color: #b0b6c0;
+  font-style: italic;
+}
 .field-hint { font-size: .75rem; color: var(--muted); margin-top: 3px; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; }
 .checkbox-row input { width: auto; }
