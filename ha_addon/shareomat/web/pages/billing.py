@@ -50,6 +50,7 @@ def _parse_period(ctx: RequestContext, source: dict[str, str]) -> tuple[date, da
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Route to the billing list, new-period form, preview, or one run's detail view."""
     if not ctx.segments:
         runs = list_billing_runs(ctx.db_path)
         return render_page("billing/list.html", ctx, "billing", runs=runs)
@@ -88,6 +89,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Save a draft, release, or cancel a billing run, depending on the sub-path."""
     if ctx.segments == ["save"]:
         period_start, period_end = _parse_period(ctx, ctx.form)
         try:

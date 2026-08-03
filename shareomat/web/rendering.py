@@ -48,10 +48,12 @@ class RequestContext:
 
     @property
     def db_path(self) -> Path | None:
+        """The active SQLite database path, or None before startup registers it."""
         return get_state().db_path
 
     @property
     def runtime(self) -> RuntimeConfig | None:
+        """The active technical runtime config, or None before startup registers it."""
         return get_state().runtime
 
 

@@ -67,6 +67,7 @@ def _participant_from_form(ctx: RequestContext, *, participant_id: str) -> Parti
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Route to the participant list, new-participant form, or edit form."""
     if not ctx.segments:
         participants = list_participants(ctx.db_path)
         return render_page(
@@ -94,6 +95,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Create, update, or toggle a participant, depending on the sub-path."""
     if ctx.segments == ["new"]:
         participant_id = form_required(ctx, "participant_id", label="Teilnehmer-ID")
         try:

@@ -28,6 +28,7 @@ UNKNOWN_METER_POLICIES = [
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render processing settings plus a read-only technical-config summary."""
     settings = get_operation_settings(ctx.db_path)
     return render_page(
         "settings/edit.html", ctx, "settings",
@@ -36,6 +37,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Validate and save processing settings."""
     current = get_operation_settings(ctx.db_path)
     policy = (ctx.form.get("unknown_meter_policy") or "").strip()
     if policy not in {UNKNOWN_METER_POLICY_FAIL, UNKNOWN_METER_POLICY_SKIP}:

@@ -57,6 +57,7 @@ def _summarize(items: list[_T], formatter: Callable[[_T], str], *, limit: int = 
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render settings, fetched-data tables, and the recent-imports log."""
     settings = get_external_data_settings(ctx.db_path)
     imports = list_recent_imports(ctx.db_path)
     pv_reference_prices = list_reference_prices(ctx.db_path, technology="pv")
@@ -75,6 +76,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Save settings or run the requested on-demand external-data fetch."""
     action = ctx.segments[0] if ctx.segments else ""
 
     if action == "settings":

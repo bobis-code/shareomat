@@ -42,16 +42,21 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 from shareomat.config import RuntimeConfig, load_runtime_config, validate_leg_config
 from shareomat.core.leg_runner import run
+from shareomat.core.pipeline.consumption_forecast import LOOKBACK_WEEKS, compute_leg_demand_forecast
 from shareomat.database.config_builder import IncompleteConfigError, build_leg_config
+from shareomat.database.consumption_forecasts import latest_computed_at, save_consumption_forecast
+from shareomat.database.meter_readings import list_meter_readings
 from shareomat.database.settings import OperationSettings, get_operation_settings
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
-from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.ha.mqtt_runtime import publish_demand_forecast, setup_mqtt, should_run_daemon, shutdown_mqtt
 from shareomat.web.server import WebServer, get_state as get_web_state
 
 _RUNTIME_CONFIG_PATH = Path(
@@ -60,8 +65,28 @@ _RUNTIME_CONFIG_PATH = Path(
     or "config/leg_config.yaml"
 )
 
+_TZ = ZoneInfo(os.environ.get("SHAREOMAT_TZ", "Europe/Zurich"))
+_MIN_RECOMPUTE_INTERVAL_SECONDS = 1800  # weekday/time-of-day patterns don't change minute to minute
+
 logger = logging.getLogger(__name__)
 _RUN_LOCK = threading.Lock()
+
+
+def _maybe_recompute_demand_forecast(db_path: Path) -> None:
+    """Recompute the LEG demand forecast if the last one is stale, then always publish the latest.
+
+    Throttled independently of the settlement cycle itself: _run_safe_cycle
+    can run often (watcher/cron), but weekday/time-of-day consumption
+    patterns don't meaningfully change within half an hour, so recomputing
+    every cycle would be wasted work — publish always reflects the most
+    recently stored forecast regardless of whether this call recomputed it.
+    """
+    now = datetime.now(timezone.utc)
+    last = latest_computed_at(db_path, scope="leg")
+    if last is None or (now - last).total_seconds() >= _MIN_RECOMPUTE_INTERVAL_SECONDS:
+        readings = list_meter_readings(db_path, start=now - timedelta(weeks=LOOKBACK_WEEKS), end=now)
+        points = compute_leg_demand_forecast(readings, now=now, horizon_days=7, tz=_TZ)
+        save_consumption_forecast(db_path, points)
 
 
 def setup_logging() -> None:
@@ -131,7 +156,7 @@ def _run_safe_cycle(runtime: RuntimeConfig, db_path: Path, mqtt_client: object |
             return False
 
         try:
-            run(config, mqtt_client=mqtt_client)
+            run(config, mqtt_client=mqtt_client, db_path=db_path)
             _update_web_state(runtime, "ok", "")
             return True
         except Exception as exc:
@@ -141,6 +166,21 @@ def _run_safe_cycle(runtime: RuntimeConfig, db_path: Path, mqtt_client: object |
                 publish_status(mqtt_client, "error", runtime.mqtt)
             _update_web_state(runtime, "error", str(exc))
             return True
+        finally:
+            # Published on every cycle, independent of run() outcome, so
+            # short-horizon prices/local-grid data stay fresh on the normal
+            # cron cadence even on cycles where the inbox had nothing new.
+            if mqtt_client is not None:
+                try:
+                    from shareomat.ha.mqtt_runtime import publish_energy_data_snapshot
+                    publish_energy_data_snapshot(mqtt_client, config.mqtt, db_path)
+                except Exception as exc:
+                    logger.error("MQTT energy_data publish failed: %s", exc)
+                try:
+                    _maybe_recompute_demand_forecast(db_path)
+                    publish_demand_forecast(mqtt_client, config.mqtt, db_path)
+                except Exception as exc:
+                    logger.error("Demand forecast failed: %s", exc)
     finally:
         _RUN_LOCK.release()
 

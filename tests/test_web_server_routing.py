@@ -44,3 +44,25 @@ def test_hyphenated_url_segments_normalize_to_known_routes():
 
 def test_dashboard_route_path_is_root():
     assert ROUTE_PATHS["dashboard"] == "/"
+
+
+def test_route_path_round_trips_back_to_its_own_page_module_key():
+    """A route's own URL, parsed the same way server.py parses incoming requests, must
+    dispatch back to that same _PAGE_MODULES entry.
+
+    Catches a different flavor of the same bug class: ROUTE_PATHS/url_for() using a
+    German URL word (e.g. "/analyse") while _PAGE_MODULES/the route name use the
+    English word ("analysis") — every other check here passed (both dicts had
+    matching keys), but a real request to that URL would 404 because the first path
+    segment ("analyse") never matches the dict key ("analysis").
+    """
+    for route, page in _PAGE_MODULES.items():
+        if route == "":
+            continue  # dashboard is served at "/", which has no path segment to parse
+        path = ROUTE_PATHS[route]
+        segment = path.strip("/").split("/")[0]
+        normalized = segment.replace("-", "_")
+        assert normalized == route, (
+            f"ROUTE_PATHS['{route}'] = '{path}' does not route back to '{route}' "
+            f"(first segment normalizes to '{normalized}')"
+        )

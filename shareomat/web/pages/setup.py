@@ -35,6 +35,7 @@ from shareomat.web.state import get_state
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render the setup wizard at whichever step is next incomplete."""
     status = get_setup_status(ctx.db_path)
     participants = list_participants(ctx.db_path, include_inactive=False) if status.has_community else []
     meters = list_meters(ctx.db_path, include_inactive=False) if status.has_participants else []
@@ -45,6 +46,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Create the community, first participant, first meter, or first tariff, per wizard step."""
     step = ctx.form.get("step", "")
 
     if step == "community":

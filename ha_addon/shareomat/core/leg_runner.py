@@ -32,8 +32,11 @@ Notes:
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from shareomat.core.pipeline.leg_billing import compute_billing
 from shareomat.config import LegConfig
@@ -51,6 +54,8 @@ from shareomat.core.report.leg_report import (
     write_match_csv,
 )
 from shareomat.core.collector.leg_storage import is_processed, mark_processed
+from shareomat.database.meter_readings import save_meter_readings
+from shareomat.database.settlement_history import save_settlement_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +96,7 @@ def _filter_readings(
     return [r for r in readings if r.meter_id in known_meter_ids]
 
 
-def run(config: LegConfig, mqtt_client: object = None) -> None:
+def run(config: LegConfig, mqtt_client: object = None, db_path: Path | None = None) -> None:
     """Execute a full settlement cycle: scan → parse → match → bill → report → archive."""
     logger.info(
         "Settlement run started — %s (%s)", config.community.name, config.community.community_id
@@ -138,6 +143,9 @@ def run(config: LegConfig, mqtt_client: object = None) -> None:
         logger.info("No valid readings remain after meter filtering.")
         return
 
+    if db_path is not None:
+        save_meter_readings(db_path, all_readings)
+
     logger.info(
         "Processing %d reading(s) from %d new file(s)",
         len(all_readings), len(newly_processed),
@@ -159,6 +167,15 @@ def run(config: LegConfig, mqtt_client: object = None) -> None:
         match_results, config, period_start, period_end,
         source_files=source_file_names,
     )
+
+    if db_path is not None:
+        run_id = uuid.uuid4().hex
+        source_fingerprint = hashlib.sha256(
+            "|".join(sorted(imp.sha256 for imp in newly_processed)).encode("utf-8")
+        ).hexdigest()
+        save_settlement_snapshot(
+            db_path, run_id, source_fingerprint, period_start, period_end, billing_records,
+        )
 
     meter_labels = {m.meter_id: m.label for m in config.meters}
 

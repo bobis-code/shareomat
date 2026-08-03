@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 from shareomat.web.navigation import url_for
 from shareomat.web.pages import (
+    analysis,
     automation,
     billing,
     community,
@@ -72,6 +73,7 @@ _PAGE_MODULES = {
     "meters": meters,
     "tariffs": tariffs,
     "meter_data": meter_data,
+    "analysis": analysis,
     "billing": billing,
     "invoices": invoices,
     "automation": automation,
@@ -96,10 +98,12 @@ class _Handler(BaseHTTPRequestHandler):
     """
 
     def setup(self) -> None:
+        """Apply the socket read/write timeout on top of the base handler's setup."""
         super().setup()
         self.connection.settimeout(_SOCKET_TIMEOUT_SECONDS)
 
     def log_message(self, fmt, *args) -> None:
+        """Route BaseHTTPRequestHandler's access log through the module logger at debug level."""
         logger.debug("Web: " + fmt, *args)
 
     def _ingress_path(self) -> str:
@@ -171,6 +175,7 @@ class _Handler(BaseHTTPRequestHandler):
     # ── GET ──────────────────────────────────────────────────────────────
 
     def do_GET(self) -> None:
+        """Serve static files/downloads directly, else dispatch to the routed page module."""
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         ingress_path = self._ingress_path()
@@ -228,6 +233,7 @@ class _Handler(BaseHTTPRequestHandler):
         return _flatten_qs(body)
 
     def do_POST(self) -> None:
+        """Handle the run-trigger/upload special cases, else dispatch to the routed page module."""
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         ingress_path = self._ingress_path()
@@ -503,6 +509,7 @@ class WebServer(threading.Thread):
             self._server.shutdown()
 
     def run(self) -> None:
+        """Start the HTTP server and serve until stop() shuts it down."""
         try:
             self._server = ThreadingHTTPServer(("0.0.0.0", self._port), _Handler)
             logger.info("Web server listening on port %d", self._port)

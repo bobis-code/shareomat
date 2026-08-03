@@ -126,16 +126,20 @@ class BillingPreview:
 
     @property
     def total_local_kwh(self) -> Decimal:
+        """Sum of local (LEG-shared) energy received across all line items."""
         return sum((i.local_received_kwh for i in self.line_items), Decimal(0))
 
     @property
     def total_leg_amount_chf(self) -> Decimal:
+        """Sum of the amount Shareomat actually bills (local share only)."""
         return sum((i.local_amount_chf for i in self.line_items), Decimal(0))
 
     @property
     def total_grid_kwh(self) -> Decimal:
+        """Sum of grid-drawn energy across all line items (informational, not billed by Shareomat)."""
         return sum((i.grid_import_kwh for i in self.line_items), Decimal(0))
 
     @property
     def total_grid_amount_chf(self) -> Decimal:
+        """Sum of the grid amount EBL bills directly (informational, not billed by Shareomat)."""
         return sum((i.grid_amount_chf for i in self.line_items), Decimal(0))
