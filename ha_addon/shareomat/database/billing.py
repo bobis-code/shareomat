@@ -49,6 +49,7 @@ from shareomat.core.pipeline.leg_matcher import match_all
 from shareomat.core.pipeline.leg_parser import readings_to_slots
 from shareomat.database.config_builder import build_leg_config
 from shareomat.database.community import ensure_community_row_id
+from shareomat.database.meter_readings import save_meter_readings
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.leg_const import BILLING_STATUS_CANCELLED, BILLING_STATUS_DRAFT, BILLING_STATUS_RELEASED, SLOT_MINUTES
 from shareomat.models.billing_workflow import (
@@ -85,7 +86,7 @@ def _round4(value: float) -> Decimal:
 
 
 def _collect_readings_for_period(
-    runtime: RuntimeConfig, period_start: date, period_end: date,
+    db_path: Path, runtime: RuntimeConfig, period_start: date, period_end: date,
 ) -> tuple[list[IntervalReading], list[BillingSourceFile]]:
     """Parse every inbox + archive file and keep only readings inside the period.
 
@@ -116,6 +117,7 @@ def _collect_readings_for_period(
                 seen_sha256.add(imp.sha256)
                 sources.append(BillingSourceFile(filename=imp.path.name, sha256=imp.sha256, origin=origin))
 
+    save_meter_readings(db_path, readings)
     return readings, sources
 
 
@@ -132,7 +134,7 @@ def compute_billing_preview(
         raise BillingWorkflowError("Enddatum darf nicht vor dem Startdatum liegen.")
 
     config = build_leg_config(db_path, runtime, as_of=period_start)
-    readings, sources = _collect_readings_for_period(runtime, period_start, period_end)
+    readings, sources = _collect_readings_for_period(db_path, runtime, period_start, period_end)
 
     known_meter_ids = {m.meter_id for m in config.meters}
     meter_ids_with_data = sorted({r.meter_id for r in readings})

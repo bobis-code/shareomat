@@ -118,6 +118,7 @@ class SetupStatus:
 
     @property
     def is_complete(self) -> bool:
+        """True once every setup-wizard step has at least one row."""
         return self.has_community and self.has_participants and self.has_meters and self.has_tariff
 
 

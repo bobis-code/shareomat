@@ -54,6 +54,7 @@ def _open_tasks(ctx: RequestContext, snapshot: dict) -> list[str]:
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render the system-status overview with counts, recent runs, and pending tasks."""
     state = get_state()
     snapshot = state.get()
     status = snapshot["status"]

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "components/svg_chart.html" import bar_chart, line_chart %}
+{% block title %}Analyse{% endblock %}
+{% block heading %}Analyse{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Ansicht</h2>
+  <form method="get" action="{{ url_for('analysis') }}">
+    <div class="field">
+      <label for="view">Ansicht</label>
+      <select id="view" name="view">
+        <option value="leg" {{ 'selected' if view == 'leg' }}>LEG-weit</option>
+        <option value="participant" {{ 'selected' if view == 'participant' }}>Pro Teilnehmer</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="participant_id">Teilnehmer (nur bei "Pro Teilnehmer")</label>
+      <select id="participant_id" name="participant_id">
+        <option value="">— wählen —</option>
+        {% for p in participants %}
+        <option value="{{ p.participant_id }}" {{ 'selected' if p.participant_id == participant_id }}>{{ p.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="range">Zeitraum</label>
+      <select id="range" name="range">
+        <option value="7d" {{ 'selected' if range_key == '7d' }}>Letzte 7 Tage</option>
+        <option value="30d" {{ 'selected' if range_key == '30d' }}>Letzte 30 Tage</option>
+        <option value="90d" {{ 'selected' if range_key == '90d' }}>Letzte 90 Tage</option>
+      </select>
+    </div>
+    <div class="field checkbox-row">
+      <input type="checkbox" id="overlay" name="overlay" value="price" {{ 'checked' if show_price }}>
+      <label for="overlay" style="margin:0">Marktpreis-Prognose einblenden</label>
+    </div>
+    <div class="actions-row">
+      <button type="submit">Anzeigen</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ 'LEG-weit — lokal vs. Netzbezug' if view == 'leg' else 'Teilnehmer — lokal vs. Netzbezug' }}</h2>
+  {% if series %}
+  <p class="ts">Ein Balkenpaar je tatsächlichem Abrechnungszeitraum (kann Tage oder Wochen umfassen, je nachdem
+     wann Messdaten eintreffen) — keine künstliche Tages-Aggregation.</p>
+  {{ bar_chart(series, "local_kwh", "grid_kwh", "Lokal (LEG)", "Netzbezug") }}
+  {% else %}
+  <p class="ts">Noch keine Abrechnungszyklen im gewählten Zeitraum
+     {{ 'für diesen Teilnehmer' if view == 'participant' else '' }} vorhanden.</p>
+  {% endif %}
+</div>
+
+{% if show_price %}
+<div class="card">
+  <h2>Marktpreis-Prognose (CHF/kWh)</h2>
+  {% if price_series %}
+  {{ line_chart(price_series, "price_chf_kwh") }}
+  {% else %}
+  <p class="ts">Keine Preisprognose im gewählten Zeitraum verfügbar.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

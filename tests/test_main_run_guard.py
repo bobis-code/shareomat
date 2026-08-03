@@ -28,7 +28,7 @@ def test_run_safe_cycle_rejects_concurrent_runs(monkeypatch, tmp_path) -> None:
     release = threading.Event()
     calls = 0
 
-    def fake_run(config, mqtt_client=None) -> None:
+    def fake_run(config, mqtt_client=None, db_path=None) -> None:
         nonlocal calls
         calls += 1
         entered.set()
@@ -56,7 +56,7 @@ def test_run_safe_cycle_rejects_concurrent_runs(monkeypatch, tmp_path) -> None:
 def test_run_safe_cycle_allows_next_run_after_completion(monkeypatch, tmp_path) -> None:
     calls = 0
 
-    def fake_run(config, mqtt_client=None) -> None:
+    def fake_run(config, mqtt_client=None, db_path=None) -> None:
         nonlocal calls
         calls += 1
 

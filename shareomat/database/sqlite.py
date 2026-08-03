@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 4
+_SCHEMA_VERSION = 6
 
 _SCHEMA_STATEMENTS = [
     """
@@ -259,6 +259,68 @@ _SCHEMA_STATEMENTS = [
         origin TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL
     )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS meter_readings (
+        id INTEGER PRIMARY KEY,
+        meter_id TEXT NOT NULL,
+        slot_start TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        value_kwh REAL NOT NULL,
+        quality TEXT NOT NULL DEFAULT 'valid',
+        source_file TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL,
+        UNIQUE(meter_id, slot_start, direction)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_meter_readings_slot ON meter_readings(slot_start)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS settlement_cycle_records (
+        id INTEGER PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        participant_id TEXT NOT NULL,
+        participant_label TEXT NOT NULL,
+        meter_ids TEXT NOT NULL DEFAULT '',
+        source_fingerprint TEXT NOT NULL,
+        local_received_kwh REAL NOT NULL DEFAULT 0,
+        grid_import_kwh REAL NOT NULL DEFAULT 0,
+        local_supplied_kwh REAL NOT NULL DEFAULT 0,
+        grid_export_kwh REAL NOT NULL DEFAULT 0,
+        local_cost_chf TEXT NOT NULL DEFAULT '0',
+        grid_cost_chf TEXT NOT NULL DEFAULT '0',
+        total_cost_chf TEXT NOT NULL DEFAULT '0',
+        created_at TEXT NOT NULL,
+        UNIQUE(participant_id, period_start, period_end, source_fingerprint)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_settlement_cycle_participant ON settlement_cycle_records(participant_id, period_start)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_settlement_cycle_run ON settlement_cycle_records(run_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS consumption_forecasts (
+        id INTEGER PRIMARY KEY,
+        scope TEXT NOT NULL DEFAULT 'leg',
+        participant_id TEXT NOT NULL DEFAULT '',
+        slot_start TEXT NOT NULL,
+        forecast_kwh REAL,
+        quality TEXT NOT NULL,
+        method TEXT NOT NULL,
+        sample_count INTEGER NOT NULL DEFAULT 0,
+        data_period_start TEXT,
+        data_period_end TEXT,
+        computed_at TEXT NOT NULL,
+        UNIQUE(scope, participant_id, slot_start)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_consumption_forecasts_slot ON consumption_forecasts(slot_start)
     """,
     """
     CREATE TABLE IF NOT EXISTS schema_migrations (

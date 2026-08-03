@@ -1,0 +1,45 @@
+{# Minimal server-rendered SVG charts — no JS chart library, matches the
+   stdlib/Jinja2-only architecture. Deliberately simple: two macros, no
+   legends beyond a static label, no tooltips/interaction. #}
+
+{% macro bar_chart(series, key_a, key_b, label_a, label_b, width=760, height=220) %}
+{% set values = [] %}
+{% for point in series %}{% set _ = values.append(point[key_a] or 0) %}{% set _ = values.append(point[key_b] or 0) %}{% endfor %}
+{% set max_val = (values | max) if values else 0 %}
+{% set max_val = max_val if max_val > 0 else 1 %}
+{% set n = series | length %}
+{% set plot_width = width - 50 %}
+{% set group_width = (plot_width / n) if n > 0 else plot_width %}
+{% set bar_width = [(group_width / 2) - 4, 2] | max %}
+<svg viewBox="0 0 {{ width }} {{ height }}" width="100%" height="{{ height }}" role="img" aria-label="Balkendiagramm lokal/Netz">
+  <line x1="42" y1="{{ height - 28 }}" x2="{{ width - 4 }}" y2="{{ height - 28 }}" stroke="#d1d5db" />
+  {% for point in series %}
+  {% set gx = 42 + loop.index0 * group_width %}
+  {% set val_a = point[key_a] or 0 %}
+  {% set val_b = point[key_b] or 0 %}
+  {% set h_a = (val_a / max_val) * (height - 48) %}
+  {% set h_b = (val_b / max_val) * (height - 48) %}
+  <rect x="{{ gx }}" y="{{ height - 28 - h_a }}" width="{{ bar_width }}" height="{{ h_a }}" fill="#2563eb"><title>{{ label_a }}: {{ '%.2f'|format(val_a) }} kWh</title></rect>
+  <rect x="{{ gx + bar_width + 3 }}" y="{{ height - 28 - h_b }}" width="{{ bar_width }}" height="{{ h_b }}" fill="#9ca3af"><title>{{ label_b }}: {{ '%.2f'|format(val_b) }} kWh</title></rect>
+  {% if n <= 20 %}
+  <text x="{{ gx }}" y="{{ height - 10 }}" font-size="9" fill="#666">{{ point.period_start[:10] }}</text>
+  {% endif %}
+  {% endfor %}
+  <rect x="42" y="2" width="10" height="10" fill="#2563eb" /><text x="56" y="11" font-size="10" fill="#333">{{ label_a }}</text>
+  <rect x="150" y="2" width="10" height="10" fill="#9ca3af" /><text x="164" y="11" font-size="10" fill="#333">{{ label_b }}</text>
+</svg>
+{% endmacro %}
+
+{% macro line_chart(series, value_key, width=760, height=140, stroke="#d97706") %}
+{% set values = [] %}
+{% for point in series %}{% set _ = values.append(point[value_key] or 0) %}{% endfor %}
+{% set max_val = (values | max) if values else 0 %}
+{% set min_val = (values | min) if values else 0 %}
+{% set range_val = (max_val - min_val) %}
+{% set range_val = range_val if range_val > 0 else 1 %}
+{% set n = series | length %}
+{% set step = ((width - 60) / (n - 1)) if n > 1 else 0 %}
+<svg viewBox="0 0 {{ width }} {{ height }}" width="100%" height="{{ height }}" role="img" aria-label="Liniendiagramm Preis">
+  <polyline fill="none" stroke="{{ stroke }}" stroke-width="2" points="{% for point in series %}{{ (40 + loop.index0 * step) | round(1) }},{{ ((height - 20) - (((point[value_key] or 0) - min_val) / range_val) * (height - 40)) | round(1) }} {% endfor %}" />
+</svg>
+{% endmacro %}

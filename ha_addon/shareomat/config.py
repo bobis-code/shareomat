@@ -117,6 +117,7 @@ class MqttConfig:
     retain: bool = True
     tls_enabled: bool = False
     tls_ca_cert: str = ""   # Path to CA certificate file, empty = use system CAs
+    energy_data_ttl_seconds: int = 21600   # staleness cutoff for shareomat/energy_data/* (6h default)
 
 
 @dataclass
@@ -205,6 +206,7 @@ def _parse_mqtt(raw: dict[str, Any]) -> MqttConfig:
         retain=bool(m.get("retain", True)),
         tls_enabled=bool(m.get("tls_enabled", False)),
         tls_ca_cert=str(m.get("tls_ca_cert", "")),
+        energy_data_ttl_seconds=int(m.get("energy_data_ttl_seconds", 21600)),
     )
 
 

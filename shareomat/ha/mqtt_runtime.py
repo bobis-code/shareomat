@@ -50,6 +50,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from shareomat.config import MqttConfig
@@ -61,6 +63,9 @@ from shareomat.leg_const import (
 )
 from shareomat.models.billing import BillingRecord
 from shareomat.ha.mqtt_entities import _topic_safe
+from shareomat.database.consumption_forecasts import list_consumption_forecasts
+from shareomat.database.price_forecasts import list_price_forecasts
+from shareomat.database.settlement_history import aggregate_leg_local_grid, list_settlement_history
 
 if TYPE_CHECKING:
     import paho.mqtt.client as _mqtt_type
@@ -118,6 +123,7 @@ def create_client(config: MqttConfig) -> "_mqtt_type.Client | None":
     status_topic = f"{config.topic_prefix}/status"
 
     def on_connect(client, userdata, flags, rc: int) -> None:
+        """Publish 'starting' status and re-apply tracked subscriptions on (re)connect."""
         if rc == 0:
             logger.info("MQTT connected to %s:%d", config.broker, config.port)
             client.publish(status_topic, MQTT_STATUS_STARTING, qos=config.qos, retain=True)
@@ -129,6 +135,7 @@ def create_client(config: MqttConfig) -> "_mqtt_type.Client | None":
             logger.error("MQTT connection refused: rc=%d", rc)
 
     def on_disconnect(client, userdata, rc: int) -> None:
+        """Log unexpected disconnects (paho reconnects automatically)."""
         if rc != 0:
             logger.warning("MQTT unexpected disconnect (rc=%d) — reconnecting...", rc)
 
@@ -260,6 +267,113 @@ def publish_system_state(
     logger.debug("MQTT system state published (status=%s)", status or "-")
 
 
+def publish_energy_data_snapshot(client: "_mqtt_type.Client", config: MqttConfig, db_path: Path) -> None:
+    """Publish short-horizon prices and recent local/grid history for external MQTT consumers (e.g. Emsomat).
+
+    Deliberately generic topic namespace (not tied to one named consumer) —
+    any subscriber can read these. Only short-horizon data is published;
+    long-term history stays queryable in SQLite only (see
+    shareomat.database.settlement_history / meter_readings).
+    """
+    now = datetime.now(timezone.utc)
+    prefix = config.topic_prefix
+    qos = config.qos
+    envelope_base = {
+        "schema_version": 1,
+        "created_at": now.isoformat(),
+        "valid_until": (now + timedelta(seconds=config.energy_data_ttl_seconds)).isoformat(),
+        "source": "shareomat",
+        "quality": "ok",
+    }
+
+    horizon_start = now.date()
+    horizon_end = horizon_start + timedelta(days=7)
+    forecasts = [
+        f for f in list_price_forecasts(db_path, limit=30)
+        if f.period_end is None or (f.period_start <= horizon_end and f.period_end >= horizon_start)
+    ]
+    price_series = [
+        {
+            "period_start": f.period_start.isoformat(),
+            "period_end": f.period_end.isoformat() if f.period_end else None,
+            "price_chf_kwh": str(f.forecast_price_chf_kwh),
+            "kind": "forecast",
+        }
+        for f in forecasts
+    ]
+    prices_payload = {**envelope_base, "data": {"currency": "CHF", "series": price_series}}
+    client.publish(f"{prefix}/energy_data/prices", json.dumps(prices_payload), qos=qos, retain=True)
+
+    history_start = now - timedelta(days=7)
+    leg_totals = aggregate_leg_local_grid(db_path, history_start, now)
+    leg_series = [
+        {"period_start": t["period_start"], "period_end": t["period_end"],
+         "local_kwh": t["local_kwh"], "grid_kwh": t["grid_kwh"], "kind": "recent_actual"}
+        for t in leg_totals
+    ]
+    participants_payload: dict[str, list[dict]] = {}
+    for rec in list_settlement_history(db_path, start=history_start, end=now):
+        participants_payload.setdefault(rec.participant_id, []).append({
+            "period_start": rec.period_start.isoformat(),
+            "period_end": rec.period_end.isoformat(),
+            "local_kwh": rec.local_received_kwh,
+            "grid_kwh": rec.grid_import_kwh,
+            "kind": "recent_actual",
+        })
+    local_grid_payload = {
+        **envelope_base,
+        "data": {"leg": {"series": leg_series}, "participants": participants_payload},
+    }
+    client.publish(f"{prefix}/energy_data/local_grid", json.dumps(local_grid_payload), qos=qos, retain=True)
+
+    logger.info(
+        "MQTT energy_data snapshot published (prices=%d, leg_periods=%d, participants=%d)",
+        len(price_series), len(leg_series), len(participants_payload),
+    )
+
+
+def publish_demand_forecast(client: "_mqtt_type.Client", config: MqttConfig, db_path: Path) -> None:
+    """Publish the last-computed LEG demand forecast — kept on its own topic, never mixed with recent_actual data."""
+    now = datetime.now(timezone.utc)
+    prefix = config.topic_prefix
+    qos = config.qos
+
+    points = list_consumption_forecasts(db_path, scope="leg", start=now)
+    series = [
+        {
+            "slot_start": p.slot_start.isoformat(),
+            "forecast_kwh": p.forecast_kwh,
+            "quality": p.quality,
+            "sample_count": p.sample_count,
+            "kind": "forecast",
+        }
+        for p in points
+    ]
+
+    near_term = [p for p in points if p.slot_start < now + timedelta(days=2)]
+    ok_count = sum(1 for p in near_term if p.quality == "ok")
+    overall_quality = "ok" if near_term and ok_count / len(near_term) >= 0.5 else "insufficient_data"
+
+    method = points[0].method if points else None
+    data_period_start = points[0].data_period_start.isoformat() if points and points[0].data_period_start else None
+    data_period_end = points[0].data_period_end.isoformat() if points and points[0].data_period_end else None
+
+    payload = {
+        "schema_version": 1,
+        "created_at": now.isoformat(),
+        "valid_until": (now + timedelta(seconds=config.energy_data_ttl_seconds)).isoformat(),
+        "source": "shareomat",
+        "quality": overall_quality,
+        "data": {
+            "scope": "leg", "method": method,
+            "data_period_start": data_period_start, "data_period_end": data_period_end,
+            "series": series,
+        },
+    }
+    client.publish(f"{prefix}/energy_data/demand_forecast", json.dumps(payload), qos=qos, retain=True)
+    logger.info("MQTT demand forecast published (%d slot(s), quality=%s)", len(series), overall_quality)
+
+
 def setup_command_subscription(
     client: "_mqtt_type.Client",
     on_run: Callable[[], None],
@@ -270,6 +384,7 @@ def setup_command_subscription(
     auto_scan_topic = f"{config.topic_prefix}/auto_scan/set"
 
     def on_message(client, userdata, message) -> None:
+        """Dispatch an incoming command topic to the settlement trigger or auto-scan switch."""
         topic = message.topic
         if message.retain:
             logger.debug("Discarding retained message on %s", topic)

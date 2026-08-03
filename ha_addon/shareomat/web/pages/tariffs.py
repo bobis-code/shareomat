@@ -51,6 +51,7 @@ def _tariff_from_form(ctx: RequestContext) -> Tariff:
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Route to the tariff list, new-tariff form, or edit form."""
     today = date.today()
 
     if not ctx.segments:
@@ -80,6 +81,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Create, update, or toggle a tariff, depending on the sub-path."""
     if ctx.segments == ["new"]:
         create_tariff(ctx.db_path, _tariff_from_form(ctx))
         get_state().set_flash("Tarif angelegt.", ok=True)

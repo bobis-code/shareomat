@@ -58,6 +58,7 @@ def _meter_from_form(ctx: RequestContext, *, meter_id: str) -> Meter:
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Route to the meter list, new-meter form, or edit form."""
     if not ctx.segments:
         meters = list_meters(ctx.db_path)
         return render_page("meters/list.html", ctx, "meters", meters=meters)
@@ -92,6 +93,7 @@ def handle_get(ctx: RequestContext) -> str:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Create, update, or toggle a meter, depending on the sub-path."""
     if ctx.segments == ["new"]:
         meter_id = form_required(ctx, "meter_id", label="Messpunkt-ID")
         try:

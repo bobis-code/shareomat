@@ -17,6 +17,7 @@ from shareomat.web.rendering import RequestContext, render_page
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render the "coming soon" placeholder — invoicing is not implemented yet."""
     return render_page(
         "placeholders/coming_soon.html", ctx, "invoices",
         title="Rechnungen",

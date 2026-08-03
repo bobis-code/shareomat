@@ -19,6 +19,7 @@ from shareomat.web.reports import list_billing_reports, render_report_section
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render the report list, plus the selected report's content if any."""
     selected = ctx.query.get("report", "")
     report_list = list_billing_reports()
 

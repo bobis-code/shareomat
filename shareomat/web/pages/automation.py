@@ -25,11 +25,13 @@ from shareomat.web.state import get_state
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render the automation settings form."""
     settings = get_operation_settings(ctx.db_path)
     return render_page("automation/edit.html", ctx, "automation", settings=settings)
 
 
 def handle_post(ctx: RequestContext) -> str | None:
+    """Validate and save automation settings, flashing a restart-required notice."""
     current = get_operation_settings(ctx.db_path)
 
     scan_interval_raw = (ctx.form.get("scan_interval_seconds") or "").strip()

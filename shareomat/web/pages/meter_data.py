@@ -19,6 +19,7 @@ from shareomat.web.rendering import RequestContext, render_page
 
 
 def handle_get(ctx: RequestContext) -> str:
+    """Render the inbox file list and upload/run-now forms."""
     runtime = ctx.runtime
     inbox_files: list[str] = []
     if runtime is not None and runtime.paths.inbox.exists():
