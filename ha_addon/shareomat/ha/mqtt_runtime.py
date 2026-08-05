@@ -60,9 +60,10 @@ from shareomat.leg_const import (
     MQTT_STATUS_OFFLINE,
     MQTT_STATUS_OK,
     MQTT_STATUS_STARTING,
+    SLOT_MINUTES,
 )
 from shareomat.models.billing import BillingRecord
-from shareomat.ha.mqtt_entities import _topic_safe
+from shareomat.ha.entities import _topic_safe
 from shareomat.database.consumption_forecasts import list_consumption_forecasts
 from shareomat.database.price_forecasts import list_price_forecasts
 from shareomat.database.settlement_history import aggregate_leg_local_grid, list_settlement_history
@@ -374,6 +375,39 @@ def publish_demand_forecast(client: "_mqtt_type.Client", config: MqttConfig, db_
     logger.info("MQTT demand forecast published (%d slot(s), quality=%s)", len(series), overall_quality)
 
 
+def publish_manual_demand_test(client: "_mqtt_type.Client", config: MqttConfig, value_kwh: float) -> None:
+    """Publish a single manually-entered LEG demand value onto the real demand_forecast topic.
+
+    Lets a developer exercise Emsomat's actual ingestion path (same topic,
+    same envelope/series shape) from the Home Assistant GUI, without
+    waiting for real accumulated meter data. Overwrites the retained
+    demand_forecast payload until the next real settlement cycle republishes
+    the computed forecast — intentional for a test aid, not a bug.
+    """
+    now = datetime.now(timezone.utc)
+    slot_start = now - timedelta(
+        minutes=now.minute % SLOT_MINUTES, seconds=now.second, microseconds=now.microsecond,
+    )
+    prefix = config.topic_prefix
+    payload = {
+        "schema_version": 1,
+        "created_at": now.isoformat(),
+        "valid_until": (now + timedelta(seconds=config.energy_data_ttl_seconds)).isoformat(),
+        "source": "shareomat",
+        "quality": "ok",
+        "data": {
+            "scope": "leg", "method": "manual_test_override",
+            "data_period_start": None, "data_period_end": None,
+            "series": [{
+                "slot_start": slot_start.isoformat(), "forecast_kwh": value_kwh,
+                "quality": "ok", "sample_count": 0, "kind": "forecast",
+            }],
+        },
+    }
+    client.publish(f"{prefix}/energy_data/demand_forecast", json.dumps(payload), qos=config.qos, retain=True)
+    logger.info("MQTT manual demand test value published: %.3f kWh", value_kwh)
+
+
 def setup_command_subscription(
     client: "_mqtt_type.Client",
     on_run: Callable[[], None],
@@ -382,9 +416,10 @@ def setup_command_subscription(
     """Register the run_once subscription on the client (non-blocking)."""
     cmd_topic = f"{config.topic_prefix}/cmd/run_once"
     auto_scan_topic = f"{config.topic_prefix}/auto_scan/set"
+    demand_test_topic = f"{config.topic_prefix}/energy_data/demand_forecast/test_set"
 
     def on_message(client, userdata, message) -> None:
-        """Dispatch an incoming command topic to the settlement trigger or auto-scan switch."""
+        """Dispatch an incoming command topic to the settlement trigger, auto-scan switch, or demand test value."""
         topic = message.topic
         if message.retain:
             logger.debug("Discarding retained message on %s", topic)
@@ -413,13 +448,21 @@ def setup_command_subscription(
                     )
             else:
                 logger.debug("auto_scan/set received but no watcher registered")
+        elif topic == demand_test_topic:
+            payload = message.payload.decode("utf-8", errors="ignore").strip()
+            try:
+                value_kwh = float(payload)
+            except ValueError:
+                logger.warning("demand_forecast/test_set received non-numeric payload: %r", payload)
+                return
+            publish_manual_demand_test(client, config, value_kwh)
 
     client.on_message = on_message
 
-    # Register both topics in userdata so on_connect re-subscribes after reconnect
+    # Register all topics in userdata so on_connect re-subscribes after reconnect
     userdata = client.user_data_get() or {}
     subs = userdata.get("subscriptions", [])
-    for topic in (cmd_topic, auto_scan_topic):
+    for topic in (cmd_topic, auto_scan_topic, demand_test_topic):
         if (topic, config.qos) not in subs:
             subs.append((topic, config.qos))
     userdata["subscriptions"] = subs
@@ -427,6 +470,7 @@ def setup_command_subscription(
 
     client.subscribe(cmd_topic, qos=config.qos)
     client.subscribe(auto_scan_topic, qos=config.qos)
+    client.subscribe(demand_test_topic, qos=config.qos)
     logger.info("Command subscription active: %s", cmd_topic)
 
 

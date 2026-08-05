@@ -16,7 +16,7 @@ Notes:
 
     Call order:
         1. publish_engine_discovery() — at startup, before the first billing run.
-           Registers the engine device (system sensors, button, optional switch).
+           Registers the engine device (system sensors, button, number, optional switch).
         2. publish_billing_discovery() — after each successful settlement cycle.
            Registers billing sensors per participant under the community device.
 
@@ -27,6 +27,10 @@ Notes:
 
     System state topics are published by mqtt_runtime.publish_system_state(),
     not here. Discovery only tells HA where to look.
+
+    Entity definitions themselves live in shareomat/ha/entities/ (one file
+    per HA domain) — this module only turns those definitions into
+    Discovery JSON payloads.
 """
 
 from __future__ import annotations
@@ -38,13 +42,11 @@ from typing import TYPE_CHECKING
 from shareomat.config import MqttConfig
 from shareomat.leg_const import MQTT_STATUS_OFFLINE, MQTT_STATUS_OK
 from shareomat.models.billing import BillingRecord
-from shareomat.ha.mqtt_entities import (
-    _HA_BILLING_SENSORS,
-    _HA_BUTTONS,
-    _HA_SWITCHES,
-    _HA_SYSTEM_ENTITIES,
-    _topic_safe,
-)
+from shareomat.ha.entities import _topic_safe
+from shareomat.ha.entities.buttons import BUTTONS
+from shareomat.ha.entities.numbers import NUMBERS
+from shareomat.ha.entities.sensors import BILLING_SENSORS, SYSTEM_SENSORS
+from shareomat.ha.entities.switches import SWITCHES
 
 if TYPE_CHECKING:
     import paho.mqtt.client as _mqtt_type
@@ -69,71 +71,93 @@ def publish_engine_discovery(
     *,
     auto_scan_enabled: bool = False,
 ) -> None:
-    """Publish HA Discovery for the engine device: system sensors, button, optional switch."""
+    """Publish HA Discovery for the engine device: system sensors, button, number, optional switch."""
     prefix = config.topic_prefix
     discovery_prefix = config.discovery_prefix
     qos = config.qos
     device = _engine_device()
 
     # System sensors (status, last_run, inbox_count, report_count, last_error)
-    for uid_suffix, name, topic_suffix, device_class, state_class, icon in _HA_SYSTEM_ENTITIES:
-        unique_id = f"shareomat_engine_{uid_suffix}"
+    for sensor in SYSTEM_SENSORS:
+        unique_id = f"shareomat_engine_{sensor.uid_suffix}"
         payload: dict = {
-            "name": name,
+            "name": sensor.name,
             "unique_id": unique_id,
-            "state_topic": f"{prefix}/{topic_suffix}",
+            "state_topic": f"{prefix}/{sensor.state_topic_suffix}",
             "device": device,
         }
-        if device_class:
-            payload["device_class"] = device_class
-        if state_class:
-            payload["state_class"] = state_class
-        if icon:
-            payload["icon"] = icon
+        if sensor.device_class:
+            payload["device_class"] = sensor.device_class
+        if sensor.state_class:
+            payload["state_class"] = sensor.state_class
+        if sensor.icon:
+            payload["icon"] = sensor.icon
         client.publish(
             f"{discovery_prefix}/sensor/{unique_id}/config",
             json.dumps(payload), qos=qos, retain=True,
         )
 
     # Buttons (Run Now)
-    for uid_suffix, name, cmd_suffix, payload_press, icon in _HA_BUTTONS:
-        unique_id = f"shareomat_engine_{uid_suffix}"
+    for button in BUTTONS:
+        unique_id = f"shareomat_engine_{button.uid_suffix}"
         payload = {
-            "name": name,
+            "name": button.name,
             "unique_id": unique_id,
-            "command_topic": f"{prefix}/{cmd_suffix}",
-            "payload_press": payload_press,
+            "command_topic": f"{prefix}/{button.command_topic_suffix}",
+            "payload_press": button.payload_press,
             "device": device,
         }
-        if icon:
-            payload["icon"] = icon
+        if button.icon:
+            payload["icon"] = button.icon
         client.publish(
             f"{discovery_prefix}/button/{unique_id}/config",
             json.dumps(payload), qos=qos, retain=True,
         )
 
+    # Numbers (e.g. manual demand-forecast test value)
+    for number in NUMBERS:
+        unique_id = f"shareomat_engine_{number.uid_suffix}"
+        payload = {
+            "name": number.name,
+            "unique_id": unique_id,
+            "command_topic": f"{prefix}/{number.command_topic_suffix}",
+            "unit_of_measurement": number.unit,
+            "min": number.min_value,
+            "max": number.max_value,
+            "step": number.step,
+            "mode": "box",
+            "optimistic": True,
+            "device": device,
+        }
+        if number.icon:
+            payload["icon"] = number.icon
+        client.publish(
+            f"{discovery_prefix}/number/{unique_id}/config",
+            json.dumps(payload), qos=qos, retain=True,
+        )
+
     # Switch: only published when auto-scan is configured
     if auto_scan_enabled:
-        for uid_suffix, name, state_suffix, cmd_suffix, pay_on, pay_off, icon in _HA_SWITCHES:
-            unique_id = f"shareomat_engine_{uid_suffix}"
+        for switch in SWITCHES:
+            unique_id = f"shareomat_engine_{switch.uid_suffix}"
             payload = {
-                "name": name,
+                "name": switch.name,
                 "unique_id": unique_id,
-                "state_topic": f"{prefix}/{state_suffix}",
-                "command_topic": f"{prefix}/{cmd_suffix}",
-                "payload_on": pay_on,
-                "payload_off": pay_off,
+                "state_topic": f"{prefix}/{switch.state_topic_suffix}",
+                "command_topic": f"{prefix}/{switch.command_topic_suffix}",
+                "payload_on": switch.payload_on,
+                "payload_off": switch.payload_off,
                 "device": device,
             }
-            if icon:
-                payload["icon"] = icon
+            if switch.icon:
+                payload["icon"] = switch.icon
             client.publish(
                 f"{discovery_prefix}/switch/{unique_id}/config",
                 json.dumps(payload), qos=qos, retain=True,
             )
         logger.info("HA Discovery: auto-scan switch published")
 
-    logger.info("HA Discovery published: engine device (sensors, button%s)",
+    logger.info("HA Discovery published: engine device (sensors, button, number%s)",
                 ", switch" if auto_scan_enabled else "")
 
 
@@ -169,19 +193,19 @@ def publish_billing_discovery(
         pid_safe = _topic_safe(rec.participant_id)
         base_state = f"{prefix}/billing/{pid_safe}"
 
-        for field, friendly, unit, device_class, state_class in _HA_BILLING_SENSORS:
-            unique_id = f"shareomat_{pid_safe}_{field}"
+        for sensor in BILLING_SENSORS:
+            unique_id = f"shareomat_{pid_safe}_{sensor.field}"
             payload: dict = {
-                "name": f"{rec.label} {friendly}",
+                "name": f"{rec.label} {sensor.friendly}",
                 "unique_id": unique_id,
-                "state_topic": f"{base_state}/{field}",
-                "unit_of_measurement": unit,
-                "state_class": state_class,
+                "state_topic": f"{base_state}/{sensor.field}",
+                "unit_of_measurement": sensor.unit,
+                "state_class": sensor.state_class,
                 "availability": availability,
                 "device": device,
             }
-            if device_class:
-                payload["device_class"] = device_class
+            if sensor.device_class:
+                payload["device_class"] = sensor.device_class
 
             client.publish(
                 f"{discovery_prefix}/sensor/{unique_id}/config",
