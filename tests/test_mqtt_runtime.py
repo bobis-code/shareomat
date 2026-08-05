@@ -15,7 +15,12 @@ from shareomat.database.consumption_forecasts import save_consumption_forecast
 from shareomat.database.price_forecasts import save_price_forecast
 from shareomat.database.settlement_history import save_settlement_snapshot
 from shareomat.database.sqlite import init_db
-from shareomat.ha.mqtt_runtime import publish_demand_forecast, publish_energy_data_snapshot
+from shareomat.ha.mqtt_runtime import (
+    publish_demand_forecast,
+    publish_energy_data_snapshot,
+    publish_manual_demand_test,
+    setup_command_subscription,
+)
 from shareomat.models.billing import BillingRecord
 from shareomat.models.external_data import PriceForecast
 from shareomat.models.forecast import ConsumptionForecastPoint
@@ -26,9 +31,30 @@ class FakeClient:
 
     def __init__(self) -> None:
         self.published: dict[str, str] = {}
+        self._userdata: dict = {}
+        self.subscribed: list[tuple[str, int]] = []
+        self.on_message = None
 
     def publish(self, topic, payload, qos=0, retain=False) -> None:
         self.published[topic] = payload
+
+    def user_data_get(self):
+        return self._userdata
+
+    def user_data_set(self, data) -> None:
+        self._userdata = data
+
+    def subscribe(self, topic, qos=0) -> None:
+        self.subscribed.append((topic, qos))
+
+
+class FakeMessage:
+    """Minimal stand-in for a paho MQTTMessage, for feeding on_message directly."""
+
+    def __init__(self, topic: str, payload: str, retain: bool = False) -> None:
+        self.topic = topic
+        self.payload = payload.encode("utf-8")
+        self.retain = retain
 
 
 @pytest.fixture
@@ -179,3 +205,58 @@ def test_demand_forecast_overall_quality_insufficient_when_no_data(db_path) -> N
     payload = json.loads(client.published["shareomat/energy_data/demand_forecast"])
     assert payload["quality"] == "insufficient_data"
     assert payload["data"]["series"] == []
+
+
+# ── publish_manual_demand_test / demand_forecast test_set command ──────────
+
+
+def test_manual_demand_test_publishes_onto_the_real_demand_forecast_topic() -> None:
+    client = FakeClient()
+    publish_manual_demand_test(client, MqttConfig(topic_prefix="shareomat"), 3.5)
+
+    payload = json.loads(client.published["shareomat/energy_data/demand_forecast"])
+    assert payload["data"]["method"] == "manual_test_override"
+    series = payload["data"]["series"]
+    assert len(series) == 1
+    assert series[0]["forecast_kwh"] == 3.5
+    assert series[0]["quality"] == "ok"
+    assert series[0]["kind"] == "forecast"
+
+
+def test_command_subscription_subscribes_to_demand_test_topic() -> None:
+    client = FakeClient()
+    setup_command_subscription(client, on_run=lambda: None, config=MqttConfig(topic_prefix="shareomat"))
+
+    assert ("shareomat/energy_data/demand_forecast/test_set", 1) in client.subscribed
+
+
+def test_demand_test_command_publishes_manual_value() -> None:
+    client = FakeClient()
+    setup_command_subscription(client, on_run=lambda: None, config=MqttConfig(topic_prefix="shareomat"))
+
+    client.on_message(client, None, FakeMessage("shareomat/energy_data/demand_forecast/test_set", "7.25"))
+
+    payload = json.loads(client.published["shareomat/energy_data/demand_forecast"])
+    assert payload["data"]["series"][0]["forecast_kwh"] == 7.25
+    assert payload["data"]["method"] == "manual_test_override"
+
+
+def test_demand_test_command_ignores_retained_replay() -> None:
+    client = FakeClient()
+    setup_command_subscription(client, on_run=lambda: None, config=MqttConfig(topic_prefix="shareomat"))
+
+    client.on_message(
+        client, None,
+        FakeMessage("shareomat/energy_data/demand_forecast/test_set", "7.25", retain=True),
+    )
+
+    assert "shareomat/energy_data/demand_forecast" not in client.published
+
+
+def test_demand_test_command_ignores_non_numeric_payload() -> None:
+    client = FakeClient()
+    setup_command_subscription(client, on_run=lambda: None, config=MqttConfig(topic_prefix="shareomat"))
+
+    client.on_message(client, None, FakeMessage("shareomat/energy_data/demand_forecast/test_set", "not-a-number"))
+
+    assert "shareomat/energy_data/demand_forecast" not in client.published
