@@ -10,10 +10,13 @@ import pytest
 
 import shareomat.database.contract_versions as contract_versions_module
 from shareomat.database.community import save_community
-from shareomat.database.contract_versions import get_contract_version, list_contract_versions
+from shareomat.database.contract_versions import get_contract_version, get_contract_version_for_date, list_contract_versions
+from shareomat.database.participant_contract import list_assignments_for_version
+from shareomat.database.participants import create_participant, get_participant
 from shareomat.database.sqlite import init_db
 from shareomat.database.tariffs import create_tariff
 from shareomat.models.community import Community
+from shareomat.models.participant import Participant
 from shareomat.models.tariff import Tariff
 from shareomat.web.pages import contract
 from shareomat.web.rendering import FormError, RequestContext
@@ -250,3 +253,117 @@ def test_edit_prefills_form_for_existing_draft(db_path) -> None:
 def test_unknown_post_action_raises(db_path) -> None:
     with pytest.raises(FormError):
         contract.handle_post(_post(["nonsense"]))
+
+
+# ── Teilnehmer / Beitrittserklärung ─────────────────────────────────────────
+
+
+def _publish_v1(db_path, monkeypatch, *, valid_from: str = "2020-06-01") -> None:
+    save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
+    create_tariff(db_path, Tariff(
+        local_rate_chf_kwh=Decimal("0.05"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
+    ))
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2020, 1, 1)))
+    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, valid_from=valid_from)))
+    draft = list_contract_versions(db_path)[0]
+    contract.handle_post(_post(["publish"], {"version_id": str(draft.id)}))
+    monkeypatch.setattr(contract_versions_module, "date", date)
+
+
+def test_participants_add_requires_active_contract(db_path) -> None:
+    save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    with pytest.raises(FormError):
+        contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-01-01"}))
+
+
+def test_participants_add_rejects_non_month_start(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    with pytest.raises(FormError):
+        contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-01-15"}))
+
+
+def test_participants_add_creates_pending_assignment_and_sets_participant_valid_from(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignments = list_assignments_for_version(db_path, current_version.id)
+    assert len(assignments) == 1
+    assert assignments[0].accepted_at is None
+    assert assignments[0].joined_at == date(2027, 3, 1)
+    assert get_participant(db_path, "p1").valid_from == date(2027, 3, 1)
+
+
+def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignment = list_assignments_for_version(db_path, current_version.id)[0]
+
+    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {"accepted_at": "2027-02-01"}))
+
+    updated = list_assignments_for_version(db_path, current_version.id)[0]
+    assert updated.accepted_at == date(2027, 2, 1)
+    assert updated.notified_at == date(2027, 2, 1)
+
+
+def test_participants_notify_only_sets_notified(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignment = list_assignments_for_version(db_path, current_version.id)[0]
+    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {"accepted_at": "2027-02-01"}))
+
+    contract.handle_post(_post(["participants", str(assignment.id), "notify"], {"notified_at": "2028-01-01"}))
+
+    updated = list_assignments_for_version(db_path, current_version.id)[0]
+    assert updated.accepted_at == date(2027, 2, 1)  # untouched
+    assert updated.notified_at == date(2028, 1, 1)
+
+
+def test_participants_depart_rejects_non_month_end(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignment = list_assignments_for_version(db_path, current_version.id)[0]
+
+    with pytest.raises(FormError):
+        contract.handle_post(_post(["participants", str(assignment.id), "depart"], {"end_date": "2027-05-15"}))
+
+
+def test_participants_depart_sets_valid_until_and_left_at(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignment = list_assignments_for_version(db_path, current_version.id)[0]
+
+    contract.handle_post(_post(["participants", str(assignment.id), "depart"], {"end_date": "2027-05-31"}))
+
+    assert get_participant(db_path, "p1").valid_until == date(2027, 5, 31)
+    updated = list_assignments_for_version(db_path, current_version.id)[0]
+    assert updated.left_at == date(2027, 5, 31)
+
+
+def test_declaration_view_shows_participant_and_version(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignment = list_assignments_for_version(db_path, current_version.id)[0]
+
+    html = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration"]))
+    assert "Haus 1" in html
+    assert f"Version {current_version.version}" in html
+
+
+def test_declaration_view_unknown_assignment_shows_placeholder(db_path) -> None:
+    html = contract.handle_get(_ctx(segments=["participants", "99999", "declaration"]))
+    assert "nicht gefunden" in html

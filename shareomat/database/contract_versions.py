@@ -393,6 +393,24 @@ def publish_version(db_path: Path, version_id: int) -> ContractVersion:
             )
             new_tariff_id = cursor.lastrowid
 
+            if prior is not None:
+                # Existing, not-yet-departed participants carry over to the new version
+                # automatically — LEG-Mustervertrag §8 only requires notifying them of an
+                # amendment, not a fresh Beitrittserklärung. accepted_at (their original
+                # join confirmation) is preserved as-is; notified_at always starts NULL
+                # for the new version and must be recorded separately (see mark_notified()).
+                conn.execute(
+                    """
+                    INSERT INTO participant_contract
+                        (participant_id, contract_version_id, tariff_id, joined_at, left_at,
+                         accepted_at, notified_at, created_at)
+                    SELECT participant_id, ?, ?, joined_at, NULL, accepted_at, NULL, ?
+                    FROM participant_contract
+                    WHERE contract_version_id = ? AND left_at IS NULL
+                    """,
+                    (version_id, new_tariff_id, now, prior.id),
+                )
+
             conn.execute(
                 "UPDATE contract_versions SET status = ?, tariff_id = ?, supersedes_version_id = ?, "
                 "updated_at = ? WHERE id = ?",
@@ -408,8 +426,10 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
 
     Deletes the tariff this version created (safe — it never took effect,
     so it was never used for a billing run), restores the previously
-    superseded version's valid_until/tariff to open-ended, and turns this
-    version back into a plain, editable draft.
+    superseded version's valid_until/tariff to open-ended, deletes any
+    participant_contract rows carried forward to this version (same
+    reasoning — never in force, never relied on), and turns this version
+    back into a plain, editable draft.
     """
     with connect(db_path) as conn:
         with conn:
@@ -437,6 +457,7 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
                 "updated_at = ? WHERE id = ?",
                 (CONTRACT_STATUS_DRAFT, now, version_id),
             )
+            conn.execute("DELETE FROM participant_contract WHERE contract_version_id = ?", (version_id,))
             if tariff_id_to_delete is not None:
                 conn.execute("DELETE FROM tariffs WHERE id = ?", (tariff_id_to_delete,))
             if supersedes_id is not None:

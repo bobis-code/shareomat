@@ -29,7 +29,12 @@ from shareomat.database.contract_versions import (
 from shareomat.database.participant_contract import (
     ParticipantContractError,
     assign_contract,
+    get_assignment,
+    has_any_assignment,
     list_assignments_for_version,
+    mark_accepted,
+    mark_notified,
+    record_departure,
 )
 from shareomat.database.participants import create_participant
 from shareomat.database.sqlite import init_db
@@ -458,3 +463,125 @@ def test_reassigning_same_participant_and_version_updates_not_duplicates(db_path
     assignments = list_assignments_for_version(db_path, v.id)
     assert len(assignments) == 1
     assert assignments[0].accepted_at == date(2024, 1, 1)
+
+
+def test_mark_accepted_sets_accepted_and_notified_together(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    v = save_draft_version(db_path, _draft())
+    assignment = assign_contract(db_path, "p1", v.id)
+
+    updated = mark_accepted(db_path, assignment.id, date(2027, 1, 1))
+    assert updated.accepted_at == date(2027, 1, 1)
+    assert updated.notified_at == date(2027, 1, 1)
+
+
+def test_mark_accepted_unknown_assignment_raises(db_path):
+    with pytest.raises(ParticipantContractError):
+        mark_accepted(db_path, 99999, date(2027, 1, 1))
+
+
+def test_mark_notified_leaves_accepted_at_untouched(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    v = save_draft_version(db_path, _draft())
+    assignment = assign_contract(db_path, "p1", v.id)
+    mark_accepted(db_path, assignment.id, date(2026, 1, 1))
+
+    updated = mark_notified(db_path, assignment.id, date(2027, 6, 1))
+    assert updated.accepted_at == date(2026, 1, 1)  # original join confirmation, never re-set
+    assert updated.notified_at == date(2027, 6, 1)
+
+
+def test_mark_notified_unknown_assignment_raises(db_path):
+    with pytest.raises(ParticipantContractError):
+        mark_notified(db_path, 99999, date(2027, 1, 1))
+
+
+def test_record_departure_sets_left_at(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    v = save_draft_version(db_path, _draft())
+    assignment = assign_contract(db_path, "p1", v.id)
+
+    updated = record_departure(db_path, assignment.id, date(2027, 5, 31))
+    assert updated.left_at == date(2027, 5, 31)
+
+
+def test_record_departure_unknown_assignment_raises(db_path):
+    with pytest.raises(ParticipantContractError):
+        record_departure(db_path, 99999, date(2027, 1, 1))
+
+
+def test_has_any_assignment_reflects_state(db_path):
+    assert has_any_assignment(db_path) is False
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    v = save_draft_version(db_path, _draft())
+    assign_contract(db_path, "p1", v.id)
+    assert has_any_assignment(db_path) is True
+
+
+def test_get_assignment_returns_none_for_unknown_id(db_path):
+    assert get_assignment(db_path, 99999) is None
+
+
+# ── publish_version() participant carry-forward ─────────────────────────────
+
+
+def test_publish_carries_forward_active_participants_resetting_notified_at(db_path, monkeypatch):
+    from shareomat.database.tariffs import create_tariff
+    from shareomat.models.tariff import Tariff
+    create_tariff(db_path, Tariff(
+        local_rate_chf_kwh=Decimal("0.05"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
+    ))
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p2", "Haus 2", "consumer"))
+
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2025, 1, 1)))
+    v1 = save_draft_version(db_path, _draft(valid_from=date(2026, 1, 1)))
+    v1_published = publish_version(db_path, v1.id)
+
+    a1 = assign_contract(db_path, "p1", v1_published.id, v1_published.tariff_id, joined_at=date(2026, 1, 1))
+    mark_accepted(db_path, a1.id, date(2026, 1, 1))
+    a2 = assign_contract(db_path, "p2", v1_published.id, v1_published.tariff_id, joined_at=date(2026, 1, 1))
+    mark_accepted(db_path, a2.id, date(2026, 1, 1))
+    record_departure(db_path, a2.id, date(2026, 12, 31))  # p2 leaves before v2 takes over
+
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 9, 1)))
+    v2 = save_draft_version(db_path, _draft(valid_from=date(2027, 1, 1)))
+    v2_published = publish_version(db_path, v2.id)
+
+    v2_assignments = list_assignments_for_version(db_path, v2_published.id)
+    assert {a.participant_id for a in v2_assignments} == {"p1"}  # p2 (departed) is NOT carried forward
+
+    carried = v2_assignments[0]
+    assert carried.accepted_at == date(2026, 1, 1)  # original join confirmation preserved
+    assert carried.notified_at is None              # must be re-recorded for the new version
+    assert carried.joined_at == date(2026, 1, 1)     # original join date preserved, not republish date
+
+
+def test_withdraw_deletes_carried_forward_participant_assignments(db_path, monkeypatch):
+    from shareomat.database.tariffs import create_tariff
+    from shareomat.models.tariff import Tariff
+    create_tariff(db_path, Tariff(
+        local_rate_chf_kwh=Decimal("0.05"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
+    ))
+    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2025, 1, 1)))
+    v1 = save_draft_version(db_path, _draft(valid_from=date(2026, 1, 1)))
+    v1_published = publish_version(db_path, v1.id)
+    a1 = assign_contract(db_path, "p1", v1_published.id, v1_published.tariff_id, joined_at=date(2026, 1, 1))
+    mark_accepted(db_path, a1.id, date(2026, 1, 1))
+
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 9, 1)))
+    v2 = save_draft_version(db_path, _draft(valid_from=date(2027, 1, 1)))
+    v2_published = publish_version(db_path, v2.id)
+    assert len(list_assignments_for_version(db_path, v2_published.id)) == 1
+
+    withdraw_version(db_path, v2_published.id)
+
+    assert list_assignments_for_version(db_path, v2_published.id) == []
+    # v1's own assignment is untouched
+    v1_assignments = list_assignments_for_version(db_path, v1_published.id)
+    assert len(v1_assignments) == 1
+    assert v1_assignments[0].accepted_at == date(2026, 1, 1)
