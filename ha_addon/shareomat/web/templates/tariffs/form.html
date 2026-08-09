@@ -2,6 +2,12 @@
 {% block title %}Tarife{% endblock %}
 {% block heading %}{{ 'Tarif bearbeiten' if tariff else 'Tarif anlegen' }}{% endblock %}
 {% block content %}
+<div class="notice-err">
+  Normalerweise entstehen Tarife automatisch beim Veröffentlichen einer Vertragsversion auf der
+  <a href="{{ url_for('contract') }}">Vertrags-Seite</a>. Diese Seite hier ist nur für die
+  Erstinbetriebnahme (bevor ein erster Vertrag existiert) oder echte Notfälle gedacht — ein hier
+  angelegter Tarif ist nicht an die vertraglichen Ankündigungsfristen gebunden.
+</div>
 <div class="card">
   <form class="form-card" method="post"
         action="{{ url_for('tariffs', suffix='/' + (tariff.id|string if tariff else 'new') + ('/edit' if tariff else '')) }}">

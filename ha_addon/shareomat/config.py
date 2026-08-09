@@ -41,6 +41,7 @@ from shareomat.leg_const import (
     PARTICIPANT_TYPE_CONSUMER,
     PARTICIPANT_TYPE_PRODUCER,
     PARTICIPANT_TYPE_PRODUCER_CONSUMER,
+    PARTICIPANT_TYPE_STORAGE,
     SLOT_MINUTES,
     UNKNOWN_METER_POLICY_FAIL,
     UNKNOWN_METER_POLICY_SKIP,
@@ -63,6 +64,7 @@ _VALID_PARTICIPANT_TYPES = {
     PARTICIPANT_TYPE_PRODUCER,
     PARTICIPANT_TYPE_CONSUMER,
     PARTICIPANT_TYPE_PRODUCER_CONSUMER,
+    PARTICIPANT_TYPE_STORAGE,
 }
 
 _VALID_METER_POLICIES = {UNKNOWN_METER_POLICY_FAIL, UNKNOWN_METER_POLICY_SKIP}
@@ -97,6 +99,9 @@ class ProcessingConfig:
     cron_schedule: str = ""
     auto_scan_enabled: bool = False
     scan_interval_seconds: int = 60
+    peak_start_hour: int = 6               # Hochtarif-Fenster für Tariff.rate_mode="ht_nt"
+    peak_end_hour: int = 22
+    peak_weekdays_only: bool = True
 
 
 @dataclass

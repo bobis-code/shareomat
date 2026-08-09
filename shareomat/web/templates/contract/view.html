@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% from "components/status_card.html" import tile %}
+{% block title %}Vertrag{% endblock %}
+{% block heading %}Vertrag{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>Übersicht</h2>
+  <div class="grid">
+    {{ tile("Gemeinschaft", community.name if community else "—") }}
+    {{ tile("Status", "Aktiv" if current_version else "Kein aktiver Vertrag",
+            "ok" if current_version else "warn") }}
+    {% if current_version %}
+    {{ tile("Aktuelle Version", "v" + current_version.version|string) }}
+    {{ tile("Produzentenvergütung", "%.2f"|format(current_version.feed_in_rate_chf_kwh * 100) + " Rp./kWh") }}
+    {{ tile("Verwaltungsgebühr", "%.2f"|format(current_version.admin_fee_chf_kwh * 100) + " Rp./kWh") }}
+    {{ tile("LEG-Bezugspreis", "%.2f"|format(current_version.local_rate_chf_kwh * 100) + " Rp./kWh") }}
+    {% endif %}
+  </div>
+  {% if not current_version %}
+  <p class="ts" style="margin-top:12px">Noch kein Vertrag in Kraft — unten einen Entwurf erstellen und veröffentlichen.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Vorschlagswerte für neue Entwürfe</h2>
+  <p class="field-hint" style="margin-bottom:10px">
+    Diese Werte füllen nur ein neues Entwurfsformular vor — rechtlich bindend sind ausschliesslich
+    die Angaben der jeweils veröffentlichten Vertragsversion unten.
+  </p>
+  <form class="form-card" method="post" action="{{ url_for('contract', suffix='/settings') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="grid_operator">Netzbetreiber (VNB)</label>
+      <input type="text" id="grid_operator" name="grid_operator" required value="{{ settings.grid_operator }}">
+    </div>
+    <div class="field">
+      <label for="representative_name">LEG-Vertreter: Name</label>
+      <input type="text" id="representative_name" name="representative_name" value="{{ settings.representative_name }}">
+    </div>
+    <div class="field">
+      <label for="representative_address_line">Adresse</label>
+      <input type="text" id="representative_address_line" name="representative_address_line"
+             value="{{ settings.representative_address_line }}">
+    </div>
+    <div class="field">
+      <label for="representative_postal_code">PLZ</label>
+      <input type="text" id="representative_postal_code" name="representative_postal_code"
+             value="{{ settings.representative_postal_code }}">
+    </div>
+    <div class="field">
+      <label for="representative_city">Ort</label>
+      <input type="text" id="representative_city" name="representative_city" value="{{ settings.representative_city }}">
+    </div>
+    <div class="field">
+      <label for="representative_email">E-Mail</label>
+      <input type="email" id="representative_email" name="representative_email" value="{{ settings.representative_email }}">
+    </div>
+    <div class="field">
+      <label for="distribution_method">Verteilschlüssel (Beschreibung)</label>
+      <input type="text" id="distribution_method" name="distribution_method" value="{{ settings.distribution_method }}">
+    </div>
+    <div class="actions-row">
+      <button type="submit">Vorschlagswerte speichern</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>{{ ('Entwurf bearbeiten (v' + form_version.version|string + ')') if form_mode == 'update' else 'Neuen Entwurf erstellen' }}</h2>
+  <form class="form-card" method="post"
+        action="{{ url_for('contract', suffix=('/draft/update' if form_mode == 'update' else '/draft/create')) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if form_mode == 'update' %}<input type="hidden" name="version_id" value="{{ form_version.id }}">{% endif %}
+    <div class="field">
+      <label for="rate_mode">Tarifmodell</label>
+      <select id="rate_mode" name="rate_mode">
+        <option value="flat" {{ 'selected' if form_version.rate_mode == 'flat' }}>Einheitstarif</option>
+        <option value="ht_nt" {{ 'selected' if form_version.rate_mode == 'ht_nt' }}>Hoch-/Niedertarif (HT/NT)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="local_rate_chf_kwh">LEG-Bezugspreis (CHF/kWh)</label>
+      <input type="text" id="local_rate_chf_kwh" name="local_rate_chf_kwh" required
+             value="{{ form_version.local_rate_chf_kwh }}">
+    </div>
+    <div class="field">
+      <label for="local_rate_nt_chf_kwh">LEG-Bezugspreis Niedertarif (CHF/kWh)</label>
+      <input type="text" id="local_rate_nt_chf_kwh" name="local_rate_nt_chf_kwh"
+             value="{{ form_version.local_rate_nt_chf_kwh if form_version.local_rate_nt_chf_kwh is not none else '' }}">
+      <div class="field-hint">Nur bei Hoch-/Niedertarif — leer lassen für Einheitstarif.</div>
+    </div>
+    <div class="field">
+      <label for="feed_in_rate_chf_kwh">Produzentenvergütung (CHF/kWh)</label>
+      <input type="text" id="feed_in_rate_chf_kwh" name="feed_in_rate_chf_kwh" required
+             value="{{ form_version.feed_in_rate_chf_kwh }}">
+    </div>
+    <div class="field">
+      <label for="feed_in_rate_nt_chf_kwh">Produzentenvergütung Niedertarif (CHF/kWh)</label>
+      <input type="text" id="feed_in_rate_nt_chf_kwh" name="feed_in_rate_nt_chf_kwh"
+             value="{{ form_version.feed_in_rate_nt_chf_kwh if form_version.feed_in_rate_nt_chf_kwh is not none else '' }}">
+    </div>
+    <div class="field">
+      <label for="admin_fee_chf_kwh">Verwaltungsgebühr (CHF/kWh bezogener Solarstrom)</label>
+      <input type="text" id="admin_fee_chf_kwh" name="admin_fee_chf_kwh" required
+             value="{{ form_version.admin_fee_chf_kwh }}">
+    </div>
+    <div class="field">
+      <label for="representative_name">LEG-Vertreter: Name</label>
+      <input type="text" id="representative_name" name="representative_name" value="{{ form_version.representative_name }}">
+    </div>
+    <div class="field">
+      <label for="representative_address_line">Adresse</label>
+      <input type="text" id="representative_address_line" name="representative_address_line"
+             value="{{ form_version.representative_address_line }}">
+    </div>
+    <div class="field">
+      <label for="representative_postal_code">PLZ</label>
+      <input type="text" id="representative_postal_code" name="representative_postal_code"
+             value="{{ form_version.representative_postal_code }}">
+    </div>
+    <div class="field">
+      <label for="representative_city">Ort</label>
+      <input type="text" id="representative_city" name="representative_city" value="{{ form_version.representative_city }}">
+    </div>
+    <div class="field">
+      <label for="representative_email">E-Mail</label>
+      <input type="email" id="representative_email" name="representative_email" value="{{ form_version.representative_email }}">
+    </div>
+    <div class="field">
+      <label for="grid_operator">Netzbetreiber (VNB)</label>
+      <input type="text" id="grid_operator" name="grid_operator" required value="{{ form_version.grid_operator }}">
+    </div>
+    <div class="field">
+      <label for="distribution_method">Verteilschlüssel (Beschreibung)</label>
+      <input type="text" id="distribution_method" name="distribution_method" value="{{ form_version.distribution_method }}">
+    </div>
+    <div class="field">
+      <label for="price_notice_period_months">Ankündigungsfrist Preisänderung (Monate)</label>
+      <input type="number" id="price_notice_period_months" name="price_notice_period_months" min="1"
+             value="{{ form_version.price_notice_period_months }}">
+      <div class="field-hint">LEG-Mustervertrag §3: mind. 4 Monate.</div>
+    </div>
+    <div class="field">
+      <label for="contract_notice_period_months">Ankündigungsfrist Vertragsänderung (Monate)</label>
+      <input type="number" id="contract_notice_period_months" name="contract_notice_period_months" min="1"
+             value="{{ form_version.contract_notice_period_months }}">
+      <div class="field-hint">LEG-Mustervertrag §8: mind. 6 Monate.</div>
+    </div>
+    <div class="field">
+      <label for="valid_from">Gültig ab</label>
+      <input type="date" id="valid_from" name="valid_from" value="{{ form_version.valid_from if form_version.valid_from else '' }}">
+      <div class="field-hint">
+        Kann leer bleiben oder später korrigiert werden — beim Speichern eines Entwurfs wird die
+        Ankündigungsfrist nicht geprüft, erst beim Veröffentlichen.
+      </div>
+    </div>
+    <div class="field">
+      <label for="valid_until">Gültig bis</label>
+      <input type="date" id="valid_until" name="valid_until" value="{{ form_version.valid_until if form_version.valid_until else '' }}">
+      <div class="field-hint">Leer lassen für "bis auf Weiteres".</div>
+    </div>
+    <div class="actions-row">
+      <button type="submit">{{ 'Entwurf speichern' if form_mode == 'update' else 'Entwurf erstellen' }}</button>
+      {% if form_mode == 'update' %}<a class="btn btn-muted" href="{{ url_for('contract') }}">Abbrechen</a>{% endif %}
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Vertragsversionen</h2>
+  {% if versions %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Version</th><th>Status</th><th>Gültigkeit</th><th></th></tr></thead>
+      <tbody>
+        {% for v in versions %}
+        {% set is_draft = v.status == 'draft' %}
+        {% set is_scheduled = v.status == 'published' and v.valid_from and v.valid_from > today %}
+        {% set is_historic = v.status == 'published' and v.valid_until and v.valid_until < today %}
+        {% set is_active = v.status == 'published' and not is_scheduled and not is_historic %}
+        <tr>
+          <td>v{{ v.version }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-active' if is_active else 'status-pill-inactive' }}">
+              {% if is_draft %}Entwurf
+              {% elif is_scheduled %}Geplant ab {{ v.valid_from.strftime('%d.%m.%Y') }}
+              {% elif is_historic %}Historisch
+              {% else %}Aktiv
+              {% endif %}
+            </span>
+          </td>
+          <td class="ts">
+            {{ v.valid_from.strftime('%d.%m.%Y') if v.valid_from else '—' }}
+            –
+            {{ v.valid_until.strftime('%d.%m.%Y') if v.valid_until else 'offen' }}
+          </td>
+          <td>
+            <details style="display:inline-block">
+              <summary class="btn-small btn-muted" style="display:inline-block;cursor:pointer">Anzeigen</summary>
+              <div class="contract-text" style="margin-top:8px">{{ v.contract_text_snapshot | safe }}</div>
+            </details>
+            {% if is_draft %}
+            <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?edit={{ v.id }}">Bearbeiten</a>
+            <form method="post" action="{{ url_for('contract', suffix='/publish') }}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="version_id" value="{{ v.id }}">
+              <button type="submit" class="btn-small">Veröffentlichen</button>
+            </form>
+            <form method="post" action="{{ url_for('contract', suffix='/draft/delete') }}" style="display:inline"
+                  onsubmit="return confirm('Entwurf wirklich löschen?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="version_id" value="{{ v.id }}">
+              <button type="submit" class="btn-small btn-danger">Löschen</button>
+            </form>
+            {% elif is_scheduled %}
+            <form method="post" action="{{ url_for('contract', suffix='/withdraw') }}" style="display:inline"
+                  onsubmit="return confirm('Veröffentlichung wirklich zurückziehen? Die Version wird wieder zum Entwurf.')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="version_id" value="{{ v.id }}">
+              <button type="submit" class="btn-small btn-muted">Veröffentlichung zurückziehen</button>
+            </form>
+            {% elif is_active %}
+            <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?copy_from={{ v.id }}">Bearbeiten</a>
+            <details style="display:inline-block">
+              <summary class="btn-small btn-danger" style="display:inline-block;cursor:pointer">Vertrag beenden</summary>
+              <form method="post" action="{{ url_for('contract', suffix='/end') }}" style="margin-top:8px;max-width:320px">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="version_id" value="{{ v.id }}">
+                <div class="field">
+                  <label>Enddatum</label>
+                  <input type="date" name="end_date" required>
+                </div>
+                <div class="field">
+                  <label>Zur Bestätigung den Namen der Gemeinschaft eingeben: „{{ community.name if community else '' }}"</label>
+                  <input type="text" name="confirm_name" required placeholder="{{ community.name if community else '' }}">
+                </div>
+                <button type="submit" class="btn-small btn-danger">Vertrag endgültig beenden</button>
+              </form>
+            </details>
+            {% else %}
+            <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?copy_from={{ v.id }}">Als neue Version übernehmen</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Vertragsversion erstellt.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Regeln und Pflichten der LEG</h2>
+  <ul>
+    <li>[Gesetz] Voraussetzungen für die Teilnahme — Art. 17d Abs. 2 StromVG.</li>
+    <li>[Vertrag] Aufgaben des LEG-Vertreters — siehe Vertragstext §4.</li>
+    <li>[EBL] Anmeldung / Mutationen gegenüber dem Netzbetreiber.</li>
+    <li>[Gesetz] Anforderungen an Messung und Messdaten — Art. 19g StromVV.</li>
+    <li>[Vertrag] Verteilung des LEG-Stroms — siehe Vertragstext §1.</li>
+    <li>[Vertrag] Abrechnung des LEG-Stroms — siehe Vertragstext §3.</li>
+    <li>[Vertrag] Behandlung von Reststrom — siehe Vertragstext §2.</li>
+    <li>[EBL] Behandlung von Überschusseinspeisung.</li>
+    <li>[Gesetz] Speicher innerhalb einer LEG — Art. 19h Abs. 4 StromVV.</li>
+    <li>[Vertrag] Ein- und Austritt — siehe Vertragstext §5.</li>
+    <li>[Vertrag] Datenschutz und Datenaustausch — siehe Vertragstext §7.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h2>Rechtsgrundlagen und Quellen</h2>
+  <p><strong>Bund</strong></p>
+  <ul>
+    <li>Stromversorgungsgesetz (StromVG) / Stromversorgungsverordnung (StromVV) —
+      <a href="https://www.fedlex.admin.ch/" target="_blank" rel="noopener">fedlex.admin.ch</a></li>
+  </ul>
+  <p><strong>Branchenempfehlungen</strong></p>
+  <ul>
+    <li>VSE BD LEG-CH 2025 —
+      <a href="https://www.strom.ch/de/dokument/lokale-elektrizitaetsgemeinschaften-leg-bd-leg-ch-2025" target="_blank" rel="noopener">strom.ch</a></li>
+    <li>VSE HER-CH 2025 —
+      <a href="https://www.strom.ch/de/media/15256/download" target="_blank" rel="noopener">strom.ch</a></li>
+  </ul>
+  <p><strong>Netzbetreiber</strong></p>
+  <ul>
+    <li>EBL — Lokale Elektrizitätsgemeinschaft —
+      <a href="https://www.ebl.ch/de/strom/eigenverbrauch-lokale-elektrizitaetsgemeinschaft" target="_blank" rel="noopener">ebl.ch</a></li>
+    <li>EBL AGB Strom —
+      <a href="https://www.ebl.ch/hubfs/EBL_AGBs_DE.pdf" target="_blank" rel="noopener">ebl.ch</a></li>
+    <li>EBL Rückspeisevergütung —
+      <a href="https://www.ebl.ch/de/privatkunden/strom/photovoltaik/rueckspeiseverguetung" target="_blank" rel="noopener">ebl.ch</a></li>
+  </ul>
+  <p><strong>Vertragsgrundlage</strong></p>
+  <ul>
+    <li>lokalerstrom.ch —
+      <a href="https://www.lokalerstrom.ch/" target="_blank" rel="noopener">lokalerstrom.ch</a></li>
+  </ul>
+  <p><strong>Darstellungs-/Preisblatt-Beispiel</strong> (kein rechtlicher Massstab)</p>
+  <ul>
+    <li>LEG-App — EBL Gemeinde —
+      <a href="https://leg-app.ch/preisblatt/ebl-gemeinde" target="_blank" rel="noopener">leg-app.ch</a></li>
+  </ul>
+  <p><strong>Mehrwertsteuer</strong></p>
+  <ul>
+    <li>Eidgenössische Steuerverwaltung —
+      <a href="https://www.estv.admin.ch/" target="_blank" rel="noopener">estv.admin.ch</a></li>
+  </ul>
+</div>
+{% endblock %}

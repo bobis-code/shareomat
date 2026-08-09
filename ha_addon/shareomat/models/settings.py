@@ -16,6 +16,14 @@ Notes:
     auto_create_billing / auto_create_invoices / auto_send_invoices are
     stored and displayed already, but not yet acted on — invoicing is a
     placeholder feature in this phase (see SHAREOMAT_UMBAU_STRUKTUR.md §5).
+
+    peak_start_hour/peak_end_hour/peak_weekdays_only define when a slot
+    counts as Hochtarif (HT) for tariffs with rate_mode="ht_nt" (see
+    shareomat.models.tariff) — used by shareomat.core.pipeline.tariff_time.
+    Not every grid operator defines HT/NT the same way, so this is an
+    editable setting, not a hardcoded rule. The defaults (Mon-Fri 06:00-22:00
+    = HT) are a common Swiss starting convention, not a verified EBL rule —
+    adjust once the community's actual grid-operator definition is known.
 """
 
 from __future__ import annotations
@@ -35,3 +43,6 @@ class OperationSettings:
     auto_create_billing: bool = False
     auto_create_invoices: bool = False
     auto_send_invoices: bool = False
+    peak_start_hour: int = 6               # Hochtarif start hour (0-23), local time
+    peak_end_hour: int = 22                # Hochtarif end hour (0-23, exclusive), local time
+    peak_weekdays_only: bool = True        # True: Sat/Sun always Niedertarif

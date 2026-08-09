@@ -23,6 +23,7 @@
         <option value="{{ value }}" {{ 'selected' if participant and participant.participant_type == value }}>{{ label }}</option>
         {% endfor %}
       </select>
+      <div class="field-hint">Bei „Speicherbetreiber": {{ participant_type_storage_hint }}</div>
     </div>
     <div class="field">
       <label for="email">E-Mail</label>

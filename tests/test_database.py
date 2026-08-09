@@ -129,6 +129,11 @@ def test_list_participants_excludes_inactive_when_requested(db_path):
     assert {p.participant_id for p in list_participants(db_path, include_inactive=False)} == {"p1"}
 
 
+def test_storage_participant_type_persists(db_path):
+    create_participant(db_path, Participant("p1", "Batterie", "storage"))
+    assert get_participant(db_path, "p1").participant_type == "storage"
+
+
 # ── Meters ──────────────────────────────────────────────────────────────────
 
 
@@ -196,6 +201,68 @@ def test_get_tariff_for_date_picks_the_valid_version(db_path):
     assert get_tariff_for_date(db_path, date(2024, 6, 1)).name == "2024"
     assert get_tariff_for_date(db_path, date(2025, 6, 1)).name == "2025"
     assert get_tariff_for_date(db_path, date(2023, 1, 1)) is None
+
+
+def test_tariff_defaults_when_new_fields_unset(db_path):
+    """A tariff created without the new HT/NT/admin-fee fields must fall back to flat-mode defaults."""
+    create_tariff(db_path, Tariff(
+        local_rate_chf_kwh=Decimal("0.12"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2024, 1, 1),
+    ))
+    tariff = list_tariffs(db_path)[0]
+    assert tariff.rate_mode == "flat"
+    assert tariff.admin_fee_chf_kwh == Decimal("0")
+    assert tariff.local_rate_nt_chf_kwh is None
+    assert tariff.feed_in_rate_nt_chf_kwh is None
+
+
+def test_tariff_ht_nt_fields_roundtrip(db_path):
+    create_tariff(db_path, Tariff(
+        local_rate_chf_kwh=Decimal("0.20"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.15"), admin_fee_chf_kwh=Decimal("0.005"),
+        rate_mode="ht_nt", local_rate_nt_chf_kwh=Decimal("0.10"),
+        feed_in_rate_nt_chf_kwh=Decimal("0.05"), valid_from=date(2024, 1, 1),
+    ))
+    tariff = list_tariffs(db_path)[0]
+    assert tariff.rate_mode == "ht_nt"
+    assert tariff.admin_fee_chf_kwh == Decimal("0.005")
+    assert tariff.local_rate_nt_chf_kwh == Decimal("0.10")
+    assert tariff.feed_in_rate_nt_chf_kwh == Decimal("0.05")
+
+
+def test_tariff_migration_adds_columns_to_a_pre_existing_database(tmp_path):
+    """Simulates an install created before this migration: the tariffs table exists
+    without the new columns, and init_db() must add them via ALTER TABLE without
+    touching existing data."""
+    import sqlite3
+
+    from shareomat.database.sqlite import init_db
+
+    old_db = tmp_path / "old.db"
+    conn = sqlite3.connect(old_db)
+    conn.execute("""
+        CREATE TABLE tariffs (
+            id INTEGER PRIMARY KEY, community_id INTEGER NOT NULL,
+            name TEXT NOT NULL DEFAULT 'Standard', local_rate_chf_kwh TEXT NOT NULL,
+            grid_rate_chf_kwh TEXT NOT NULL, feed_in_rate_chf_kwh TEXT NOT NULL,
+            valid_from TEXT NOT NULL, valid_until TEXT, active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO tariffs (id, community_id, name, local_rate_chf_kwh, grid_rate_chf_kwh, "
+        "feed_in_rate_chf_kwh, valid_from, active, created_at, updated_at) "
+        "VALUES (1, 1, 'Standard', '0.12', '0.28', '0.08', '2020-01-01', 1, 'x', 'x')"
+    )
+    conn.commit()
+    conn.close()
+
+    init_db(old_db)
+
+    tariff = list_tariffs(old_db)[0]
+    assert tariff.local_rate_chf_kwh == Decimal("0.12")  # existing data preserved
+    assert tariff.rate_mode == "flat"                     # new column, correct default
+    assert tariff.admin_fee_chf_kwh == Decimal("0")
 
 
 # ── Settings ────────────────────────────────────────────────────────────────

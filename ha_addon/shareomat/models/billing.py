@@ -71,12 +71,18 @@ class BillingRecord:
     local_received_kwh: float        # share received from the LEG pool
     grid_import_kwh: float           # share drawn from the public grid
 
-    # Cost (only for consumption; feed-in credit is handled by the grid operator)
+    # Cost (consumption side)
     local_rate_chf: float
     grid_rate_chf: float
     local_cost_chf: float
     grid_cost_chf: float
     total_cost_chf: float
+
+    # Producer payout (§3.1 LEG contract — what this participant is paid for
+    # local_supplied_kwh, at the tariff's feed_in_rate_chf_kwh; 0 for a pure
+    # consumer). Grid feed-in outside the LEG is still settled directly
+    # between the participant and the grid operator, not here.
+    producer_payout_chf: float = 0.0
 
     # Audit
     slot_count: int = 0
