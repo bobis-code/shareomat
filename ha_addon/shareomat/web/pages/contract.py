@@ -45,16 +45,16 @@ from shareomat.database.contract_versions import (
     end_contract,
     get_contract_version,
     get_contract_version_for_date,
+    get_latest_relevant_version,
     list_contract_versions,
     publish_version,
     save_draft_version,
     update_draft_version,
     withdraw_version,
 )
-from shareomat.database.tariffs import get_tariff_for_date
 from shareomat.leg_const import CONTRACT_STATUS_DRAFT
 from shareomat.models.contract import ContractSettings, ContractVersion
-from shareomat.models.tariff import RATE_MODE_FLAT
+from shareomat.models.tariff import RATE_MODE_FLAT, RATE_MODE_HT_NT
 from shareomat.web.rendering import FormError, RequestContext, form_date, form_decimal, form_required, render_page
 from shareomat.web.rendering import _env as jinja_env
 from shareomat.web.state import get_state
@@ -97,16 +97,60 @@ def _settings_from_form(ctx: RequestContext) -> ContractSettings:
     )
 
 
+def _compute_rates(
+    *, rate_mode: str, vnb_reference_price: Decimal, price_reduction: Decimal,
+    vnb_reference_price_nt: Decimal | None, price_reduction_nt: Decimal | None, admin_fee: Decimal,
+) -> tuple[Decimal, Decimal | None, Decimal, Decimal | None]:
+    """Derive (feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt) from the VNB reference price.
+
+    feed_in_rate (Produzentenvergütung, LEG-Mustervertrag §3.1) = vnb_reference_price
+    - price_reduction; local_rate (LEG-Bezugspreis) = feed_in_rate + admin_fee (§3.3).
+    A reduction larger than the reference price would mean a negative producer
+    rate, which is never valid — rejected rather than silently clamped.
+    """
+    feed_in_rate = vnb_reference_price - price_reduction
+    if feed_in_rate < 0:
+        raise FormError(
+            f"Die Preisreduktion ({price_reduction} CHF/kWh) übersteigt den "
+            f"VNB-Referenzenergiepreis ({vnb_reference_price} CHF/kWh)."
+        )
+    local_rate = feed_in_rate + admin_fee
+
+    feed_in_rate_nt = None
+    local_rate_nt = None
+    if rate_mode == RATE_MODE_HT_NT and vnb_reference_price_nt is not None and price_reduction_nt is not None:
+        feed_in_rate_nt = vnb_reference_price_nt - price_reduction_nt
+        if feed_in_rate_nt < 0:
+            raise FormError(
+                f"Die Preisreduktion Niedertarif ({price_reduction_nt} CHF/kWh) übersteigt den "
+                f"VNB-Referenzenergiepreis Niedertarif ({vnb_reference_price_nt} CHF/kWh)."
+            )
+        local_rate_nt = feed_in_rate_nt + admin_fee
+
+    return feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt
+
+
 def _version_from_form(ctx: RequestContext) -> ContractVersion:
     """Build a not-yet-persisted ContractVersion from the create/edit form's fields."""
+    rate_mode = ctx.form.get("rate_mode") or RATE_MODE_FLAT
+    vnb_reference_price = form_decimal(ctx, "vnb_reference_price_chf_kwh", label="VNB-Referenzenergiepreis")
+    price_reduction = form_decimal(ctx, "price_reduction_chf_kwh", label="Preisreduktion gegenüber VNB")
+    vnb_reference_price_nt = _form_decimal_optional(ctx, "vnb_reference_price_nt_chf_kwh")
+    price_reduction_nt = _form_decimal_optional(ctx, "price_reduction_nt_chf_kwh")
+    admin_fee = form_decimal(ctx, "admin_fee_chf_kwh", label="Verwaltungsgebühr")
+
+    feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt = _compute_rates(
+        rate_mode=rate_mode, vnb_reference_price=vnb_reference_price, price_reduction=price_reduction,
+        vnb_reference_price_nt=vnb_reference_price_nt, price_reduction_nt=price_reduction_nt, admin_fee=admin_fee,
+    )
+
     return ContractVersion(
         community_id="", version=0, status=CONTRACT_STATUS_DRAFT, contract_text_snapshot="",
-        local_rate_chf_kwh=form_decimal(ctx, "local_rate_chf_kwh", label="LEG-Bezugspreis"),
-        local_rate_nt_chf_kwh=_form_decimal_optional(ctx, "local_rate_nt_chf_kwh"),
-        feed_in_rate_chf_kwh=form_decimal(ctx, "feed_in_rate_chf_kwh", label="Produzentenvergütung"),
-        feed_in_rate_nt_chf_kwh=_form_decimal_optional(ctx, "feed_in_rate_nt_chf_kwh"),
-        admin_fee_chf_kwh=form_decimal(ctx, "admin_fee_chf_kwh", label="Verwaltungsgebühr"),
-        rate_mode=(ctx.form.get("rate_mode") or RATE_MODE_FLAT),
+        vnb_reference_price_chf_kwh=vnb_reference_price, price_reduction_chf_kwh=price_reduction,
+        vnb_reference_price_nt_chf_kwh=vnb_reference_price_nt, price_reduction_nt_chf_kwh=price_reduction_nt,
+        local_rate_chf_kwh=local_rate, local_rate_nt_chf_kwh=local_rate_nt,
+        feed_in_rate_chf_kwh=feed_in_rate, feed_in_rate_nt_chf_kwh=feed_in_rate_nt,
+        admin_fee_chf_kwh=admin_fee, rate_mode=rate_mode,
         representative_name=(ctx.form.get("representative_name") or "").strip(),
         representative_address_line=(ctx.form.get("representative_address_line") or "").strip(),
         representative_postal_code=(ctx.form.get("representative_postal_code") or "").strip(),
@@ -122,16 +166,20 @@ def _version_from_form(ctx: RequestContext) -> ContractVersion:
 
 
 def _blank_form_version(db_path, settings: ContractSettings) -> ContractVersion:
-    """A not-yet-persisted draft prefilled with today's tariff (if any) and the settings defaults."""
-    tariff = get_tariff_for_date(db_path, date.today())
+    """A not-yet-persisted draft prefilled from the latest contract version (if any) and the settings defaults."""
+    latest = get_latest_relevant_version(db_path)
     return ContractVersion(
         community_id="", version=0, status=CONTRACT_STATUS_DRAFT, contract_text_snapshot="",
-        local_rate_chf_kwh=tariff.local_rate_chf_kwh if tariff else Decimal("0"),
-        local_rate_nt_chf_kwh=tariff.local_rate_nt_chf_kwh if tariff else None,
-        feed_in_rate_chf_kwh=tariff.feed_in_rate_chf_kwh if tariff else Decimal("0"),
-        feed_in_rate_nt_chf_kwh=tariff.feed_in_rate_nt_chf_kwh if tariff else None,
-        admin_fee_chf_kwh=tariff.admin_fee_chf_kwh if tariff else Decimal("0"),
-        rate_mode=tariff.rate_mode if tariff else RATE_MODE_FLAT,
+        vnb_reference_price_chf_kwh=latest.vnb_reference_price_chf_kwh if latest else Decimal("0"),
+        price_reduction_chf_kwh=latest.price_reduction_chf_kwh if latest else Decimal("0"),
+        vnb_reference_price_nt_chf_kwh=latest.vnb_reference_price_nt_chf_kwh if latest else None,
+        price_reduction_nt_chf_kwh=latest.price_reduction_nt_chf_kwh if latest else None,
+        local_rate_chf_kwh=latest.local_rate_chf_kwh if latest else Decimal("0"),
+        local_rate_nt_chf_kwh=latest.local_rate_nt_chf_kwh if latest else None,
+        feed_in_rate_chf_kwh=latest.feed_in_rate_chf_kwh if latest else Decimal("0"),
+        feed_in_rate_nt_chf_kwh=latest.feed_in_rate_nt_chf_kwh if latest else None,
+        admin_fee_chf_kwh=latest.admin_fee_chf_kwh if latest else Decimal("0"),
+        rate_mode=latest.rate_mode if latest else RATE_MODE_FLAT,
         representative_name=settings.representative_name,
         representative_address_line=settings.representative_address_line,
         representative_postal_code=settings.representative_postal_code,

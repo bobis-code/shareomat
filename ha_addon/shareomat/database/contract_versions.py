@@ -56,6 +56,14 @@ def _row_to_version(row: sqlite3.Row, community_id: str) -> ContractVersion:
         version=row["version"],
         status=row["status"],
         contract_text_snapshot=row["contract_text_snapshot"],
+        vnb_reference_price_chf_kwh=Decimal(row["vnb_reference_price_chf_kwh"]),
+        price_reduction_chf_kwh=Decimal(row["price_reduction_chf_kwh"]),
+        vnb_reference_price_nt_chf_kwh=(
+            Decimal(row["vnb_reference_price_nt_chf_kwh"]) if row["vnb_reference_price_nt_chf_kwh"] else None
+        ),
+        price_reduction_nt_chf_kwh=(
+            Decimal(row["price_reduction_nt_chf_kwh"]) if row["price_reduction_nt_chf_kwh"] else None
+        ),
         local_rate_chf_kwh=Decimal(row["local_rate_chf_kwh"]),
         local_rate_nt_chf_kwh=Decimal(row["local_rate_nt_chf_kwh"]) if row["local_rate_nt_chf_kwh"] else None,
         feed_in_rate_chf_kwh=Decimal(row["feed_in_rate_chf_kwh"]),
@@ -150,6 +158,8 @@ def get_latest_relevant_version(db_path: Path) -> ContractVersion | None:
 
 
 _EDITABLE_COLUMNS = (
+    "vnb_reference_price_chf_kwh", "price_reduction_chf_kwh",
+    "vnb_reference_price_nt_chf_kwh", "price_reduction_nt_chf_kwh",
     "local_rate_chf_kwh", "local_rate_nt_chf_kwh", "feed_in_rate_chf_kwh", "feed_in_rate_nt_chf_kwh",
     "admin_fee_chf_kwh", "rate_mode",
     "representative_name", "representative_address_line", "representative_postal_code",
@@ -160,6 +170,10 @@ _EDITABLE_COLUMNS = (
 
 def _editable_values(version: ContractVersion) -> tuple:
     return (
+        str(version.vnb_reference_price_chf_kwh),
+        str(version.price_reduction_chf_kwh),
+        str(version.vnb_reference_price_nt_chf_kwh) if version.vnb_reference_price_nt_chf_kwh is not None else None,
+        str(version.price_reduction_nt_chf_kwh) if version.price_reduction_nt_chf_kwh is not None else None,
         str(version.local_rate_chf_kwh),
         str(version.local_rate_nt_chf_kwh) if version.local_rate_nt_chf_kwh is not None else None,
         str(version.feed_in_rate_chf_kwh),

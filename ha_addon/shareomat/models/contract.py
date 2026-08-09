@@ -61,7 +61,16 @@ class ContractVersion:
     status: str
     contract_text_snapshot: str
 
-    # Pricing (source for the tariff created at publish time).
+    # Pricing (source for the tariff created at publish time). feed_in_rate_chf_kwh
+    # and local_rate_chf_kwh (and their _nt variants) are computed at save time from
+    # the fields below — see shareomat.web.pages.contract._compute_rates — and kept
+    # here too so a historical version's rendered text/tariff never depends on a
+    # later recomputation: feed_in_rate = vnb_reference_price - price_reduction,
+    # local_rate = feed_in_rate + admin_fee_chf_kwh.
+    vnb_reference_price_chf_kwh: Decimal = Decimal("0")
+    price_reduction_chf_kwh: Decimal = Decimal("0")
+    vnb_reference_price_nt_chf_kwh: Decimal | None = None
+    price_reduction_nt_chf_kwh: Decimal | None = None
     local_rate_chf_kwh: Decimal = Decimal("0")
     local_rate_nt_chf_kwh: Decimal | None = None
     feed_in_rate_chf_kwh: Decimal = Decimal("0")
