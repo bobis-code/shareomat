@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 6
+_SCHEMA_VERSION = 9
 
 _SCHEMA_STATEMENTS = [
     """
@@ -323,12 +323,82 @@ _SCHEMA_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_consumption_forecasts_slot ON consumption_forecasts(slot_start)
     """,
     """
+    CREATE TABLE IF NOT EXISTS contract_versions (
+        id INTEGER PRIMARY KEY,
+        community_id INTEGER NOT NULL REFERENCES communities(id),
+        version INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        contract_text_snapshot TEXT NOT NULL,
+        valid_from TEXT,
+        valid_until TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(community_id, version)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS participant_contract (
+        id INTEGER PRIMARY KEY,
+        participant_id INTEGER NOT NULL REFERENCES participants(id),
+        contract_version_id INTEGER NOT NULL REFERENCES contract_versions(id),
+        tariff_id INTEGER REFERENCES tariffs(id),
+        joined_at TEXT,
+        left_at TEXT,
+        accepted_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(participant_id, contract_version_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at TEXT NOT NULL
     )
     """,
 ]
+
+# Additive column migrations: table -> {column_name: DDL fragment}.
+# CREATE TABLE IF NOT EXISTS above only helps brand-new installs — an
+# existing database's tariffs table already exists, so that statement is a
+# no-op for it and these columns would never appear without ALTER TABLE.
+# SQLite's ALTER TABLE ADD COLUMN only supports one column at a time with a
+# constant default, which is all these need.
+_COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
+    "tariffs": {
+        "admin_fee_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
+        "rate_mode": "TEXT NOT NULL DEFAULT 'flat'",
+        "local_rate_nt_chf_kwh": "TEXT",
+        "feed_in_rate_nt_chf_kwh": "TEXT",
+    },
+    "contract_versions": {
+        "local_rate_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
+        "local_rate_nt_chf_kwh": "TEXT",
+        "feed_in_rate_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
+        "feed_in_rate_nt_chf_kwh": "TEXT",
+        "admin_fee_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
+        "rate_mode": "TEXT NOT NULL DEFAULT 'flat'",
+        "representative_name": "TEXT NOT NULL DEFAULT ''",
+        "representative_address_line": "TEXT NOT NULL DEFAULT ''",
+        "representative_postal_code": "TEXT NOT NULL DEFAULT ''",
+        "representative_city": "TEXT NOT NULL DEFAULT ''",
+        "representative_email": "TEXT NOT NULL DEFAULT ''",
+        "grid_operator": "TEXT NOT NULL DEFAULT ''",
+        "distribution_method": "TEXT NOT NULL DEFAULT ''",
+        "price_notice_period_months": "INTEGER NOT NULL DEFAULT 4",
+        "contract_notice_period_months": "INTEGER NOT NULL DEFAULT 6",
+        "tariff_id": "INTEGER REFERENCES tariffs(id)",
+        "supersedes_version_id": "INTEGER REFERENCES contract_versions(id)",
+    },
+}
+
+
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add any columns from _COLUMN_MIGRATIONS missing on an existing table. Idempotent."""
+    for table, columns in _COLUMN_MIGRATIONS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, ddl in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
 
 
 def resolve_db_path() -> Path:
@@ -372,6 +442,7 @@ def init_db(db_path: Path) -> None:
         with conn:
             for statement in _SCHEMA_STATEMENTS:
                 conn.execute(statement)
+            _ensure_columns(conn)
             applied = conn.execute(
                 "SELECT 1 FROM schema_migrations WHERE version = ?", (_SCHEMA_VERSION,)
             ).fetchone()

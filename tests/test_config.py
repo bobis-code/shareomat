@@ -142,6 +142,26 @@ def test_invalid_meter_role_raises():
         validate_leg_config(config)
 
 
+def test_storage_participant_type_is_valid():
+    """Speicherbetreiber (PARTICIPANT_TYPE_STORAGE) must be accepted, not just producer/consumer/producer_consumer."""
+    config = _leg_config(participants=[
+        Participant("P1", "Solar", "producer_consumer"),
+        Participant("P2", "Flat 1", "consumer"),
+        Participant("P3", "Batterie", "storage"),
+    ])
+    validate_leg_config(config)  # must not raise
+
+
+def test_invalid_participant_type_still_raises():
+    config = _leg_config(participants=[
+        Participant("P1", "Solar", "producer_consumer"),
+        Participant("P2", "Flat 1", "consumer"),
+        Participant("P3", "?", "not_a_real_type"),
+    ])
+    with pytest.raises(ValueError, match="participant"):
+        validate_leg_config(config)
+
+
 def test_negative_tariff_raises():
     config = _leg_config(tariff=Tariff(
         local_rate_chf_kwh=Decimal("-0.1"), grid_rate_chf_kwh=Decimal("0.28"),

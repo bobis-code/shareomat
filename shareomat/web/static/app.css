@@ -198,6 +198,11 @@ form.form-card { max-width: 480px; }
 .status-pill-active { background: #f0fdf4; color: #166534; }
 .status-pill-inactive { background: #f3f4f6; color: #6b7280; }
 
+.contract-text { font-size: .9rem; line-height: 1.55; max-width: 68ch; }
+.contract-text h3 { font-size: 1.05rem; margin: 24px 0 8px; }
+.contract-text h4 { font-size: .95rem; margin: 16px 0 6px; color: var(--muted); }
+.contract-text p { margin-bottom: 10px; }
+
 @media (max-width: 720px) {
   /* The desktop sidebar is a fixed-width column beside the content. On a
      phone (incl. the HA Companion App's Ingress webview) that has to become

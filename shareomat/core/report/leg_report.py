@@ -59,6 +59,7 @@ _BILLING_FIELDS = [
     # Cost
     "local_rate_chf", "grid_rate_chf",
     "local_cost_chf", "grid_cost_chf", "total_cost_chf",
+    "producer_payout_chf",
     "created_at",
 ]
 
@@ -134,6 +135,7 @@ def write_billing_csv(
                 "local_cost_chf":   _round_chf(r.local_cost_chf),
                 "grid_cost_chf":    _round_chf(r.grid_cost_chf),
                 "total_cost_chf":   _round_chf(r.total_cost_chf),
+                "producer_payout_chf": _round_chf(r.producer_payout_chf),
                 "created_at":       _to_ch(r.created_at),
             })
     logger.info("Billing CSV written: %s", path.name)
@@ -168,6 +170,7 @@ def write_billing_json(
             "local_cost_chf":   _round_chf(r.local_cost_chf),
             "grid_cost_chf":    _round_chf(r.grid_cost_chf),
             "total_cost_chf":   _round_chf(r.total_cost_chf),
+            "producer_payout_chf": _round_chf(r.producer_payout_chf),
             "created_at":       _to_ch(r.created_at),
         }
         for r in records

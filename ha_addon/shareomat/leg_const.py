@@ -40,6 +40,10 @@ METER_ROLE_GRID: str = "grid"
 PARTICIPANT_TYPE_PRODUCER: str = "producer"
 PARTICIPANT_TYPE_CONSUMER: str = "consumer"
 PARTICIPANT_TYPE_PRODUCER_CONSUMER: str = "producer_consumer"
+# Storage operators are both LEG-Bezüger and LEG-Produzent (see LEG-Mustervertrag
+# Beitrittserklärung), and per Art. 19h Abs. 4 StromVV must not, in sum, feed more
+# electricity into the community per settlement period than they draw from it.
+PARTICIPANT_TYPE_STORAGE: str = "storage"
 
 # ── Unknown meter handling ────────────────────────────────────────────────────
 
@@ -53,6 +57,15 @@ UNKNOWN_METER_POLICY_SKIP: str = "skip"
 BILLING_STATUS_DRAFT: str = "draft"
 BILLING_STATUS_RELEASED: str = "released"
 BILLING_STATUS_CANCELLED: str = "cancelled"
+
+# ── Contract version lifecycle ────────────────────────────────────────────────
+# Only two stored statuses. Whether a "published" version is currently in
+# force, merely announced for the future, or historical is never a third
+# stored status — it is derived from valid_from/valid_until at read time,
+# exactly like tariffs. See shareomat.database.contract_versions.
+
+CONTRACT_STATUS_DRAFT: str = "draft"
+CONTRACT_STATUS_PUBLISHED: str = "published"
 
 # ── MQTT status values ────────────────────────────────────────────────────────
 

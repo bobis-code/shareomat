@@ -64,9 +64,15 @@ not here — see "Ersteinrichtung" below.
 Nach der Installation öffnen Sie die Shareomat Weboberfläche (Ingress-Panel
 des Add-ons). Beim ersten Start ist die Datenbank leer und ein
 Einrichtungsassistent führt durch: Gemeinschaft → Teilnehmer → Messpunkte →
-Tarif. Danach lassen sich Teilnehmer, Messpunkte, Tarife und die Automatik
+Vertrag. Danach lassen sich Teilnehmer, Messpunkte, Vertrag und die Automatik
 jederzeit über die Weboberfläche verwalten — Änderungen gelten sofort, ohne
 Add-on-Neustart.
+
+Preise werden auf der Vertrag-Seite festgelegt, nicht auf der Tarife-Seite:
+das Veröffentlichen einer Vertragsversion erzeugt den Tarif, der für ihre
+Gültigkeitsdauer massgebend ist, unter Einhaltung der im LEG-Mustervertrag
+vorgesehenen Ankündigungsfristen. Die Tarife-Seite existiert weiterhin, aber
+nur als manueller Notfall-/Erstinbetriebnahme-Fallback.
 
 ### Email import
 
@@ -100,7 +106,7 @@ add-on's own persistent `/data` (both survive add-on updates):
 └── state/            ← processed_files.json (SHA-256 deduplication)
 
 /data/
-└── shareomat.db       ← Gemeinschaft/Teilnehmer/Messpunkte/Tarife/Automatik
+└── shareomat.db       ← Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife/Automatik
 ```
 
 Drop meter data files into `/config/shareomat/inbox/` via SSH or the

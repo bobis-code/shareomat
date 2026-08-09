@@ -1,0 +1,237 @@
+{# Rendered standalone (not extending base.html) — the result string is stored
+   verbatim as a contract_versions.contract_text_snapshot, so a historical
+   version's wording never changes even if this template changes later.
+   Base text: docs/examples/MusterVertrag/LEG-Gesellschaftsvertrag_Lokaler-Strom_de.docx,
+   with the "ODER"/checkbox variants resolved per the community's decisions
+   (VNB-Verhältnis Variante A; Preis-Varianten "Einheitstarif", HT/NT-fähig
+   angepasst; Kostentragung "Rp./kWh bezogener Solarstrom") — see
+   shareomat/web/pages/contract.py for how this template is invoked. #}
+<h2>Gesellschaftsvertrag «{{ community_name }}»</h2>
+
+<p>Unter dem Namen «{{ community_name }}» (nachfolgend «LEG») besteht eine
+einfache Gesellschaft gemäss den Artikeln 530 ff. des Schweizerischen
+Obligationenrechts (OR), die aus mindestens zwei Personen besteht, darunter
+mindestens ein LEG-Produzent und ein LEG-Bezüger. Die Gesellschaft wird
+vertreten durch den LEG-Vertreter. Vertragsparteien des vorliegenden Vertrags
+sind der LEG-Vertreter und der oder die LEG-Teilnehmer.</p>
+
+<p>Um die Sprache in diesem Dokument zu vereinfachen, wurden keine
+geschlechtsspezifischen Formulierungen verwendet. Soweit von einem
+Teilnehmer oder einem Produzenten die Rede ist, gilt dies ebenfalls für den
+Fall, dass es mehrere Teilnehmer und/oder Produzenten sind.</p>
+
+<h3>1. Zweck</h3>
+<p>Die Gesellschafter bezwecken den Austausch von selbst erzeugter und lokal
+produzierter Elektrizität unter sich («LEG-Strom» gemäss Art. 17d StromVG).
+Für den Austausch des LEG-Stroms darf das Verteilnetz zu einem rabattierten
+Netznutzungstarif genutzt werden (Art. 17e StromVG).</p>
+<p>Die Gesellschaft «{{ community_name }}» entspricht einer lokalen
+Elektrizitätsgemeinschaft (LEG) gemäss StromVG. Sie erfüllt die
+Voraussetzungen einer LEG gemäss Art. 17d Abs. 2 StromVG.</p>
+<p>Gesellschafter können in der Rolle als LEG-Bezüger, in der Rolle als
+LEG-Produzenten wie auch in beiden Rollen agieren. Speicherbetreiber sind
+sowohl LEG-Bezüger wie auch LEG-Produzenten. Mit Zustimmung zum
+vorliegenden Gesellschaftsvertrag hat der Gesellschafter anzugeben, welche
+Rolle(n) er wahrnimmt.</p>
+<p>Der LEG-Strom wird {{ distribution_method }} auf alle teilnehmenden
+LEG-Bezüger aufgeteilt. Innerhalb einer Viertelstunde haben alle
+teilnehmenden LEG-Bezüger den gleichen prozentualen Anteil an LEG-Strom im
+Verhältnis zum Verbrauch zugute.</p>
+<p>Die Gesellschaft «LEG» verfügt über kein Gesellschaftsvermögen. Die
+Gesellschaft «LEG» erwirtschaftet weder Gewinn noch Verlust. Ebenso haben
+die Gesellschafter keine Beiträge an die Gesellschaft «LEG» zu leisten.</p>
+
+<h3>2. Verhältnis zum lokalen Verteilnetzbetreiber</h3>
+<p>Der lokale Verteilnetzbetreiber ({{ grid_operator }}, nachfolgend «VNB»)
+stellt dem einzelnen Gesellschafter die in der Grundversorgung vom Netz
+bezogene Energie (Reststrom) sowie Messtarif, Netznutzungstarif (für
+LEG-Strom und für Reststrom) und Abgaben in Rechnung. Die Entschädigung für
+eingespeiste Energie gemäss Art. 15 EnG wird den Produzenten der
+Gesellschaft direkt vergütet.</p>
+<p>Für Gesellschafter im freien Markt erfolgt die Rechnungsstellung für die
+vom Netz bezogene Energie jeweils separat durch ihren Energielieferanten.</p>
+<p>Die einzelnen Gesellschafter bleiben Schuldner gegenüber dem VNB
+(Art. 17e StromVG). Es besteht keine Solidarhaftung für solche
+Rechnungen.</p>
+<p>Der Reststrombedarf, welcher nicht mit LEG-Strom gedeckt werden kann, ist
+nicht Gegenstand des vorliegenden Gesellschaftsvertrages.</p>
+
+<h3>3. Preis für LEG-Strom</h3>
+
+<h4>3.1 Preis für die Lieferung von LEG-Strom an die Gesellschaft «{{ community_name }}»</h4>
+<p>Die nachfolgende Preisdefinition bezieht sich ausschliesslich auf den
+Anteil «Energie» (exkl. Mess- und Netztarife sowie Abgaben).</p>
+{% if tariff.rate_mode == "ht_nt" %}
+<p>Der Preis für die Lieferung von LEG-Strom an die Gesellschaft «LEG»
+beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh
+(Hochtarif) beziehungsweise
+{{ "%.2f"|format((tariff.feed_in_rate_nt_chf_kwh if tariff.feed_in_rate_nt_chf_kwh is not none else tariff.feed_in_rate_chf_kwh) * 100) }}
+Rp./kWh (Niedertarif), jeweils inklusive Mehrwertsteuer. Massgebend für die
+Zuordnung ist der Zeitpunkt der Lieferung gemäss der in den
+Grundeinstellungen der Gemeinschaft festgelegten Hoch-/Niedertarif-Zeiten.</p>
+{% else %}
+<p>Der Preis für die Lieferung von LEG-Strom an die Gesellschaft «LEG»
+beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh
+inklusive Mehrwertsteuer (Einheitstarif 7/24 Stunden).</p>
+{% endif %}
+<p>Die Preise können vom LEG-Vertreter mit einer Frist von
+{{ price_notice_period_months }} Monaten jeweils per Monatsende
+angepasst werden. Die Preise müssen den Gesellschaftern schriftlich
+(E-Mail oder Brief) mitgeteilt werden.</p>
+<p>Unterliegt ein LEG-Produzent aufgrund seiner Geschäftstätigkeit der
+Mehrwertsteuerpflicht, so ist das Entgelt für die Stromlieferung als
+inklusive Mehrwertsteuer zu verstehen.</p>
+<p>Der VNB legt die Preise für die Netznutzung und die Messung fest.</p>
+
+<h4>3.2 Preis für den Bezug von LEG-Strom von der Gesellschaft «{{ community_name }}»</h4>
+<p>Die nachfolgende Preisdefinition bezieht sich ausschliesslich auf den
+Anteil «Energie» (exkl. Netz und Abgaben). Bei Teilnahme eines Prosumers
+gelten für den Prosumer die Ziffern 3.1 und 3.2. Individualtarife werden
+hier nicht vereinbart.</p>
+{% if tariff.rate_mode == "ht_nt" %}
+<p>Der Preis für den Bezug von LEG-Strom von der Gesellschaft «LEG» beträgt
+{{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh (Hochtarif)
+beziehungsweise
+{{ "%.2f"|format((tariff.local_rate_nt_chf_kwh if tariff.local_rate_nt_chf_kwh is not none else tariff.local_rate_chf_kwh) * 100) }}
+Rp./kWh (Niedertarif), jeweils inklusive Mehrwertsteuer. Massgebend für die
+Zuordnung ist der Zeitpunkt des Bezugs gemäss der in den Grundeinstellungen
+der Gemeinschaft festgelegten Hoch-/Niedertarif-Zeiten.</p>
+{% else %}
+<p>Der Preis für den Bezug von LEG-Strom von der Gesellschaft «LEG» beträgt
+{{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh inklusive
+Mehrwertsteuer (Einheitstarif 7/24 Stunden).</p>
+{% endif %}
+<p>Die Preise können vom LEG-Vertreter mit einer Frist von
+{{ price_notice_period_months }} Monaten jeweils per Monatsende
+angepasst werden. Die Preise müssen den Gesellschaftern schriftlich
+(E-Mail oder Brief) mitgeteilt werden.</p>
+<p>Die Gesellschaft «LEG» unterliegt der Mehrwertsteuerpflicht, sobald die
+gesetzlichen Voraussetzungen gemäss dem Mehrwertsteuergesetz erfüllt sind.
+Unterliegt die Gesellschaft «LEG» der Mehrwertsteuerpflicht, so ist das
+Entgelt für die Stromlieferung als inklusive Mehrwertsteuer zu
+verstehen.</p>
+<p>Der VNB legt die Preise für die Netznutzung und die Messung fest.</p>
+
+<h4>3.3 Kostentragung Abrechnung</h4>
+<p>Die Kosten für die interne Datenbearbeitung, Verwaltung und Abrechnung
+werden den teilnehmenden Gesellschaftern in Rechnung gestellt. Diese
+Kosten betragen {{ "%.2f"|format(tariff.admin_fee_chf_kwh * 100) }}
+Rp./kWh bezogener Solarstrom.</p>
+
+<h3>4. Vertretung</h3>
+<p>Die Gesellschafter sind einzeln nicht ermächtigt, Verpflichtungen oder
+Verträge im Namen der Gesellschaft «LEG» einzugehen.</p>
+<p>Die Gesellschaft «LEG» bevollmächtigt ihren LEG-Vertreter, sie in allen
+rechtlichen und wirtschaftlichen Angelegenheiten der LEG gegenüber
+natürlichen und juristischen Personen, Behörden und sonstigen Stellen,
+insbesondere dem VNB, zu vertreten. Diese Vollmacht umfasst insbesondere
+den Abschluss und die Kündigung von Verträgen, die Vertretung vor Gerichten
+und Behörden, das Inkasso und die Auszahlung von Preisen gemäss diesem
+Vertrag, die Durchführung von Bankgeschäften aller Art, den Empfang und das
+Öffnen der die Gesellschaft «LEG» betreffenden Post, sowie den Entscheid
+über die Aufnahme von neuen LEG-Teilnehmern oder den Ausschluss von
+bestehenden LEG-Teilnehmern.</p>
+<p>Falls die LEG die Voraussetzungen für die Mehrwertsteuerpflicht erfüllt,
+obliegt es dem LEG-Vertreter, die korrekte Abwicklung der Mehrwertsteuer
+sicherzustellen.</p>
+<p>Der LEG-Vertreter kann die ihm obliegenden Aufgaben auch an Dritte
+delegieren.</p>
+<p>Der LEG-Vertreter hat die Pflicht, gegenüber dem VNB die
+Mitteilungspflichten gemäss Art. 19g StromVV zu erfüllen.</p>
+<p>Die Gesellschaft «LEG» wird vertreten durch:</p>
+<p>
+  LEG-Vertreter: {{ representative_name or "—" }}<br>
+  Adresse: {{ representative_address_line or "—" }}<br>
+  PLZ/Ort: {{ representative_postal_code }} {{ representative_city }}<br>
+  E-Mail: {{ representative_email or "—" }}
+</p>
+
+<h3>5. Vertragsdauer und Kündigung</h3>
+<p>Der vorliegende Gesellschaftsvertrag tritt mit gegenseitiger
+Willensäusserung mindestens eines LEG-Produzenten und eines LEG-Bezügers
+unter Berücksichtigung der anwendbaren gesetzlichen Bestimmungen zur
+Bildung der Gesellschaft «LEG» in Kraft und wird auf unbestimmte Zeit
+abgeschlossen.</p>
+<p>Jeder Gesellschafter kann mit einer Kündigungsfrist von
+{{ price_notice_period_months }} Monaten den vorliegenden Gesellschaftsvertrag
+jeweils auf ein Monatsende schriftlich kündigen.</p>
+<p>Die Teilnahme eines LEG-Teilnehmers an der Gesellschaft «LEG» endet
+automatisch, sobald die anwendbaren gesetzlichen Voraussetzungen für den
+Bezug von LEG-Strom nicht mehr erfüllt sind (z. B. durch Wegzug oder
+Verkauf der Wohnung).</p>
+<p>Der LEG-Vertreter sowie der VNB sind berechtigt, die betreffenden
+Mutationen an die für die Abrechnungsdienstleistung notwendigen Stellen zu
+kommunizieren.</p>
+<p>Wenn ein LEG-Bezüger seine Rechnungen innerhalb der definierten
+Zahlungsfrist und nach einmalig erfolgter schriftlicher Mahnung nicht
+bezahlt, hat die Gesellschaft «LEG» und/oder der LEG-Vertreter das Recht,
+den LEG-Bezüger per sofort aus der Gesellschaft «LEG» auszuschliessen.</p>
+<p>Dasselbe gilt, wenn ein LEG-Produzent seine Lieferung einstellt und nach
+einmalig erfolgter schriftlicher Mahnung nicht wieder aufnimmt. In diesem
+Fall hat die Gesellschaft «LEG» und/oder der LEG-Vertreter das Recht, den
+LEG-Lieferanten per sofort aus der Gesellschaft «LEG» auszuschliessen.</p>
+<p>Kündigungen durch Gesellschafter sind an den LEG-Vertreter zu senden.
+Dieser meldet dem VNB die Kündigung. Der Austritt eines einzelnen
+Gesellschafters führt nicht zur Auflösung der Gesellschaft «LEG». Sie ist
+hingegen automatisch aufgelöst, wenn nicht mindestens ein LEG-Produzent und
+mindestens ein LEG-Bezüger in der Gesellschaft «LEG» verbleiben. In diesem
+Fall teilt der LEG-Vertreter die Auflösung den LEG-Teilnehmern in
+angemessener Frist schriftlich (E-Mail oder Brief) mit.</p>
+
+<h3>6. Gewährleistung und Haftung</h3>
+<p>Die Gewährleistung und Haftung richten sich nach den anwendbaren
+zwingenden gesetzlichen Bestimmungen und sind, soweit rechtlich zulässig,
+wegbedungen.</p>
+<p>Es besteht keine Solidarhaftung für die Lieferung von Strom innerhalb
+der LEG. Schuldner gegenüber den LEG-Produzenten bleibt in jedem Fall der
+LEG-Teilnehmer für den von ihm von der Gesellschaft «LEG» bezogenen
+LEG-Strom.</p>
+
+<h3>7. Datenaustausch und Datenschutz</h3>
+<p>Die Gesellschafter ermächtigen mit Zustimmung zum vorliegenden
+Gesellschaftsvertrag den VNB, die betreffenden Daten (insbesondere Kunden-
+und Messdaten) viertelstündlich digital an den LEG-Vertreter bzw. den
+Abrechnungsdienstleister zu übertragen, so dass die Fakturierung des
+LEG-Stroms ermöglicht wird.</p>
+<p>Die Gesellschafter verpflichten sich zur Einhaltung der anwendbaren
+Datenschutzvorschriften und schützen Personendaten durch geeignete
+technische und organisatorische Massnahmen, behandeln diese vertraulich
+und bewahren diese nicht länger als für die Bearbeitungszwecke auf. Sie
+gewährleisten, dass deren Vertreter und allfällige weitere Dritte sich im
+mindestens demselben Umfang zur Einhaltung der anwendbaren
+Datenschutzvorschriften verpflichten, Personendaten durch geeignete
+technische und organisatorische Massnahmen schützen, diese vertraulich
+behandeln und nicht länger als für die Bearbeitungszwecke aufbewahren.</p>
+
+<h3>8. Vertragsänderungen</h3>
+<p>Der LEG-Vertreter hat das Recht, diesen Gesellschaftsvertrag einseitig
+anzupassen. Änderungen des vorliegenden Gesellschaftsvertrags bedürfen zu
+ihrer Gültigkeit der Schriftform. Auf diese Schriftformklausel kann nicht
+stillschweigend verzichtet werden. Es bestehen keine mündlichen
+Nebenabreden. Vertragsänderungen werden den Gesellschaftern durch den
+LEG-Vertreter mindestens {{ contract_notice_period_months }} Monate vor
+Inkrafttreten schriftlich mitgeteilt. Bei einer Vertragsänderung haben die Gesellschafter das Recht,
+per diesem Datum durch schriftliche Kündigung gemäss Ziffer 5 Absatz 2
+dieses Gesellschaftsvertrags aus der Gesellschaft «LEG» auszutreten.</p>
+
+<h3>9. Zustimmung Beitritt</h3>
+<p>Die Gesellschafter erteilen ihre vorbehaltlose Zustimmung zum Beitritt
+weiterer zukünftiger Gesellschafter zu diesem Gesellschaftsvertrag, sofern
+diese sämtliche Rechte und Pflichten aus dem vorliegenden
+Gesellschaftsvertrag übernehmen.</p>
+<p>Die Gesellschafter bestätigen, dass sie nicht an einer weiteren LEG
+teilnehmen.</p>
+
+<h3>10. Salvatorische Klausel</h3>
+<p>Sollten einzelne Bestimmungen des vorliegenden Gesellschaftsvertrags
+unwirksam sein oder werden, bleibt davon die Wirksamkeit der übrigen
+Vertragsbestimmungen unberührt. Die Vertragsparteien verpflichten sich,
+die unwirksame Bestimmung durch eine wirksame Regelung zu ersetzen, die
+dem Sinn und Zweck dieser Bestimmung in rechtwirksamer Weise wirtschaftlich
+am nächsten kommt. Dasselbe gilt für den Fall, dass sich dieser
+Gesellschaftsvertrag als lückenhaft erweist.</p>
+
+<h3>11. Anwendbares Recht und Gerichtsstand</h3>
+<p>Dieser Gesellschaftsvertrag untersteht ausschliesslich schweizerischem
+materiellem Recht. Gerichtsstand ist der Ort der Gesellschaft «LEG».
+Zwingende Gerichtsstände bleiben vorbehalten.</p>

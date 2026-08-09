@@ -33,6 +33,10 @@ def _row_to_tariff(row: sqlite3.Row) -> Tariff:
         local_rate_chf_kwh=Decimal(row["local_rate_chf_kwh"]),
         grid_rate_chf_kwh=Decimal(row["grid_rate_chf_kwh"]),
         feed_in_rate_chf_kwh=Decimal(row["feed_in_rate_chf_kwh"]),
+        admin_fee_chf_kwh=Decimal(row["admin_fee_chf_kwh"]),
+        rate_mode=row["rate_mode"],
+        local_rate_nt_chf_kwh=Decimal(row["local_rate_nt_chf_kwh"]) if row["local_rate_nt_chf_kwh"] else None,
+        feed_in_rate_nt_chf_kwh=Decimal(row["feed_in_rate_nt_chf_kwh"]) if row["feed_in_rate_nt_chf_kwh"] else None,
         name=row["name"],
         valid_from=str_to_date(row["valid_from"]),
         valid_until=str_to_date(row["valid_until"]),
@@ -69,12 +73,17 @@ def create_tariff(db_path: Path, tariff: Tariff) -> Tariff:
                 """
                 INSERT INTO tariffs
                     (community_id, name, local_rate_chf_kwh, grid_rate_chf_kwh,
-                     feed_in_rate_chf_kwh, valid_from, valid_until, active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     feed_in_rate_chf_kwh, admin_fee_chf_kwh, rate_mode,
+                     local_rate_nt_chf_kwh, feed_in_rate_nt_chf_kwh,
+                     valid_from, valid_until, active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     community_row_id, tariff.name, str(tariff.local_rate_chf_kwh),
                     str(tariff.grid_rate_chf_kwh), str(tariff.feed_in_rate_chf_kwh),
+                    str(tariff.admin_fee_chf_kwh), tariff.rate_mode,
+                    str(tariff.local_rate_nt_chf_kwh) if tariff.local_rate_nt_chf_kwh is not None else None,
+                    str(tariff.feed_in_rate_nt_chf_kwh) if tariff.feed_in_rate_nt_chf_kwh is not None else None,
                     date_to_str(tariff.valid_from), date_to_str(tariff.valid_until),
                     int(tariff.active), now, now,
                 ),
@@ -93,12 +102,17 @@ def update_tariff(db_path: Path, tariff_id: int, tariff: Tariff) -> Tariff:
                 """
                 UPDATE tariffs
                 SET name=?, local_rate_chf_kwh=?, grid_rate_chf_kwh=?, feed_in_rate_chf_kwh=?,
+                    admin_fee_chf_kwh=?, rate_mode=?, local_rate_nt_chf_kwh=?, feed_in_rate_nt_chf_kwh=?,
                     valid_from=?, valid_until=?, active=?, updated_at=?
                 WHERE id=?
                 """,
                 (
                     tariff.name, str(tariff.local_rate_chf_kwh), str(tariff.grid_rate_chf_kwh),
-                    str(tariff.feed_in_rate_chf_kwh), date_to_str(tariff.valid_from),
+                    str(tariff.feed_in_rate_chf_kwh),
+                    str(tariff.admin_fee_chf_kwh), tariff.rate_mode,
+                    str(tariff.local_rate_nt_chf_kwh) if tariff.local_rate_nt_chf_kwh is not None else None,
+                    str(tariff.feed_in_rate_nt_chf_kwh) if tariff.feed_in_rate_nt_chf_kwh is not None else None,
+                    date_to_str(tariff.valid_from),
                     date_to_str(tariff.valid_until), int(tariff.active), now_iso(), tariff_id,
                 ),
             )

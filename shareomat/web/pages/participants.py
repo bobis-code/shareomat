@@ -32,6 +32,7 @@ from shareomat.leg_const import (
     PARTICIPANT_TYPE_CONSUMER,
     PARTICIPANT_TYPE_PRODUCER,
     PARTICIPANT_TYPE_PRODUCER_CONSUMER,
+    PARTICIPANT_TYPE_STORAGE,
 )
 from shareomat.models.participant import Participant
 from shareomat.web.rendering import (
@@ -48,7 +49,18 @@ PARTICIPANT_TYPES = [
     (PARTICIPANT_TYPE_PRODUCER, "Erzeuger"),
     (PARTICIPANT_TYPE_CONSUMER, "Verbraucher"),
     (PARTICIPANT_TYPE_PRODUCER_CONSUMER, "Erzeuger & Verbraucher"),
+    (PARTICIPANT_TYPE_STORAGE, "Speicherbetreiber"),
 ]
+
+# Shown as a form hint next to the type dropdown — legal obligation for
+# storage operators specifically, from the LEG-Mustervertrag footnote
+# (Art. 19h Abs. 4 StromVV).
+PARTICIPANT_TYPE_STORAGE_HINT = (
+    "Speicherbetreiber sind dafür verantwortlich, dass sie pro "
+    "Abrechnungsperiode in der Summe nicht mehr Elektrizität innerhalb der "
+    "Gemeinschaft absetzen, als sie von der Gemeinschaft beziehen "
+    "(Art. 19h Abs. 4 StromVV)."
+)
 
 
 def _participant_from_form(ctx: RequestContext, *, participant_id: str) -> Participant:
@@ -78,6 +90,7 @@ def handle_get(ctx: RequestContext) -> str:
         return render_page(
             "participants/form.html", ctx, "participants",
             participant=None, participant_types=PARTICIPANT_TYPES,
+            participant_type_storage_hint=PARTICIPANT_TYPE_STORAGE_HINT,
         )
 
     if len(ctx.segments) == 2 and ctx.segments[1] == "edit":
@@ -88,6 +101,7 @@ def handle_get(ctx: RequestContext) -> str:
         return render_page(
             "participants/form.html", ctx, "participants",
             participant=participant, participant_types=PARTICIPANT_TYPES,
+            participant_type_storage_hint=PARTICIPANT_TYPE_STORAGE_HINT,
         )
 
     return render_page("placeholders/coming_soon.html", ctx, "participants",

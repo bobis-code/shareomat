@@ -92,6 +92,9 @@ def build_leg_config(db_path: Path, runtime: RuntimeConfig, *, as_of: date | Non
         cron_schedule=settings.cron_schedule,
         auto_scan_enabled=settings.auto_scan_enabled,
         scan_interval_seconds=settings.scan_interval_seconds,
+        peak_start_hour=settings.peak_start_hour,
+        peak_end_hour=settings.peak_end_hour,
+        peak_weekdays_only=settings.peak_weekdays_only,
     )
 
     return LegConfig(

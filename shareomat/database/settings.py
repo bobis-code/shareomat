@@ -27,8 +27,8 @@ from shareomat.models.settings import OperationSettings
 
 # bool/int/str fields on OperationSettings, in the order they are (de)serialized.
 _BOOL_FIELDS = {"archive_processed", "auto_scan_enabled", "auto_create_billing",
-                "auto_create_invoices", "auto_send_invoices"}
-_INT_FIELDS = {"scan_interval_seconds"}
+                "auto_create_invoices", "auto_send_invoices", "peak_weekdays_only"}
+_INT_FIELDS = {"scan_interval_seconds", "peak_start_hour", "peak_end_hour"}
 
 
 def get_setting(db_path: Path, key: str) -> str | None:
