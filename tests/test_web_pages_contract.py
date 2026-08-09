@@ -51,8 +51,8 @@ def _post(segments, form=None) -> RequestContext:
 
 _PRICE_FORM = {
     "rate_mode": "flat",
-    "local_rate_chf_kwh": "0.11",
-    "feed_in_rate_chf_kwh": "0.15",
+    "vnb_reference_price_chf_kwh": "0.115",
+    "price_reduction_chf_kwh": "0.01",
     "admin_fee_chf_kwh": "0.005",
     "grid_operator": "EBL",
     "price_notice_period_months": "4",
@@ -99,12 +99,44 @@ def test_draft_create_creates_a_draft_version(db_path) -> None:
     assert "Test LEG" in versions[0].contract_text_snapshot
 
 
+def test_draft_create_derives_feed_in_and_local_rate_from_reference_price(db_path) -> None:
+    save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
+    contract.handle_post(_post(["draft", "create"], _PRICE_FORM))
+
+    draft = list_contract_versions(db_path)[0]
+    assert draft.feed_in_rate_chf_kwh == Decimal("0.105")  # 0.115 - 0.01
+    assert draft.local_rate_chf_kwh == Decimal("0.11")     # 0.105 + 0.005
+
+
+def test_draft_create_rejects_reduction_larger_than_reference_price(db_path) -> None:
+    save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
+    form = dict(_PRICE_FORM, vnb_reference_price_chf_kwh="0.05", price_reduction_chf_kwh="0.10")
+    with pytest.raises(FormError):
+        contract.handle_post(_post(["draft", "create"], form))
+
+
+def test_draft_create_derives_ht_nt_rates_separately(db_path) -> None:
+    save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
+    form = dict(
+        _PRICE_FORM, rate_mode="ht_nt",
+        vnb_reference_price_nt_chf_kwh="0.09", price_reduction_nt_chf_kwh="0.02",
+    )
+    contract.handle_post(_post(["draft", "create"], form))
+
+    draft = list_contract_versions(db_path)[0]
+    assert draft.feed_in_rate_nt_chf_kwh == Decimal("0.07")   # 0.09 - 0.02
+    assert draft.local_rate_nt_chf_kwh == Decimal("0.075")    # 0.07 + 0.005
+
+
 def test_draft_update_edits_in_place(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
     contract.handle_post(_post(["draft", "create"], _PRICE_FORM))
     draft = list_contract_versions(db_path)[0]
 
-    updated_form = dict(_PRICE_FORM, local_rate_chf_kwh="0.20", version_id=str(draft.id))
+    updated_form = dict(
+        _PRICE_FORM, vnb_reference_price_chf_kwh="0.20", price_reduction_chf_kwh="0", admin_fee_chf_kwh="0",
+        version_id=str(draft.id),
+    )
     contract.handle_post(_post(["draft", "update"], updated_form))
 
     versions = list_contract_versions(db_path)
@@ -193,7 +225,9 @@ def test_end_requires_matching_community_name(db_path, monkeypatch) -> None:
 
 def test_copy_from_prefills_form_for_new_draft(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
-    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, local_rate_chf_kwh="0.13")))
+    contract.handle_post(_post(["draft", "create"], dict(
+        _PRICE_FORM, vnb_reference_price_chf_kwh="0.13", price_reduction_chf_kwh="0", admin_fee_chf_kwh="0",
+    )))
     source = list_contract_versions(db_path)[0]
 
     html = contract.handle_get(_ctx(query={"copy_from": str(source.id)}))
@@ -203,7 +237,9 @@ def test_copy_from_prefills_form_for_new_draft(db_path) -> None:
 
 def test_edit_prefills_form_for_existing_draft(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
-    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, local_rate_chf_kwh="0.13")))
+    contract.handle_post(_post(["draft", "create"], dict(
+        _PRICE_FORM, vnb_reference_price_chf_kwh="0.13", price_reduction_chf_kwh="0", admin_fee_chf_kwh="0",
+    )))
     draft = list_contract_versions(db_path)[0]
 
     html = contract.handle_get(_ctx(query={"edit": str(draft.id)}))

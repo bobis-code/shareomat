@@ -80,30 +80,46 @@
       </select>
     </div>
     <div class="field">
-      <label for="local_rate_chf_kwh">LEG-Bezugspreis (CHF/kWh)</label>
-      <input type="text" id="local_rate_chf_kwh" name="local_rate_chf_kwh" required
-             value="{{ form_version.local_rate_chf_kwh }}">
+      <label for="vnb_reference_price_chf_kwh">VNB-Referenzenergiepreis (CHF/kWh)</label>
+      <div class="file-row">
+        <input type="text" id="vnb_reference_price_chf_kwh" name="vnb_reference_price_chf_kwh" required
+               style="flex:1" value="{{ form_version.vnb_reference_price_chf_kwh }}">
+        <button type="button" class="btn-small btn-muted" disabled
+                title="Automatische Ermittlung (z. B. aus ElCom/externen Daten) folgt später">
+          Referenzpreis automatisch ermitteln
+        </button>
+      </div>
     </div>
     <div class="field">
-      <label for="local_rate_nt_chf_kwh">LEG-Bezugspreis Niedertarif (CHF/kWh)</label>
-      <input type="text" id="local_rate_nt_chf_kwh" name="local_rate_nt_chf_kwh"
-             value="{{ form_version.local_rate_nt_chf_kwh if form_version.local_rate_nt_chf_kwh is not none else '' }}">
-      <div class="field-hint">Nur bei Hoch-/Niedertarif — leer lassen für Einheitstarif.</div>
+      <label for="price_reduction_chf_kwh">Preisreduktion gegenüber VNB (CHF/kWh)</label>
+      <input type="text" id="price_reduction_chf_kwh" name="price_reduction_chf_kwh" required
+             value="{{ form_version.price_reduction_chf_kwh }}">
+      <div class="field-hint">
+        Produzentenvergütung = VNB-Referenzenergiepreis − Preisreduktion
+        = {{ "%.4f"|format(form_version.feed_in_rate_chf_kwh) }} CHF/kWh
+      </div>
     </div>
     <div class="field">
-      <label for="feed_in_rate_chf_kwh">Produzentenvergütung (CHF/kWh)</label>
-      <input type="text" id="feed_in_rate_chf_kwh" name="feed_in_rate_chf_kwh" required
-             value="{{ form_version.feed_in_rate_chf_kwh }}">
+      <label for="vnb_reference_price_nt_chf_kwh">VNB-Referenzenergiepreis Niedertarif (CHF/kWh)</label>
+      <input type="text" id="vnb_reference_price_nt_chf_kwh" name="vnb_reference_price_nt_chf_kwh"
+             {{ 'disabled' if form_version.rate_mode != 'ht_nt' }}
+             value="{{ form_version.vnb_reference_price_nt_chf_kwh if form_version.vnb_reference_price_nt_chf_kwh is not none else '' }}">
+      <div class="field-hint">Nur bei Hoch-/Niedertarif — gesperrt bei Einheitstarif.</div>
     </div>
     <div class="field">
-      <label for="feed_in_rate_nt_chf_kwh">Produzentenvergütung Niedertarif (CHF/kWh)</label>
-      <input type="text" id="feed_in_rate_nt_chf_kwh" name="feed_in_rate_nt_chf_kwh"
-             value="{{ form_version.feed_in_rate_nt_chf_kwh if form_version.feed_in_rate_nt_chf_kwh is not none else '' }}">
+      <label for="price_reduction_nt_chf_kwh">Preisreduktion gegenüber VNB Niedertarif (CHF/kWh)</label>
+      <input type="text" id="price_reduction_nt_chf_kwh" name="price_reduction_nt_chf_kwh"
+             {{ 'disabled' if form_version.rate_mode != 'ht_nt' }}
+             value="{{ form_version.price_reduction_nt_chf_kwh if form_version.price_reduction_nt_chf_kwh is not none else '' }}">
     </div>
     <div class="field">
       <label for="admin_fee_chf_kwh">Verwaltungsgebühr (CHF/kWh bezogener Solarstrom)</label>
       <input type="text" id="admin_fee_chf_kwh" name="admin_fee_chf_kwh" required
              value="{{ form_version.admin_fee_chf_kwh }}">
+      <div class="field-hint">
+        LEG-Bezugspreis = Produzentenvergütung + Verwaltungsgebühr
+        = {{ "%.4f"|format(form_version.local_rate_chf_kwh) }} CHF/kWh
+      </div>
     </div>
     <div class="field">
       <label for="representative_name">LEG-Vertreter: Name</label>
@@ -165,6 +181,22 @@
       {% if form_mode == 'update' %}<a class="btn btn-muted" href="{{ url_for('contract') }}">Abbrechen</a>{% endif %}
     </div>
   </form>
+  <script>
+    // Niedertarif-Felder sind nur bei Hoch-/Niedertarif editierbar — deaktivierte
+    // Felder werden beim Absenden vom Browser gar nicht mitgeschickt, was hier
+    // gewollt ist (Wechsel auf Einheitstarif löscht die NT-Werte).
+    (function () {
+      var rateMode = document.getElementById('rate_mode');
+      var ntFields = [
+        document.getElementById('vnb_reference_price_nt_chf_kwh'),
+        document.getElementById('price_reduction_nt_chf_kwh'),
+      ];
+      rateMode.addEventListener('change', function () {
+        var enabled = rateMode.value === 'ht_nt';
+        ntFields.forEach(function (field) { field.disabled = !enabled; });
+      });
+    })();
+  </script>
 </div>
 
 <div class="card">

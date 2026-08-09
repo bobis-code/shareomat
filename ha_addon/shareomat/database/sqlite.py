@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 9
+_SCHEMA_VERSION = 10
 
 _SCHEMA_STATEMENTS = [
     """
@@ -388,6 +388,15 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "contract_notice_period_months": "INTEGER NOT NULL DEFAULT 6",
         "tariff_id": "INTEGER REFERENCES tariffs(id)",
         "supersedes_version_id": "INTEGER REFERENCES contract_versions(id)",
+        # Source figures the producer rate is derived from (see
+        # shareomat.web.pages.contract._compute_rates): feed_in_rate_chf_kwh =
+        # vnb_reference_price - price_reduction. Kept alongside the computed
+        # feed_in_rate_chf_kwh/local_rate_chf_kwh so a historical version still
+        # shows *why* the rate was what it was, not just the result.
+        "vnb_reference_price_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
+        "price_reduction_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
+        "vnb_reference_price_nt_chf_kwh": "TEXT",
+        "price_reduction_nt_chf_kwh": "TEXT",
     },
 }
 
