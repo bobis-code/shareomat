@@ -23,6 +23,94 @@
 </div>
 
 <div class="card">
+  <h2>Teilnehmer</h2>
+  {% if not current_version %}
+  <p class="ts">Zuerst einen Vertrag veröffentlichen, um Teilnehmer zuzuordnen.</p>
+  {% else %}
+  {% if assignments %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Teilnehmer</th><th>Rolle</th><th>seit</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for a in assignments %}
+        {% set p = participant_lookup.get(a.participant_id) %}
+        <tr>
+          <td>{{ p.label if p else a.participant_id }}</td>
+          <td>{{ participant_type_labels.get(p.participant_type, p.participant_type) if p else "—" }}</td>
+          <td class="ts">{{ a.joined_at.strftime('%d.%m.%Y') if a.joined_at else "—" }}</td>
+          <td>
+            {% if a.accepted_at is none %}
+            <span class="status-pill status-pill-inactive">⏳ Beitritt ausstehend</span>
+            {% elif a.notified_at is none %}
+            <span class="status-pill status-pill-inactive">⏳ Mitteilung ausstehend</span>
+            {% else %}
+            <span class="status-pill status-pill-active">✓ bestätigt</span>
+            {% endif %}
+          </td>
+          <td>
+            <a class="btn-small btn-muted"
+               href="{{ url_for('contract', suffix='/participants/' + a.id|string + '/declaration') }}">Beitrittserklärung</a>
+            {% if a.accepted_at is none %}
+            <form method="post" action="{{ url_for('contract', suffix='/participants/' + a.id|string + '/confirm') }}"
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-small btn-secondary">Beitritt bestätigen</button>
+            </form>
+            {% elif a.notified_at is none %}
+            <form method="post" action="{{ url_for('contract', suffix='/participants/' + a.id|string + '/notify') }}"
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-small btn-secondary">Mitteilung erfassen</button>
+            </form>
+            {% endif %}
+            {% if a.left_at is none %}
+            <details style="display:inline-block">
+              <summary class="btn-small btn-danger" style="display:inline-block;cursor:pointer">Austritt erfassen</summary>
+              <form method="post" action="{{ url_for('contract', suffix='/participants/' + a.id|string + '/depart') }}"
+                    style="margin-top:8px;max-width:260px">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <div class="field">
+                  <label>Austritt per (Monatsletzter)</label>
+                  <input type="date" name="end_date" required>
+                </div>
+                <button type="submit" class="btn-small btn-danger">Austritt bestätigen</button>
+              </form>
+            </details>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Teilnehmer diesem Vertrag zugeordnet.</p>
+  {% endif %}
+
+  {% if unassigned_participants %}
+  <form class="form-card" method="post" action="{{ url_for('contract', suffix='/participants/add') }}" style="margin-top:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="participant_id">Teilnehmer</label>
+      <select id="participant_id" name="participant_id" required>
+        {% for p in unassigned_participants %}
+        <option value="{{ p.participant_id }}">{{ p.label }} ({{ participant_type_labels.get(p.participant_type, p.participant_type) }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="participant_valid_from">Beitritt per (Monatserster)</label>
+      <input type="date" id="participant_valid_from" name="valid_from" required>
+    </div>
+    <button type="submit">Teilnehmer hinzufügen</button>
+  </form>
+  {% else %}
+  <p class="ts" style="margin-top:12px">Alle Teilnehmer sind bereits zugeordnet.</p>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Vorschlagswerte für neue Entwürfe</h2>
   <p class="field-hint" style="margin-bottom:10px">
     Diese Werte füllen nur ein neues Entwurfsformular vor — rechtlich bindend sind ausschliesslich

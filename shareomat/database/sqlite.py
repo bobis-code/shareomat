@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 10
+_SCHEMA_VERSION = 11
 
 _SCHEMA_STATEMENTS = [
     """
@@ -397,6 +397,14 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "price_reduction_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
         "vnb_reference_price_nt_chf_kwh": "TEXT",
         "price_reduction_nt_chf_kwh": "TEXT",
+    },
+    "participant_contract": {
+        # Separate from accepted_at: accepted_at is the participant's original,
+        # immutable join confirmation (never touched again); notified_at tracks
+        # whether they've been told about the CURRENT contract version — reset
+        # to NULL whenever an assignment is carried forward to a new version at
+        # publish time (see contract_versions.publish_version()).
+        "notified_at": "TEXT",
     },
 }
 

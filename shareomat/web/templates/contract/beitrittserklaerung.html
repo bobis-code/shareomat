@@ -1,0 +1,39 @@
+{# Rendered standalone (not extending base.html), like contract/legal_text.html.
+   Wording follows the Beitrittserklärung section of the reference Mustervertrag
+   (docs/examples/MusterVertrag/LEG-Gesellschaftsvertrag_Lokaler-Strom_de.docx)
+   closely, but references the currently assigned contract version instead of
+   embedding the full contract text — an existing participant is informed of a
+   later version, not asked to sign again (LEG-Mustervertrag §8). #}
+<h2>Beitrittserklärung zur Gesellschaft «{{ community_name }}»</h2>
+
+<p>Mit Ihren Angaben und Ihrer Unterschrift (oder digitaler Bestätigung) melden
+Sie sich verbindlich zur Teilnahme an und akzeptieren den aktuell gültigen
+Gesellschaftsvertrag «{{ community_name }}», Version {{ version.version }}
+{% if version.valid_from %}(gültig ab {{ version.valid_from.strftime('%d.%m.%Y') }}){% endif %}.</p>
+
+<p><strong>LEG-Teilnehmer:</strong></p>
+<p>
+  Name: {{ participant.label }}<br>
+  Adresse: {{ participant.address_line or "—" }}<br>
+  PLZ/Ort: {{ participant.postal_code }} {{ participant.city }}<br>
+  E-Mail: {{ participant.email or "—" }}<br>
+  Messpunktnummer: {{ assignment.participant_id }}
+</p>
+
+<p>
+  {{ "☑" if participant.participant_type == "consumer" else "☐" }} LEG Strom beziehen (Endverbraucher)<br>
+  {{ "☑" if participant.participant_type == "producer" else "☐" }} LEG Strom liefern (Produzent)<br>
+  {{ "☑" if participant.participant_type == "producer_consumer" else "☐" }} LEG Strom beziehen und liefern (Prosumer)<br>
+  {{ "☑" if participant.participant_type == "storage" else "☐" }} LEG Speicherbetreiber*
+</p>
+<p><em>*{{ storage_hint }}</em></p>
+
+<p>Beitritt per: {{ assignment.joined_at.strftime('%d.%m.%Y') if assignment.joined_at else "—" }}</p>
+
+<p>__________________________________<br>
+Datum, Unterschrift LEG-Teilnehmer (oder digitale Bestätigung durch den LEG-Vertreter)</p>
+
+<p class="ts">Hinweis: Der LEG-Vertreter meldet Beitritte üblicherweise mindestens
+1 Monat im Voraus dem Netzbetreiber (3 Monate bei einer LEG-Neugründung bzw. falls
+dafür ein intelligentes Messsystem installiert oder getauscht werden muss),
+gemäss VSE BD LEG-CH 2025.</p>
