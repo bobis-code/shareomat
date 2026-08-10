@@ -1,6 +1,8 @@
 services:
   shareomat:
     build: .
+    ports:
+      - "8099:8099"
     volumes:
       - ./data:/app/data:Z
       - ./config:/app/config:Z

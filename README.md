@@ -49,6 +49,10 @@ Once set up, drop CSV or S-DAT files into `data/inbox/` (or upload them
 through the "Messdaten" page) and trigger a run from the web interface.
 Reports are written to `data/reports/`. Processed files move to `data/archive/`.
 
+For a more detailed walkthrough (including a native Python setup without
+Docker, sample test data, and troubleshooting), see
+[`docs/local-setup.md`](docs/local-setup.md).
+
 ## Input formats
 
 ### CSV
@@ -227,9 +231,12 @@ There must be at least two meters for any local sharing to occur.
 ## Running tests
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pytest tests/
 ```
+
+(`requirements-dev.txt` pulls in `requirements.txt` plus `pytest` — plain
+`requirements.txt` alone does not include a test runner.)
 
 ## Optional: run as a Home Assistant add-on
 
