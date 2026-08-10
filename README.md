@@ -12,10 +12,16 @@ Aktuell befindet sich das Projekt noch im Aufbau und ist weit von einer produkti
 
 Das langfristige Ziel ist es, eine Lösung zu schaffen, mit der kleinere LEG- oder ZEV-Gemeinschaften ihre Energieabrechnung mit möglichst wenig manuellem Aufwand durchführen können – idealerweise ohne teure Spezialsoftware.
 
+**Shareomat läuft komplett eigenständig, ganz ohne Home Assistant** — als
+normaler Docker-Container mit eigener Weboberfläche (`docker compose up`,
+siehe unten). Home Assistant ist optional und kommt an zwei Stellen ins
+Spiel, jede für sich abschaltbar: als Add-on mit Ingress-Panel (bequemer
+Einstieg, kein separater Port) und/oder über MQTT, wenn Kennzahlen als
+HA-Sensoren sichtbar sein sollen (`mqtt.enabled` ist standardmässig `false`).
+Beides ist reine Zusatzintegration — die eigentliche Abrechnungslogik, die
+SQLite-Datenbank und die Weboberfläche laufen identisch, mit oder ohne HA.
+
 ---
-
-LEG/ZEV — calculates local energy sharing.
-
 
 ## Quick start
 
@@ -59,6 +65,23 @@ timestamp,mpid,value_kwh,direction[,quality]
 
 Standard Swiss S-DAT metering data exchange format. Both namespaced (`xmlns="http://www.strom.ch/sdat/MeteringData"`) and plain variants are accepted.
 
+## External data sources
+
+Beyond importing meter readings, the "Externe Daten" page pulls in official
+Swiss reference data on demand — no API key needed except where noted:
+
+| Source | What it fetches | Used for |
+|---|---|---|
+| **ElCom** (LINDAS SPARQL, `energy.ld.admin.ch/elcom`) | Grid operator lookup and official tariff components per municipality/category | Comparing/sanity-checking local tariffs |
+| **BFE** (opendata.swiss, "Referenz-Marktpreise gemäss Art. 15 EnFV") | Official quarterly/monthly PV reference market price | The authoritative rate for final feed-in settlement |
+| **SNB** (`data.snb.ch`) | EUR/CHF exchange rates | Converting EUR-denominated inputs (e.g. ENTSO-E) to CHF |
+| **ENTSO-E** (Transparency Platform) | Swiss day-ahead prices and generation profiles — needs a free personal API token | A non-official price *forecast* for the dashboard/tariff planning only |
+
+The BFE value is the only one of these used for actual settlement — ElCom,
+SNB, and ENTSO-E feed a forecast/comparison view, never a billing run
+directly. Every fetch is persisted (so results survive without re-fetching)
+and logged in a recent-imports history on the same page.
+
 ## Configuration
 
 Shareomat splits configuration into two places, deliberately:
@@ -78,10 +101,10 @@ Shareomat splits configuration into two places, deliberately:
 |-----|-------------|
 | `paths.inbox` / `archive` / `reports` / `state` | Runtime filesystem paths |
 | `paths.share_inbox` | External share folder to watch for meter files; empty = disabled |
-| `mqtt.enabled` / `broker` / `port` | MQTT broker connection for Home Assistant integration |
+| `mqtt.enabled` / `broker` / `port` | Optional — publish status/prices/tariffs as MQTT topics (with Home Assistant MQTT Discovery) for Home Assistant or any other MQTT-aware system. Off by default; Shareomat runs fully without it. |
 | `email.enabled` | Poll an IMAP mailbox (e.g. a dedicated Gmail account) for meter-data attachments |
 | `email.allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender |
-| `web.enabled` / `port` | Admin web interface (standalone or behind Home Assistant Ingress) |
+| `web.enabled` / `port` | Admin web interface — always available; standalone (`http://localhost:8099`) or, if run as the HA add-on, also behind Home Assistant Ingress |
 
 Never commit real passwords or private MQTT/email credentials. Use the Home
 Assistant add-on options for add-on deployments, or keep local credentials
@@ -208,13 +231,25 @@ pip install -r requirements.txt
 pytest tests/
 ```
 
-## Home Assistant add-on source
+## Optional: run as a Home Assistant add-on
 
-The canonical Python source lives in `shareomat/` and `main.py`. The add-on
-directory contains a build copy so Home Assistant can build the add-on from
-`ha_addon/` as its Docker context.
+Shareomat does not need Home Assistant to work (see above) — this is only
+for people who *do* run Home Assistant and want Shareomat's Ingress panel
+and MQTT sensors alongside it, instead of a separate `docker compose`
+deployment.
 
-After changing application code, refresh the add-on copy:
+1. In Home Assistant: **Settings → Add-ons → Add-on Store**
+2. Add this repository as a custom repository:
+   `https://github.com/bobis-code/shareomat`
+3. Install **Shareomat**, configure MQTT/e-mail if wanted, start it.
+4. Open it from the sidebar (Ingress panel) — same admin UI as standalone.
+
+The canonical Python source lives in `shareomat/` and `main.py`. The
+`ha_addon/` directory contains a synced build copy so Home Assistant can
+build the add-on from `ha_addon/` as its Docker context — it is not a
+separate codebase, just a mirror kept in sync by a git pre-commit hook.
+
+After changing application code, refresh the add-on copy manually if needed:
 
 ```bash
 ./prepare_addon.sh
@@ -225,6 +260,16 @@ To verify that the add-on copy is current:
 ```bash
 python tools/prepare_addon.py --check
 ```
+
+## Related: Emsomat (optional)
+
+Shareomat can optionally publish LEG reference prices, recent local/grid
+history, and a short-term consumption forecast over MQTT (see
+[`docs/emsomat-integration.md`](docs/emsomat-integration.md)). One consumer
+of this is [Emsomat](https://github.com/bobis-code/Emsomat), a separate
+Home Assistant integration for local battery/heat-pump/EV optimization —
+it uses the feed as extra context, but works fully on its own without
+Shareomat too. Neither project requires the other.
 
 ## Project layout
 
