@@ -66,13 +66,13 @@ Anteil «Energie» (exkl. Mess- und Netztarife sowie Abgaben).</p>
 beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh
 (Hochtarif) beziehungsweise
 {{ "%.2f"|format((tariff.feed_in_rate_nt_chf_kwh if tariff.feed_in_rate_nt_chf_kwh is not none else tariff.feed_in_rate_chf_kwh) * 100) }}
-Rp./kWh (Niedertarif), jeweils inklusive Mehrwertsteuer. Massgebend für die
+Rp./kWh (Niedertarif). Massgebend für die
 Zuordnung ist der Zeitpunkt der Lieferung gemäss der in den
 Grundeinstellungen der Gemeinschaft festgelegten Hoch-/Niedertarif-Zeiten.</p>
 {% else %}
 <p>Der Preis für die Lieferung von LEG-Strom an die Gesellschaft «LEG»
 beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh
-inklusive Mehrwertsteuer (Einheitstarif 7/24 Stunden).</p>
+(Einheitstarif 7/24 Stunden).</p>
 {% endif %}
 <p>Die Preise können vom LEG-Vertreter mit einer Frist von
 {{ price_notice_period_months }} Monaten jeweils per Monatsende
@@ -93,13 +93,13 @@ hier nicht vereinbart.</p>
 {{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh (Hochtarif)
 beziehungsweise
 {{ "%.2f"|format((tariff.local_rate_nt_chf_kwh if tariff.local_rate_nt_chf_kwh is not none else tariff.local_rate_chf_kwh) * 100) }}
-Rp./kWh (Niedertarif), jeweils inklusive Mehrwertsteuer. Massgebend für die
+Rp./kWh (Niedertarif). Massgebend für die
 Zuordnung ist der Zeitpunkt des Bezugs gemäss der in den Grundeinstellungen
 der Gemeinschaft festgelegten Hoch-/Niedertarif-Zeiten.</p>
 {% else %}
 <p>Der Preis für den Bezug von LEG-Strom von der Gesellschaft «LEG» beträgt
-{{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh inklusive
-Mehrwertsteuer (Einheitstarif 7/24 Stunden).</p>
+{{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh
+(Einheitstarif 7/24 Stunden).</p>
 {% endif %}
 <p>Die Preise können vom LEG-Vertreter mit einer Frist von
 {{ price_notice_period_months }} Monaten jeweils per Monatsende
@@ -235,3 +235,11 @@ Gesellschaftsvertrag als lückenhaft erweist.</p>
 <p>Dieser Gesellschaftsvertrag untersteht ausschliesslich schweizerischem
 materiellem Recht. Gerichtsstand ist der Ort der Gesellschaft «LEG».
 Zwingende Gerichtsstände bleiben vorbehalten.</p>
+
+<hr>
+<p class="ts">
+  Gesellschaftsvertrag «{{ community_name }}»<br>
+  Version: {{ version.version }}<br>
+  Gültig ab: {{ version.valid_from.strftime('%d.%m.%Y') if version.valid_from else "—" }}<br>
+  LEG-Vertreter: {{ representative_name or "—" }}
+</p>

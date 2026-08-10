@@ -107,6 +107,27 @@ def _form_decimal_optional(ctx: RequestContext, field_name: str) -> Decimal | No
         raise FormError(f"Ungültiger Wert bei '{field_name}': '{raw}'")
 
 
+_RAPPEN_PER_CHF = Decimal("100")
+
+
+def _form_rappen(ctx: RequestContext, field_name: str, *, label: str) -> Decimal:
+    """Parse a required price field entered in Rappen and convert it to CHF/kWh.
+
+    The admin form takes prices in Rp./kWh (e.g. "11.50") since that is
+    the unit LEG price sheets are usually communicated in — everywhere
+    else in the app (ContractVersion, tariffs, billing) stores CHF/kWh, so
+    the conversion happens once, right here, at the form boundary. Decimal
+    division by 100 is exact (no float rounding), so no precision is lost.
+    """
+    return form_decimal(ctx, field_name, label=label) / _RAPPEN_PER_CHF
+
+
+def _form_rappen_optional(ctx: RequestContext, field_name: str) -> Decimal | None:
+    """Parse an optional Rappen price field (used for the NT rates) and convert it to CHF/kWh, '' -> None."""
+    rappen = _form_decimal_optional(ctx, field_name)
+    return rappen / _RAPPEN_PER_CHF if rappen is not None else None
+
+
 def _require_month_start(value: date, *, label: str) -> None:
     """Raise FormError unless `value` is the first day of its month (VSE: Eintritte auf Monatsersten)."""
     if value.day != 1:
@@ -187,11 +208,11 @@ def _compute_rates(
 def _version_from_form(ctx: RequestContext) -> ContractVersion:
     """Build a not-yet-persisted ContractVersion from the create/edit form's fields."""
     rate_mode = ctx.form.get("rate_mode") or RATE_MODE_FLAT
-    vnb_reference_price = form_decimal(ctx, "vnb_reference_price_chf_kwh", label="VNB-Referenzenergiepreis")
-    price_reduction = form_decimal(ctx, "price_reduction_chf_kwh", label="Preisreduktion gegenüber VNB")
-    vnb_reference_price_nt = _form_decimal_optional(ctx, "vnb_reference_price_nt_chf_kwh")
-    price_reduction_nt = _form_decimal_optional(ctx, "price_reduction_nt_chf_kwh")
-    admin_fee = form_decimal(ctx, "admin_fee_chf_kwh", label="Verwaltungsgebühr")
+    vnb_reference_price = _form_rappen(ctx, "vnb_reference_price_chf_kwh", label="VNB-Referenzenergiepreis")
+    price_reduction = _form_rappen(ctx, "price_reduction_chf_kwh", label="Preisreduktion gegenüber VNB")
+    vnb_reference_price_nt = _form_rappen_optional(ctx, "vnb_reference_price_nt_chf_kwh")
+    price_reduction_nt = _form_rappen_optional(ctx, "price_reduction_nt_chf_kwh")
+    admin_fee = _form_rappen(ctx, "admin_fee_chf_kwh", label="Verwaltungsgebühr")
 
     feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt = _compute_rates(
         rate_mode=rate_mode, vnb_reference_price=vnb_reference_price, price_reduction=price_reduction,
@@ -259,6 +280,7 @@ def render_contract_text(version: ContractVersion, community_name: str) -> str:
         representative_city=version.representative_city,
         representative_email=version.representative_email,
         tariff=version,
+        version=version,
     )
 
 
@@ -356,8 +378,12 @@ def handle_post(ctx: RequestContext) -> str | None:
         if community is None:
             raise FormError('Keine Gemeinschaft eingerichtet — zuerst unter "Gemeinschaft" anlegen.')
         version = _version_from_form(ctx)
-        version.contract_text_snapshot = render_contract_text(version, community.name)
+        # The version number is only assigned on insert, but the closing
+        # identification block in the rendered text needs it — save first,
+        # then render with the now-known number and patch the text in.
         saved = save_draft_version(ctx.db_path, version)
+        saved.contract_text_snapshot = render_contract_text(saved, community.name)
+        saved = update_draft_version(ctx.db_path, saved.id, saved)
         get_state().set_flash(f"Entwurf Version {saved.version} erstellt.", ok=True)
         return None
 
@@ -369,7 +395,11 @@ def handle_post(ctx: RequestContext) -> str | None:
         community = get_community(ctx.db_path)
         if community is None:
             raise FormError('Keine Gemeinschaft eingerichtet — zuerst unter "Gemeinschaft" anlegen.')
+        existing = get_contract_version(ctx.db_path, version_id)
+        if existing is None:
+            raise FormError(f"Vertragsversion {version_id} wurde nicht gefunden.")
         version = _version_from_form(ctx)
+        version.version = existing.version
         version.contract_text_snapshot = render_contract_text(version, community.name)
         try:
             update_draft_version(ctx.db_path, version_id, version)

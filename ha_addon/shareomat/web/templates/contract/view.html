@@ -168,10 +168,10 @@
       </select>
     </div>
     <div class="field">
-      <label for="vnb_reference_price_chf_kwh">VNB-Referenzenergiepreis (CHF/kWh)</label>
+      <label for="vnb_reference_price_chf_kwh">VNB-Referenzenergiepreis (Rp./kWh)</label>
       <div class="file-row">
         <input type="text" id="vnb_reference_price_chf_kwh" name="vnb_reference_price_chf_kwh" required
-               style="flex:1" value="{{ form_version.vnb_reference_price_chf_kwh }}">
+               style="flex:1" value="{{ '%.2f'|format(form_version.vnb_reference_price_chf_kwh * 100) }}">
         <button type="button" class="btn-small btn-muted" disabled
                 title="Automatische Ermittlung (z. B. aus ElCom/externen Daten) folgt später">
           Referenzpreis automatisch ermitteln
@@ -179,34 +179,34 @@
       </div>
     </div>
     <div class="field">
-      <label for="price_reduction_chf_kwh">Preisreduktion gegenüber VNB (CHF/kWh)</label>
+      <label for="price_reduction_chf_kwh">Preisreduktion gegenüber VNB (Rp./kWh)</label>
       <input type="text" id="price_reduction_chf_kwh" name="price_reduction_chf_kwh" required
-             value="{{ form_version.price_reduction_chf_kwh }}">
+             value="{{ '%.2f'|format(form_version.price_reduction_chf_kwh * 100) }}">
       <div class="field-hint">
         Produzentenvergütung = VNB-Referenzenergiepreis − Preisreduktion
-        = {{ "%.4f"|format(form_version.feed_in_rate_chf_kwh) }} CHF/kWh
+        = {{ "%.2f"|format(form_version.feed_in_rate_chf_kwh * 100) }} Rp./kWh
       </div>
     </div>
     <div class="field">
-      <label for="vnb_reference_price_nt_chf_kwh">VNB-Referenzenergiepreis Niedertarif (CHF/kWh)</label>
+      <label for="vnb_reference_price_nt_chf_kwh">VNB-Referenzenergiepreis Niedertarif (Rp./kWh)</label>
       <input type="text" id="vnb_reference_price_nt_chf_kwh" name="vnb_reference_price_nt_chf_kwh"
              {{ 'disabled' if form_version.rate_mode != 'ht_nt' }}
-             value="{{ form_version.vnb_reference_price_nt_chf_kwh if form_version.vnb_reference_price_nt_chf_kwh is not none else '' }}">
+             value="{{ '%.2f'|format(form_version.vnb_reference_price_nt_chf_kwh * 100) if form_version.vnb_reference_price_nt_chf_kwh is not none else '' }}">
       <div class="field-hint">Nur bei Hoch-/Niedertarif — gesperrt bei Einheitstarif.</div>
     </div>
     <div class="field">
-      <label for="price_reduction_nt_chf_kwh">Preisreduktion gegenüber VNB Niedertarif (CHF/kWh)</label>
+      <label for="price_reduction_nt_chf_kwh">Preisreduktion gegenüber VNB Niedertarif (Rp./kWh)</label>
       <input type="text" id="price_reduction_nt_chf_kwh" name="price_reduction_nt_chf_kwh"
              {{ 'disabled' if form_version.rate_mode != 'ht_nt' }}
-             value="{{ form_version.price_reduction_nt_chf_kwh if form_version.price_reduction_nt_chf_kwh is not none else '' }}">
+             value="{{ '%.2f'|format(form_version.price_reduction_nt_chf_kwh * 100) if form_version.price_reduction_nt_chf_kwh is not none else '' }}">
     </div>
     <div class="field">
-      <label for="admin_fee_chf_kwh">Verwaltungsgebühr (CHF/kWh bezogener Solarstrom)</label>
+      <label for="admin_fee_chf_kwh">Verwaltungsgebühr (Rp./kWh bezogener Solarstrom)</label>
       <input type="text" id="admin_fee_chf_kwh" name="admin_fee_chf_kwh" required
-             value="{{ form_version.admin_fee_chf_kwh }}">
+             value="{{ '%.2f'|format(form_version.admin_fee_chf_kwh * 100) }}">
       <div class="field-hint">
         LEG-Bezugspreis = Produzentenvergütung + Verwaltungsgebühr
-        = {{ "%.4f"|format(form_version.local_rate_chf_kwh) }} CHF/kWh
+        = {{ "%.2f"|format(form_version.local_rate_chf_kwh * 100) }} Rp./kWh
       </div>
     </div>
     <div class="field">
