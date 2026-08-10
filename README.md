@@ -12,32 +12,30 @@ Aktuell befindet sich das Projekt noch im Aufbau und ist weit von einer produkti
 
 Das langfristige Ziel ist es, eine Lösung zu schaffen, mit der kleinere LEG- oder ZEV-Gemeinschaften ihre Energieabrechnung mit möglichst wenig manuellem Aufwand durchführen können – idealerweise ohne teure Spezialsoftware.
 
-**Shareomat läuft komplett eigenständig, ganz ohne Home Assistant** — als
-normaler Docker-Container mit eigener Weboberfläche (`docker compose up`,
-siehe unten). Home Assistant ist optional und kommt an zwei Stellen ins
-Spiel, jede für sich abschaltbar: als Add-on mit Ingress-Panel (bequemer
-Einstieg, kein separater Port) und/oder über MQTT, wenn Kennzahlen als
-HA-Sensoren sichtbar sein sollen (`mqtt.enabled` ist standardmässig `false`).
-Beides ist reine Zusatzintegration — die eigentliche Abrechnungslogik, die
-SQLite-Datenbank und die Weboberfläche laufen identisch, mit oder ohne HA.
+**Shareomat läuft als Home-Assistant-Add-on oder komplett eigenständig, ganz
+ohne Home Assistant** — dieselbe Kernanwendung (Weboberfläche, SQLite-
+Datenbank, Abrechnungslogik) in beiden Fällen. Getestet habe ich bisher
+primär den Weg als HA-Add-on (siehe Quick Start unten); der eigenständige
+Weg per Docker Compose oder nativ mit Python sollte genauso funktionieren,
+ist aber noch nicht im gleichen Umfang durchgespielt — es gibt dort einen
+echten, bisher ungetesteten Code-Pfad (kein Ingress-Pfad-Präfix, siehe
+"Standalone" weiter unten). Feedback dazu ist besonders willkommen.
 
 ---
 
-## Quick start
+## Quick start (Home Assistant add-on)
 
-```bash
-# First-time local setup:
-cp config/leg_config.example.yaml config/leg_config.yaml
+1. In Home Assistant: **Settings → Add-ons → Add-on Store**
+2. Add this repository as a custom repository:
+   `https://github.com/bobis-code/shareomat`
+3. Install **Shareomat**, configure MQTT/e-mail if wanted, start it.
+4. Open it from the sidebar (Ingress panel) and complete the setup wizard
+   (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag).
 
-docker compose up --build
-```
-
-Open the web interface at `http://localhost:8099` and complete the setup
-wizard (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag). Gemeinschaft,
-Teilnehmer, Messpunkte, Vertrag, and automation settings are managed entirely
-through this web interface — not through `leg_config.yaml` — and are stored
-in a SQLite database at `data/shareomat.db`. `leg_config.yaml` only holds
-technical runtime settings (paths, MQTT, e-mail import, web port).
+Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, and automation settings are
+managed entirely through this web interface — not through `leg_config.yaml`
+— and are stored in a SQLite database. Add-on options cover only technical
+runtime settings (MQTT, e-mail import).
 
 Prices are set on the **Vertrag** page, not the Tarife page: publishing a
 contract version there creates the tariff that governs billing for its
@@ -45,13 +43,26 @@ validity period, with the notice periods from the LEG-Mustervertrag enforced
 before publishing. The Tarife page still exists, but only as a manual
 fallback for first-time setup or emergencies — see its own warning banner.
 
-Once set up, drop CSV or S-DAT files into `data/inbox/` (or upload them
-through the "Messdaten" page) and trigger a run from the web interface.
-Reports are written to `data/reports/`. Processed files move to `data/archive/`.
+Once set up, drop CSV or S-DAT files into the inbox (or upload them through
+the "Messdaten" page) and trigger a run from the web interface. Reports are
+written to the reports folder; processed files move to the archive.
 
-For a more detailed walkthrough (including a native Python setup without
-Docker, sample test data, and troubleshooting), see
-[`docs/local-setup.md`](docs/local-setup.md).
+The canonical Python source lives in `shareomat/` and `main.py`. The
+`ha_addon/` directory contains a synced build copy so Home Assistant can
+build the add-on from `ha_addon/` as its Docker context — it is not a
+separate codebase, just a mirror kept in sync by a git pre-commit hook.
+
+After changing application code, refresh the add-on copy manually if needed:
+
+```bash
+./prepare_addon.sh
+```
+
+To verify that the add-on copy is current:
+
+```bash
+python tools/prepare_addon.py --check
+```
 
 ## Input formats
 
@@ -91,15 +102,16 @@ and logged in a recent-imports history on the same page.
 Shareomat splits configuration into two places, deliberately:
 
 - **`leg_config.yaml`** (technical runtime settings only) — paths, MQTT
-  broker, e-mail import, web server port. Copy
+  broker, e-mail import, web server port. For the add-on this is generated
+  from the add-on options; for standalone use, copy
   `config/leg_config.example.yaml` to `config/leg_config.yaml` and edit the
   local file. It is intentionally ignored by Git because it may contain
   broker addresses and MQTT/IMAP credentials.
-- **The admin web interface** (`http://localhost:8099`, backed by
-  `data/shareomat.db`) — Gemeinschaft, Teilnehmer, Messpunkte, Vertrag
-  (which governs Tarife), and automation settings. This is the data that
-  actually changes as a LEG/ZEV community grows, so it is managed live in
-  the UI instead of a config file that requires a restart.
+- **The admin web interface** (backed by `data/shareomat.db`) —
+  Gemeinschaft, Teilnehmer, Messpunkte, Vertrag (which governs Tarife), and
+  automation settings. This is the data that actually changes as a LEG/ZEV
+  community grows, so it is managed live in the UI instead of a config file
+  that requires a restart.
 
 | `leg_config.yaml` key | Description |
 |-----|-------------|
@@ -238,35 +250,28 @@ pytest tests/
 (`requirements-dev.txt` pulls in `requirements.txt` plus `pytest` — plain
 `requirements.txt` alone does not include a test runner.)
 
-## Optional: run as a Home Assistant add-on
+## Standalone (without Home Assistant)
 
-Shareomat does not need Home Assistant to work (see above) — this is only
-for people who *do* run Home Assistant and want Shareomat's Ingress panel
-and MQTT sensors alongside it, instead of a separate `docker compose`
-deployment.
-
-1. In Home Assistant: **Settings → Add-ons → Add-on Store**
-2. Add this repository as a custom repository:
-   `https://github.com/bobis-code/shareomat`
-3. Install **Shareomat**, configure MQTT/e-mail if wanted, start it.
-4. Open it from the sidebar (Ingress panel) — same admin UI as standalone.
-
-The canonical Python source lives in `shareomat/` and `main.py`. The
-`ha_addon/` directory contains a synced build copy so Home Assistant can
-build the add-on from `ha_addon/` as its Docker context — it is not a
-separate codebase, just a mirror kept in sync by a git pre-commit hook.
-
-After changing application code, refresh the add-on copy manually if needed:
+> **Not yet tested end-to-end by me** — the code path differs from the HA
+> add-on in one concrete way (no `X-Ingress-Path` header, so URL generation
+> takes the "no prefix" branch instead — see `shareomat/web/navigation.py`).
+> It should work, since it's the same core application, but I have only
+> verified the HA add-on path live so far. Reports welcome either way.
 
 ```bash
-./prepare_addon.sh
+git clone https://github.com/bobis-code/shareomat.git
+cd shareomat
+cp config/leg_config.example.yaml config/leg_config.yaml
+
+docker compose up --build
 ```
 
-To verify that the add-on copy is current:
+Open the web interface at `http://localhost:8099` and complete the same
+setup wizard as above (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag).
 
-```bash
-python tools/prepare_addon.py --check
-```
+For a more detailed walkthrough (including a native Python setup without
+Docker, sample test data, and troubleshooting), see
+[`docs/local-setup.md`](docs/local-setup.md).
 
 ## Related: Emsomat (optional)
 
@@ -276,7 +281,9 @@ history, and a short-term consumption forecast over MQTT (see
 of this is [Emsomat](https://github.com/bobis-code/Emsomat), a separate
 Home Assistant integration for local battery/heat-pump/EV optimization —
 it uses the feed as extra context, but works fully on its own without
-Shareomat too. Neither project requires the other.
+Shareomat too. Neither project requires the other. Note: unlike Shareomat,
+Emsomat is a Home Assistant *integration* and is installed via HACS, not
+the Add-on Store — see its own README.
 
 ## Project layout
 
