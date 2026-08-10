@@ -1,0 +1,20 @@
+# The Dockerfile does `COPY . .` with no exclusions otherwise — without this
+# file, a build bakes in whatever happens to be in data/ (SQLite DB, inbox
+# files) and, worse, config/leg_config.yaml (which can hold real MQTT/IMAP
+# credentials, see README) as an image layer. Both are bind-mounted at
+# runtime anyway (see docker-compose.yml), so none of this is needed in the
+# image itself.
+
+data/
+config/leg_config.yaml
+
+.git/
+.github/
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+tests/
+docs/
+ha_addon/
