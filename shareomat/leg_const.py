@@ -50,6 +50,16 @@ PARTICIPANT_TYPE_STORAGE: str = "storage"
 UNKNOWN_METER_POLICY_FAIL: str = "fail"
 UNKNOWN_METER_POLICY_SKIP: str = "skip"
 
+# ── Meter data source ─────────────────────────────────────────────────────────
+# Per-community switch (see shareomat.models.settings.OperationSettings):
+# how the community *receives* meter data. Independent of file_type routing
+# in leg_import.py/leg_runner.py, which picks a parser by extension — this
+# picks which parser handles the "sdat" file_type (see shareomat.core.leg_runner
+# .parse_file and docs/sdat_leg_import.md).
+
+METER_DATA_SOURCE_EMAIL_CSV: str = "email_csv"
+METER_DATA_SOURCE_SDAT_LEG: str = "sdat_leg"
+
 # ── Billing run lifecycle ─────────────────────────────────────────────────────
 # A released billing run is an immutable snapshot; only draft -> released and
 # draft|released -> cancelled transitions are allowed (see shareomat.database.billing).

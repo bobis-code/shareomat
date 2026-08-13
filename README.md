@@ -287,6 +287,9 @@ the Add-on Store — see its own README.
 
 ## Project layout
 
+Full architecture writeup (layers, runtime scenarios, deployment, known
+risks, glossary): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ```
 shareomat/                    Python package
   leg_const.py               Domain constants

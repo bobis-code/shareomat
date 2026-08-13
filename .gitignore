@@ -243,3 +243,7 @@ TODO.md
 
 # personal deployment helper — hardcodes the maintainer's LAN IP
 deploy_local_addon.bat
+
+# scratch: generic AI-project doc templates, unrelated to shareomat itself —
+# staged here temporarily, meant to be copied out and deleted (not shareomat content)
+/_templates/

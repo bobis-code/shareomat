@@ -50,6 +50,7 @@ from shareomat.core.pipeline.leg_parser import readings_to_slots
 from shareomat.database.config_builder import build_leg_config
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.meter_readings import save_meter_readings
+from shareomat.database.settings import get_operation_settings
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.leg_const import BILLING_STATUS_CANCELLED, BILLING_STATUS_DRAFT, BILLING_STATUS_RELEASED, SLOT_MINUTES
 from shareomat.models.billing_workflow import (
@@ -95,6 +96,7 @@ def _collect_readings_for_period(
     historical period the user picks, not just "whatever is new".
     """
     start_dt, end_dt = _period_bounds(period_start, period_end)
+    meter_data_source = get_operation_settings(db_path).meter_data_source
 
     readings: list[IntervalReading] = []
     sources: list[BillingSourceFile] = []
@@ -105,7 +107,7 @@ def _collect_readings_for_period(
             continue
         for imp in scan_inbox(directory):
             try:
-                file_readings = parse_file(imp, SLOT_MINUTES, None)
+                file_readings = parse_file(imp, SLOT_MINUTES, None, meter_data_source=meter_data_source)
             except Exception as exc:
                 logger.warning("Billing scan: failed to parse %s: %s", imp.path.name, exc)
                 continue

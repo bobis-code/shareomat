@@ -95,6 +95,7 @@ def build_leg_config(db_path: Path, runtime: RuntimeConfig, *, as_of: date | Non
         peak_start_hour=settings.peak_start_hour,
         peak_end_hour=settings.peak_end_hour,
         peak_weekdays_only=settings.peak_weekdays_only,
+        meter_data_source=settings.meter_data_source,
     )
 
     return LegConfig(

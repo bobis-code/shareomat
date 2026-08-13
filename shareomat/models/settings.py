@@ -24,6 +24,17 @@ Notes:
     editable setting, not a hardcoded rule. The defaults (Mon-Fri 06:00-22:00
     = HT) are a common Swiss starting convention, not a verified EBL rule —
     adjust once the community's actual grid-operator definition is known.
+
+    meter_data_source: which channel the community currently receives meter
+    data through — METER_DATA_SOURCE_* from shareomat.leg_const. "email_csv"
+    (default) is today's flow: CSV/xlsx attachments via the email/share
+    importers. "sdat_leg" switches "sdat"-typed inbox files to the real
+    VSE SDAT-CH-2025 E31/E66 parser (shareomat.core.pipeline.raw.sdat_ch)
+    instead of the legacy experimental one in leg_parser.py — see
+    docs/sdat_leg_import.md. sdat_ch.py currently raises
+    SdatChNotImplementedError until its XML structure is verified against
+    official XSDs, so switching this on ahead of that is a deliberate,
+    visible no-op rather than a silent misparse.
 """
 
 from __future__ import annotations
@@ -46,3 +57,4 @@ class OperationSettings:
     peak_start_hour: int = 6               # Hochtarif start hour (0-23), local time
     peak_end_hour: int = 22                # Hochtarif end hour (0-23, exclusive), local time
     peak_weekdays_only: bool = True        # True: Sat/Sun always Niedertarif
+    meter_data_source: str = "email_csv"   # METER_DATA_SOURCE_* from shareomat.leg_const
