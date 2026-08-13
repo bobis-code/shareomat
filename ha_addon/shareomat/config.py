@@ -101,6 +101,7 @@ class ProcessingConfig:
     scan_interval_seconds: int = 60
     peak_start_hour: int = 6               # Hochtarif-Fenster für Tariff.rate_mode="ht_nt"
     peak_end_hour: int = 22
+    meter_data_source: str = "email_csv"   # METER_DATA_SOURCE_* from shareomat.leg_const
     peak_weekdays_only: bool = True
 
 

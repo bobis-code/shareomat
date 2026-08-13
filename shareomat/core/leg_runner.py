@@ -40,11 +40,12 @@ from pathlib import Path
 
 from shareomat.core.pipeline.leg_billing import compute_billing
 from shareomat.config import LegConfig
-from shareomat.leg_const import UNKNOWN_METER_POLICY_FAIL
+from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG, UNKNOWN_METER_POLICY_FAIL
 from shareomat.core.collector.leg_import import move_to_archive, scan_inbox
 from shareomat.core.pipeline.leg_matcher import match_all
 from shareomat.models.meter_data import ImportFile, IntervalReading
 from shareomat.core.pipeline.leg_parser import parse_csv, parse_sdat, readings_to_slots
+from shareomat.core.pipeline.raw.sdat_ch import parse_sdat_ch
 from shareomat.core.report.leg_report import (
     write_billing_csv,
     write_billing_json,
@@ -64,16 +65,25 @@ def parse_file(
     imp: ImportFile,
     slot_minutes: int,
     known_meter_ids: set[str] | None,
+    meter_data_source: str = "email_csv",
 ) -> list[IntervalReading]:
     """Parse one file into meter readings, choosing the right parser by type.
 
     Public (not prefixed `_`) because shareomat.database.billing reuses it
     to parse inbox/archive files on demand for an arbitrary billing period,
     outside the automatic scan-new-files-only cycle below.
+
+    meter_data_source (OperationSettings.meter_data_source) only affects
+    file_type == "sdat": METER_DATA_SOURCE_SDAT_LEG routes to the real
+    VSE SDAT-CH-2025 parser (raw/sdat_ch.py, currently a stub that raises
+    SdatChNotImplementedError — see docs/sdat_leg_import.md); the default
+    keeps using the legacy experimental parser in leg_parser.py.
     """
     if imp.file_type == "csv":
         return parse_csv(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
     if imp.file_type == "sdat":
+        if meter_data_source == METER_DATA_SOURCE_SDAT_LEG:
+            return parse_sdat_ch(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
         return parse_sdat(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
     if imp.file_type == "xlsx":
         from shareomat.core.pipeline.raw.ebl_xlsx import parse as parse_ebl_xlsx
@@ -125,7 +135,10 @@ def run(config: LegConfig, mqtt_client: object = None, db_path: Path | None = No
             logger.info("Already processed, skipping: %s", imp.path.name)
             continue
         try:
-            readings = parse_file(imp, slot_minutes, known_meter_ids)
+            readings = parse_file(
+                imp, slot_minutes, known_meter_ids,
+                meter_data_source=config.processing.meter_data_source,
+            )
             all_readings.extend(readings)
             newly_processed.append(imp)
         except Exception as exc:

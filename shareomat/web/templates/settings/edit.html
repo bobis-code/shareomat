@@ -18,6 +18,19 @@
       <input type="checkbox" id="archive_processed" name="archive_processed" {{ 'checked' if settings.archive_processed }}>
       <label for="archive_processed" style="margin:0">Verarbeitete Dateien ins Archiv verschieben</label>
     </div>
+    <div class="field">
+      <label for="meter_data_source">Messdaten-Quelle</label>
+      <select id="meter_data_source" name="meter_data_source">
+        {% for value, label in meter_data_sources %}
+        <option value="{{ value }}" {{ 'selected' if settings.meter_data_source == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+      <div class="field-hint">
+        Wie diese Gemeinschaft Messdaten erhält. "SDAT (EBL/Swisseldex)" ist
+        vorbereitet, aber noch nicht funktionsfähig, bis die offizielle
+        SDAT-CH-2025-Struktur verifiziert ist — siehe docs/sdat_leg_import.md.
+      </div>
+    </div>
     <div class="actions-row">
       <button type="submit">Speichern</button>
     </div>

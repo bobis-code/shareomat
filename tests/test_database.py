@@ -277,6 +277,7 @@ def test_operation_settings_roundtrip(db_path):
     save_operation_settings(db_path, OperationSettings(
         unknown_meter_policy="skip", archive_processed=False,
         cron_schedule="0 6 * * *", auto_scan_enabled=True, scan_interval_seconds=30,
+        meter_data_source="sdat_leg",
     ))
     settings = get_operation_settings(db_path)
     assert settings.unknown_meter_policy == "skip"
@@ -284,6 +285,7 @@ def test_operation_settings_roundtrip(db_path):
     assert settings.cron_schedule == "0 6 * * *"
     assert settings.auto_scan_enabled is True
     assert settings.scan_interval_seconds == 30
+    assert settings.meter_data_source == "sdat_leg"
 
 
 # ── YAML one-time import ────────────────────────────────────────────────────
