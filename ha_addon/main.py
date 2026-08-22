@@ -57,6 +57,11 @@ from shareomat.database.settings import OperationSettings, get_operation_setting
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
 from shareomat.ha.mqtt_runtime import publish_demand_forecast, setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.sparkplug.bridge import mirror_host_to_uplink
+from shareomat.sparkplug.host import SparkplugHost
+from shareomat.sparkplug.participant_relay import ParticipantRelay
+from shareomat.sparkplug.wan_downlink import WanDownlink
+from shareomat.sparkplug.wan_uplink import build_wan_uplink
 from shareomat.web.server import WebServer, get_state as get_web_state
 
 _RUNTIME_CONFIG_PATH = Path(
@@ -185,11 +190,71 @@ def _run_safe_cycle(runtime: RuntimeConfig, db_path: Path, mqtt_client: object |
         _RUN_LOCK.release()
 
 
+def _setup_sparkplug(runtime: RuntimeConfig) -> tuple[object | None, object | None, object | None, object | None]:
+    """Start the Sparkplug B local channel (Emsomat<->Shareomat) and, if configured, the
+    Cross-House WAN channel (Shareomat<->Shareomat). Returns
+    (sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink) - any of which is None
+    if disabled or its connection failed (failure here never blocks the settlement engine
+    or the plain MQTT/HA-discovery channel, see docs/Architektur/Emsomat_Shareomat_MQTT_Vertrag.md).
+
+    Started once at process startup (like the plain mqtt_client), not per settlement cycle -
+    these are long-lived Sparkplug sessions, not settlement-run outputs.
+    """
+    if not runtime.sparkplug.enabled:
+        return None, None, None, None
+
+    sparkplug_relay = ParticipantRelay(runtime.sparkplug, runtime.mqtt)
+    if not sparkplug_relay.start():
+        logger.warning("Sparkplug ParticipantRelay could not connect — local Sparkplug channel disabled")
+        sparkplug_relay = None
+
+    wan_uplink = None
+    wan_downlink = None
+    if runtime.wan.enabled and sparkplug_relay is not None:
+        wan_uplink = build_wan_uplink(runtime.wan, client_id=f"{runtime.mqtt.client_id}-wan-uplink")
+        if not wan_uplink.start():
+            logger.warning("WAN Uplink could not connect — Cross-House uplink disabled")
+            wan_uplink = None
+
+        wan_downlink = WanDownlink(runtime.wan, sparkplug_relay, client_id=f"{runtime.mqtt.client_id}-wan-downlink")
+        if not wan_downlink.start():
+            logger.warning("WAN Downlink could not connect — Cross-House downlink disabled")
+            wan_downlink = None
+
+    def _on_emsomat_metrics_changed() -> None:
+        if wan_uplink is None:
+            return
+        mirror_host_to_uplink(sparkplug_host, wan_uplink, runtime.wan.own_participant_id)
+
+    sparkplug_host = SparkplugHost(
+        runtime.sparkplug, runtime.mqtt,
+        on_metrics_changed=_on_emsomat_metrics_changed if wan_uplink is not None else None,
+    )
+    if not sparkplug_host.start():
+        logger.warning("Sparkplug Host could not connect — cannot read Emsomat's local Sparkplug data")
+        sparkplug_host = None
+
+    return sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink
+
+
+def _stop_sparkplug(components: tuple[object | None, ...]) -> None:
+    """Stop Sparkplug components in reverse-of-start order (host, then WAN, then relay)."""
+    for component in components:
+        if component is None:
+            continue
+        try:
+            component.stop()
+        except Exception as exc:
+            logger.warning("Sparkplug component stop failed: %s", exc)
+
+
 def _run_daemon(
     runtime: RuntimeConfig,
     mqtt_client: object | None,
     settings: OperationSettings,
     on_run: Callable[[], None],
+    *,
+    sparkplug_components: tuple[object | None, ...] = (),
 ) -> None:
     """Start all background daemon services and block until stopped."""
     threads = []
@@ -268,6 +333,7 @@ def _run_daemon(
             t.stop()
         if mqtt_client is not None:
             shutdown_mqtt(mqtt_client)
+        _stop_sparkplug(sparkplug_components)
 
 
 def _serve_degraded(message: str, *, port: int = 8099) -> None:
@@ -332,6 +398,9 @@ def main() -> None:
             "credentials, and whether the broker is running."
         )
 
+    sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink = _setup_sparkplug(runtime)
+    sparkplug_components = (sparkplug_host, wan_uplink, wan_downlink, sparkplug_relay)
+
     web_server = None
     if runtime.web.enabled:
         web_server = WebServer(port=runtime.web.port)
@@ -353,6 +422,7 @@ def main() -> None:
         _run_daemon(
             runtime, mqtt_client, settings,
             on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client),
+            sparkplug_components=sparkplug_components,
         )
     elif web_server is not None:
         # No daemon services, but the admin web UI must keep running.
@@ -363,9 +433,11 @@ def main() -> None:
         except KeyboardInterrupt:
             web_server.stop()
             shutdown_mqtt(mqtt_client)
+            _stop_sparkplug(sparkplug_components)
             logger.info("shareomat stopped")
     else:
         shutdown_mqtt(mqtt_client)
+        _stop_sparkplug(sparkplug_components)
         logger.info("shareomat done")
 
 

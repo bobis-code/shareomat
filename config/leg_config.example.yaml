@@ -41,3 +41,31 @@ email:
 web:
   enabled: true
   port: 8099
+
+# Sparkplug B: local Emsomat<->Shareomat channel, see
+# docs/Architektur/Emsomat_Shareomat_MQTT_Vertrag.md. Uses the same broker
+# as mqtt: above, on its own connection(s) (a Sparkplug STATE Will can't
+# share a connection with mqtt:'s own status Will).
+sparkplug:
+  enabled: false
+  group_id: "emsomat"
+  primary_host_id: "shareomat"
+  emsomat_edge_node_id: ""  # required if enabled - must match Emsomat's node_id
+  participant_edge_node_id: "shareomat-relay"
+
+# Cross-House Sparkplug B: Shareomat<->Shareomat over the central relay, see
+# docs/Architektur/Shareomat_CrossHouse_Sparkplug_Vertrag.md. Separate broker
+# from mqtt:/sparkplug: above (the central mqtt.shareomat.ch, not the local
+# house broker). Not yet in production use - architecture + code done,
+# central broker/credential provisioning still open.
+wan:
+  enabled: false
+  broker: ""  # e.g. "mqtt.shareomat.ch" - required if enabled
+  port: 8883
+  username: ""
+  password: ""
+  tls_enabled: true
+  tls_ca_cert: ""
+  group_id: ""  # stable internal LEG ID - required if enabled, NO human-readable names
+  edge_node_id: ""  # this site's WAN identity - required if enabled
+  own_participant_id: ""  # must match one participant_id set up via the web UI - required if enabled

@@ -149,6 +149,53 @@ class WebConfig:
 
 
 @dataclass
+class SparkplugConfig:
+    """Sparkplug B settings for the local Emsomat<->Shareomat channel, see
+    docs/Architektur/Emsomat_Shareomat_MQTT_Vertrag.md. Uses the same broker
+    as `mqtt` above (broker/port/username/password/tls_*), but its own MQTT
+    client connection - Sparkplug's STATE Will and `mqtt.status`'s own Will
+    can't share one connection (MQTT allows only one Will per connection)."""
+
+    enabled: bool = False
+    group_id: str = "emsomat"
+    primary_host_id: str = "shareomat"
+    emsomat_edge_node_id: str = ""
+    participant_edge_node_id: str = "shareomat-relay"
+
+
+@dataclass
+class WanConfig:
+    """Cross-House Sparkplug B settings (Shareomat<->Shareomat over the
+    central relay), see docs/Architektur/Shareomat_CrossHouse_Sparkplug_Vertrag.md.
+    Own broker connection details - deliberately separate from `mqtt`/
+    `sparkplug` above (different broker: the central `mqtt.shareomat.ch`,
+    not the local house broker).
+
+    group_id here is the LEG's stable internal ID (Abschnitt 6.1 - candidate:
+    Community.community_id, NOT a human-readable name), NOT the same value as
+    the local sparkplug.group_id above (that one is per-house/local, this one
+    is per-LEG/shared across houses).
+
+    own_participant_id identifies which Participant (see shareomat.models.participant)
+    this Shareomat instance's own, locally-connected Emsomat represents on the
+    WAN - one LegConfig can list many participants (a whole LEG's billing),
+    but the local Sparkplug channel only ever describes ONE site's own
+    Emsomat. No new ID scheme: reuses the existing participant_id namespace,
+    just points at which one is "this site"."""
+
+    enabled: bool = False
+    broker: str = ""
+    port: int = 8883
+    username: str = ""
+    password: str = ""
+    tls_enabled: bool = True
+    tls_ca_cert: str = ""
+    group_id: str = ""
+    edge_node_id: str = ""
+    own_participant_id: str = ""
+
+
+@dataclass
 class RuntimeConfig:
     """The technical configuration that comes from Docker/Home-Assistant options, not SQLite."""
 
@@ -156,6 +203,8 @@ class RuntimeConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     email: EmailConfig = field(default_factory=EmailConfig)
     web: WebConfig = field(default_factory=WebConfig)
+    sparkplug: SparkplugConfig = field(default_factory=SparkplugConfig)
+    wan: WanConfig = field(default_factory=WanConfig)
 
 
 @dataclass
@@ -177,6 +226,8 @@ class LegConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     email: EmailConfig = field(default_factory=EmailConfig)
     web: WebConfig = field(default_factory=WebConfig)
+    sparkplug: SparkplugConfig = field(default_factory=SparkplugConfig)
+    wan: WanConfig = field(default_factory=WanConfig)
 
 
 # ── Runtime (technical) config parsing ──────────────────────────────────────
@@ -242,6 +293,39 @@ def _parse_web(raw: dict[str, Any]) -> WebConfig:
     )
 
 
+def _parse_sparkplug(raw: dict[str, Any]) -> SparkplugConfig:
+    """Parse optional Sparkplug B settings (Emsomat<->Shareomat channel)."""
+    s = raw.get("sparkplug", {})
+    if not s:
+        return SparkplugConfig()
+    return SparkplugConfig(
+        enabled=bool(s.get("enabled", False)),
+        group_id=str(s.get("group_id", "emsomat")),
+        primary_host_id=str(s.get("primary_host_id", "shareomat")),
+        emsomat_edge_node_id=str(s.get("emsomat_edge_node_id", "")),
+        participant_edge_node_id=str(s.get("participant_edge_node_id", "shareomat-relay")),
+    )
+
+
+def _parse_wan(raw: dict[str, Any]) -> WanConfig:
+    """Parse optional Cross-House Sparkplug B settings (Shareomat<->Shareomat)."""
+    w = raw.get("wan", {})
+    if not w:
+        return WanConfig()
+    return WanConfig(
+        enabled=bool(w.get("enabled", False)),
+        broker=str(w.get("broker", "")),
+        port=int(w.get("port", 8883)),
+        username=str(w.get("username", "")),
+        password=str(w.get("password", "")),
+        tls_enabled=bool(w.get("tls_enabled", True)),
+        tls_ca_cert=str(w.get("tls_ca_cert", "")),
+        group_id=str(w.get("group_id", "")),
+        edge_node_id=str(w.get("edge_node_id", "")),
+        own_participant_id=str(w.get("own_participant_id", "")),
+    )
+
+
 def load_runtime_config(config_path: Path) -> RuntimeConfig:
     """Read the technical runtime configuration YAML (paths, MQTT, e-mail, web port)."""
     logger.info("Loading runtime config from %s", config_path)
@@ -254,6 +338,8 @@ def load_runtime_config(config_path: Path) -> RuntimeConfig:
         mqtt=_parse_mqtt(raw),
         email=_parse_email(raw),
         web=_parse_web(raw),
+        sparkplug=_parse_sparkplug(raw),
+        wan=_parse_wan(raw),
     )
 
 
@@ -343,6 +429,36 @@ def validate_leg_config(config: LegConfig) -> None:
 
     if config.mqtt.enabled and config.mqtt.tls_enabled and config.mqtt.port == 1883:
         logger.warning("TLS is enabled but port is 1883 — typical TLS port is 8883")
+
+    if config.sparkplug.enabled and not config.sparkplug.emsomat_edge_node_id.strip():
+        errors.append(
+            "sparkplug.enabled is true but sparkplug.emsomat_edge_node_id is empty - "
+            "Shareomat needs Emsomat's node_id to know which Sparkplug topics to subscribe to"
+        )
+
+    if config.wan.enabled and not config.sparkplug.enabled:
+        errors.append(
+            "wan.enabled is true but sparkplug.enabled is false - the WAN Downlink needs a local "
+            "ParticipantRelay and the WAN Uplink needs a local SparkplugHost to mirror from"
+        )
+
+    if config.wan.enabled:
+        if not config.wan.broker.strip():
+            errors.append("wan.enabled is true but wan.broker is empty")
+        if not config.wan.group_id.strip():
+            errors.append("wan.enabled is true but wan.group_id is empty - needed for LEG isolation")
+        if not config.wan.edge_node_id.strip():
+            errors.append("wan.enabled is true but wan.edge_node_id is empty - needed to identify this site on the WAN")
+        if not config.wan.own_participant_id.strip():
+            errors.append(
+                "wan.enabled is true but wan.own_participant_id is empty - Shareomat needs to know "
+                "which participant this site's own local Emsomat represents"
+            )
+        elif config.wan.own_participant_id not in participant_ids:
+            errors.append(
+                f"wan.own_participant_id '{config.wan.own_participant_id}' does not match any "
+                "configured participant_id"
+            )
 
     if config.email.enabled:
         if not (1 <= config.email.imap_port <= 65535):
