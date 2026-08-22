@@ -108,6 +108,8 @@ def build_leg_config(db_path: Path, runtime: RuntimeConfig, *, as_of: date | Non
         mqtt=runtime.mqtt,
         email=runtime.email,
         web=runtime.web,
+        sparkplug=runtime.sparkplug,
+        wan=runtime.wan,
     )
 
 
