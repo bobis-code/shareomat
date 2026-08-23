@@ -371,12 +371,17 @@ end-to-end verifiziert (siehe §11).
 
 ## 9. Architekturentscheidungen
 
-Siehe `docs/decisions/`. Noch nicht als nummerierte ADRs nachgetragen, aber
-bereits gelebte Entscheidungen (Kandidaten für ADR-0001 ff.):
+Siehe `docs/decisions/` für die vollständige Liste mit Kontext/Begründung/
+Konsequenzen. Aktuell:
 
-* Freigegebene Abrechnungsläufe sind unveränderlich.
-* Rohformat-Parser normalisieren auf ein gemeinsames internes Modell.
-* "Raise, don't guess" bei unverifizierten externen Datenformaten.
+* ADR-0001 — Freigegebene Abrechnungsläufe sind unveränderlich.
+* ADR-0002 — Rohformat-Parser normalisieren auf ein gemeinsames internes Modell.
+* ADR-0003 — "Raise, don't guess" bei unverifizierten externen Datenformaten.
+* ADR-0004 — MQTT 5.0 + Sparkplug B 3.0 für die lokale Emsomat↔Shareomat-Kommunikation.
+* ADR-0005 — Cross-House-Kommunikation über zentralen Sparkplug-B-Relay.
+
+Angenommene ADRs sind dauerhafte Leitplanken für künftige Änderungen, nicht
+nur historische Notizen — siehe `docs/decisions/README.md`, "Verbindlichkeit".
 
 ---
 

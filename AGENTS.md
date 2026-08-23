@@ -227,16 +227,13 @@ gekennzeichnet.
 Grundlegende Architekturentscheidungen (nicht jede Kleinigkeit) werden als
 ADR in `docs/decisions/ADR-NNNN-kurzbeschreibung.md` dokumentiert.
 `NNNN` ist eine vierstellige, aufsteigend vergebene Nummer. Vorlage und
-erste Beispiele: `docs/decisions/README.md`.
+vollständige Liste: `docs/decisions/README.md`.
 
-Beispiele für ADR-würdige Entscheidungen (bereits getroffen, aber bisher
-nicht als ADR festgehalten — gute Kandidaten zum Nachtragen):
-
-* Freigegebene Abrechnungsläufe sind unveränderlich (draft/released/
-  cancelled statt Update-in-place).
-* Rohformat-Parser normalisieren auf ein gemeinsames internes Modell statt
-  formatspezifischer Sonderfälle in der Abrechnungslogik.
-* "Raise, don't guess" bei unverifizierten externen Datenformaten.
+**ADRs mit Status "Angenommen" sind bindende Leitplanken, keine
+Historie.** Vor einer Änderung an einem Bereich, den ein bestehendes ADR
+laut "Betroffene Dateien" abdeckt: das ADR lesen und respektieren. Eine
+Änderung, die einer angenommenen Entscheidung widerspricht, braucht selbst
+ein neues ADR — keine stillschweigende Abweichung im Code.
 
 Bestehende ADRs werden nicht überschrieben. Wird eine Entscheidung
 revidiert, entsteht ein neuer ADR, der den alten mit "Ersetzt durch
