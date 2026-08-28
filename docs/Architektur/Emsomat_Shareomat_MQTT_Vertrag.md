@@ -3,7 +3,7 @@
 ## Finale lokale Kommunikation
 
 **Status:** Verbindliche Architekturentscheidung — fachliche Spezifikation
-abgeschlossen (Abschnitt 1-29). **Implementiert und per echtem lokalen
+abgeschlossen (Abschnitt 1-30). **Implementiert und per echtem lokalen
 Broker-Test verifiziert (2026-08-22):** Emsomat-Seite (`Emsomat/sparkplug/`,
 Emsomat-Repo) und Shareomat-Seite (`shareomat/sparkplug/`, dieses Repo,
 Primary Host Application + eigene Edge-Node-Identität für Marktteilnehmer).
@@ -23,10 +23,14 @@ gegen diese neue Struktur neu eingebaut — `SparkplugConfig`/`WanConfig` leben
 jetzt in `shareomat/config.py`, `main.py` startet Sparkplug-Host/-Relay/WAN
 einmalig beim Prozessstart (analog zum bestehenden `mqtt_client`), nicht pro
 Abrechnungslauf.
-**Version:** 1.3 (Abschnitt 27: finales Market-Participant-Domainmodell ergänzt,
-`Emsomat/docs/market_shareomat_migration.md` dadurch obsolet und entfernt. Abschnitt
-28: vollständiger Sparkplug-Lifecycle gegen den Normativtext geprüft, inkl. Korrektur
-NDEATH-Will QoS 1→0. Abschnitt 29: Implementierungs-Leitplanken, inkl. konkreter
+**Version:** 1.4 (Abschnitt 30: finale Coordinator-Metric-Präzisierung -
+der unscharfe Platzhalter `LEG/Price` aus Abschnitt 9 wird ersetzt durch
+zwei eindeutige Metrics `LEG/ExportPrice`/`LEG/FeedInPrice`; die frühere
+`{prefix}/energy_data/*`-Plain-JSON-Schnittstelle ist vollständig per
+Hard Cut entfernt, kein Compatibility Layer. Frühere Versionen: Abschnitt
+27 finales Market-Participant-Domainmodell, Abschnitt 28 vollständiger
+Sparkplug-Lifecycle gegen den Normativtext geprüft inkl. Korrektur
+NDEATH-Will QoS 1→0, Abschnitt 29 Implementierungs-Leitplanken inkl.
 Refactoring-Konsequenz für `MarketAdapter`)
 
 **Ersetzt:** die frühere Entwurfsversion dieses Dokuments (JSON-über-MQTT mit Topics
@@ -241,14 +245,13 @@ SHAREOMAT besitzt LEG-Informationen, die EMSOMAT benötigt.
 
 Diese werden als klar definierte EMSOMAT-Input-Metrics übertragen.
 
-Beispielsweise:
+**Final (siehe Abschnitt 30 für die präzisierten Metric-Namen und die
+Begründung, warum `LEG/Price` als ein einzelner Begriff nicht ausreichte):**
 
 ```text
-LEG/Price
-LEG/SurplusPower
-LEG/State
-LEG/SourceTimestamp
-LEG/ValidUntil
+LEG/ExportPrice
+LEG/FeedInPrice
+LEG/DemandForecast
 ```
 
 Die Übertragung erfolgt über den Sparkplug-Mechanismus:
@@ -583,12 +586,12 @@ Beispielsweise:
 Market/ExportPrice
 Market/ExportPriceLevel
 
-LEG/Price
-LEG/SurplusPower
-LEG/State
-LEG/SourceTimestamp
-LEG/ValidUntil
+LEG/ExportPrice
+LEG/FeedInPrice
+LEG/DemandForecast
 ```
+
+(siehe Abschnitt 30 für die vollständige, finale Metric-Liste)
 
 Das ist unser fachliches Datenmodell.
 
@@ -1023,3 +1026,110 @@ Trend/DayPattern-Abfragen), die MQTT/Sparkplug-Aufrufe wandern in einen neuen,
 eigenständigen Sparkplug-Adapter, der `MarketAdapter` nur noch über die bestehenden
 Domain-Methoden (`get_registry_snapshot()`, `get_neighbor_trend(s)`, ...) anspricht —
 nicht umgekehrt, und nicht vermischt in derselben Klasse wie heute.
+
+---
+
+# 30. Finale Coordinator-Metrics (Version 1.4) - präzisiert `LEG/Price`
+
+Abschnitt 9/22 nannten `LEG/Price` als einzelnen, unscharfen Platzhalter.
+Bei der Implementierung stellte sich heraus, dass EMSOMAT tatsächlich
+**drei fachlich unterschiedliche** Coordinator-Werte von SHAREOMAT
+benötigt, die verschiedenen Preisbegriffen entsprechen (siehe
+Billing-Analyse, `shareomat/core/pipeline/leg_billing.py::compute_billing()`):
+
+## 30.1 Die drei Metrics
+
+```text
+LEG/ExportPrice     - normaler Tagesmarkt-/Exportpreis
+LEG/FeedInPrice     - LEG-Produzentenverguetung
+LEG/DemandForecast  - LEG-Gesamtverbrauchsprognose (unveraendert seit Abschnitt 27)
+```
+
+Jede der drei Metrics ist ein Sparkplug-DataSet (Zeitreihe) + vier/sechs
+Begleit-Metrics fuer Envelope-Metadaten, exakt nach demselben Muster wie
+`LEG/DemandForecast` (Abschnitt 27):
+
+```text
+LEG/ExportPrice
+LEG/ExportPrice/CreatedAt
+LEG/ExportPrice/ValidUntil
+LEG/ExportPrice/Source
+LEG/ExportPrice/Quality
+
+LEG/FeedInPrice
+LEG/FeedInPrice/CreatedAt
+LEG/FeedInPrice/ValidUntil
+LEG/FeedInPrice/Source
+LEG/FeedInPrice/Quality
+```
+
+DataSet-Spalten (identisch fuer beide Preis-Metrics):
+`slot_start (STRING), price_chf_kwh (DOUBLE), quality (STRING)`.
+
+## 30.2 `LEG/ExportPrice` - normaler Preis, kanonischer Begriff bleibt `export_price`
+
+Speist EMSOMATs bereits bestehenden kanonischen `export_price`
+(`manager.get_export_price()`) - **kein** paralleles Feld
+`shareomat_price`/`shareomat_export_price`. EMSOMAT besitzt bereits
+mehrere austauschbare lokale Quellen fuer denselben Begriff
+(`CONF_EXPORT_PRICE_SOURCE`: `local_file`/`sensor`/`entsoe`) - SHAREOMAT
+ist schlicht eine vierte, ueber den bestehenden Schalter `leg.price_source`
+aktivierte Quelle desselben Wertes, nicht ein neuer Begriff. Fehlt/ist der
+SHAREOMAT-Wert fuer einen Slot veraltet, fällt EMSOMAT automatisch auf die
+lokale Quelle zurück - nie auf einen Plain-MQTT-Pfad.
+
+Quelle auf SHAREOMAT-Seite: dieselben Tagesmarktpreise
+(`shareomat/database/price_forecasts.py`), die zuvor über die inzwischen
+entfernte Plain-JSON-Schnittstelle (`{prefix}/energy_data/prices`)
+liefen - Transport geändert, fachlicher Wert unverändert.
+
+## 30.3 `LEG/FeedInPrice` - Produzentenverguetung, striktgetrennt vom Konsumentenpreis
+
+Der wirtschaftliche Wert, den ein Produzent für eine lokal ins LEG
+verkaufte kWh tatsächlich erhält, ist `feed_in_rate_chf_kwh` (bzw. im
+HT/NT-Modell `feed_in_rate_chf_kwh`/`feed_in_rate_nt_chf_kwh`) - siehe
+`compute_billing()`: `producer_payout = local_supplied_kwh *
+feed_in_rate_chf_kwh`.
+
+**`local_rate_chf_kwh` darf hierfür niemals verwendet werden** - das ist
+der Konsumentenpreis (`local_rate_chf_kwh = feed_in_rate_chf_kwh +
+admin_fee_chf_kwh`), den ein Abnehmer für lokal bezogene Energie zahlt.
+`admin_fee_chf_kwh` verbleibt wirtschaftlich bei der LEG selbst (Deckungs-
+beitrag/Marge) - weder Produzent noch Konsument erhalten diesen Anteil.
+Ein Battery-Vergleich "Netzexport-Erlös vs. LEG-Export-Erlös" mit
+`local_rate_chf_kwh` würde den LEG-Erlös um genau `admin_fee_chf_kwh` pro
+kWh überschätzen.
+
+SHAREOMAT ist Eigentümer der Vertrags-/Tariflogik (inkl. HT/NT-Fenster,
+`is_peak_hour()`) und löst den gültigen Satz pro Slot bereits server-seitig
+auf (`leg_billing.py::resolve_producer_rate_series()`) - EMSOMAT
+dupliziert weder `admin_fee`-Logik noch `is_peak_hour()`, sondern erhält
+eine bereits fertig aufgelöste Kurve.
+
+## 30.4 Kein gemeinsamer Sparkplug-Mechanismus mit den Teilnehmer-Devices (Abschnitt 27)
+
+Alle drei Coordinator-Metrics laufen über NCMD (Abschnitt 9/10, Pull-mit-
+Bestätigung-Semantik) - **nicht** über DBIRTH/DDATA wie die
+Teilnehmer-Devices aus Abschnitt 27. Diese beiden Sparkplug-Mechanismen
+bleiben bewusst getrennt: DBIRTH/DDATA bildet reine, unbestätigte
+Ist-Werte ab (Nachbar-Leistung), NCMD/NDATA bildet einen Wert ab, den
+EMSOMAT aktiv prüfen und in seine eigene Optimierung übernehmen muss.
+
+## 30.5 Cross-House-Ausschluss (bereits in Abschnitt 9/10 dieses Dokuments sowie im
+Cross-House-Vertrag Abschnitt 5 strukturell verankert)
+
+Alle drei Coordinator-Metrics sind NCMD-basiert; NCMD/DCMD sind auf der
+WAN-Seite (`Shareomat_CrossHouse_Sparkplug_Vertrag.md` Abschnitt 5)
+vollständig verboten. Es existiert daher kein Transportweg, über den
+`LEG/ExportPrice`/`LEG/FeedInPrice`/`LEG/DemandForecast` versehentlich auf
+den Cross-House-Kanal gelangen könnten - strukturell unmöglich, nicht nur
+per Konvention verboten.
+
+## 30.6 Entfernte Plain-JSON-Schnittstelle (Hard Cut)
+
+Die frühere `{prefix}/energy_data/{prices,local_grid,demand_forecast}`-
+Schnittstelle (`shareomat/ha/mqtt_runtime.py::publish_energy_data_snapshot()`/
+`publish_demand_forecast()`/`publish_manual_demand_test()`) ist vollständig
+entfernt, inkl. der zugehörigen Tests. `local_grid` hat keinen Sparkplug-
+Ersatz erhalten - EMSOMAT hatte dafür nie einen Consumer (siehe
+`docs/emsomat-integration.md`, jetzt selbst als obsolet markiert).

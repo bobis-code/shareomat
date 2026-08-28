@@ -39,13 +39,13 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from shareomat.config import LegConfig
+from shareomat.config import LegConfig, ProcessingConfig
 from shareomat.core.pipeline.tariff_time import is_peak_hour
 from shareomat.models.billing import BillingRecord, MatchResult
-from shareomat.models.tariff import RATE_MODE_HT_NT
+from shareomat.models.tariff import RATE_MODE_HT_NT, Tariff
 
 logger = logging.getLogger(__name__)
 
@@ -185,3 +185,46 @@ def compute_billing(
 
     logger.info("Computed %d billing record(s)", len(records))
     return records
+
+
+def resolve_producer_rate_series(
+    tariff: Tariff,
+    processing: ProcessingConfig,
+    *,
+    start: datetime,
+    horizon_hours: int,
+    tz: ZoneInfo = _TZ,
+    slot_minutes: int = 15,
+) -> list[tuple[datetime, float]]:
+    """Resolve the producer feed-in credit (CHF/kWh, `feed_in_rate_chf_kwh` -
+    never `local_rate_chf_kwh`, which is the consumer price including
+    `admin_fee_chf_kwh`) for every slot in a forward horizon.
+
+    This is the single place the HT/NT split for feed_in_rate is evaluated
+    (same `is_peak_hour()` call as compute_billing() above) - Shareomat owns
+    the tariff/HT-NT rules, so Emsomat's Sparkplug adapter (LEG/FeedInPrice,
+    see shareomat.sparkplug.coordinator_mapping) receives an already-resolved
+    per-slot rate and never needs to reimplement this logic itself."""
+    feed_in_ht = float(tariff.feed_in_rate_chf_kwh)
+    feed_in_nt = (
+        float(tariff.feed_in_rate_nt_chf_kwh)
+        if tariff.feed_in_rate_nt_chf_kwh is not None else feed_in_ht
+    )
+    ht_nt = tariff.rate_mode == RATE_MODE_HT_NT
+
+    slot_count = int(horizon_hours * 60 / slot_minutes)
+    series: list[tuple[datetime, float]] = []
+    for i in range(slot_count):
+        slot_start = start + timedelta(minutes=i * slot_minutes)
+        if ht_nt and not is_peak_hour(
+            slot_start,
+            peak_start_hour=processing.peak_start_hour,
+            peak_end_hour=processing.peak_end_hour,
+            peak_weekdays_only=processing.peak_weekdays_only,
+            tz=tz,
+        ):
+            rate = feed_in_nt
+        else:
+            rate = feed_in_ht
+        series.append((slot_start, rate))
+    return series

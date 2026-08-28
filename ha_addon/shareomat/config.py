@@ -123,7 +123,7 @@ class MqttConfig:
     retain: bool = True
     tls_enabled: bool = False
     tls_ca_cert: str = ""   # Path to CA certificate file, empty = use system CAs
-    energy_data_ttl_seconds: int = 21600   # staleness cutoff for shareomat/energy_data/* (6h default)
+    energy_data_ttl_seconds: int = 21600   # staleness cutoff (ValidUntil) for the Sparkplug Coordinator NCMD envelopes (LEG/DemandForecast, LEG/ExportPrice, LEG/FeedInPrice), 6h default
 
 
 @dataclass

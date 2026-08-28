@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-import json
-
 from shareomat.config import MqttConfig
 from shareomat.ha.mqtt_discovery import publish_engine_discovery
 
@@ -19,15 +17,13 @@ class FakeClient:
         self.published[topic] = payload
 
 
-def test_engine_discovery_publishes_demand_test_number_entity() -> None:
+def test_engine_discovery_publishes_no_number_entities_after_hard_cut() -> None:
+    """The former 'demand_test' Number entity (published to the now-removed
+    plain-MQTT energy_data/demand_forecast/test_set topic) was removed with
+    the Sparkplug Hard Cut (see shareomat/ha/entities/numbers.py) - the
+    NUMBERS loop in publish_engine_discovery() must handle an empty list
+    gracefully, publishing no number/*/config topics at all."""
     client = FakeClient()
     publish_engine_discovery(client, MqttConfig(topic_prefix="shareomat", discovery_prefix="homeassistant"))
 
-    topic = "homeassistant/number/shareomat_engine_demand_test/config"
-    assert topic in client.published
-
-    payload = json.loads(client.published[topic])
-    assert payload["command_topic"] == "shareomat/energy_data/demand_forecast/test_set"
-    assert payload["unit_of_measurement"] == "kWh"
-    assert payload["optimistic"] is True
-    assert payload["device"]["identifiers"] == ["shareomat_engine"]
+    assert not any(topic.startswith("homeassistant/number/") for topic in client.published)

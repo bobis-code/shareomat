@@ -235,6 +235,21 @@ class SparkplugHost:
         ncmd = NCmd(timestamp=now_ms, metrics=(metric,))
         self._client.publish(self._node_topic(MessageType.NCMD), ncmd.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
 
+    def publish_coordinator_ncmd(self, metrics: tuple[Metric, ...]) -> None:
+        """Sends Coordinator-/Market-Metrics (LEG/DemandForecast,
+        LEG/ExportPrice, LEG/FeedInPrice - see sparkplug/coordinator_mapping.py)
+        to the local Emsomat Edge Node via NCMD, per
+        Emsomat_Shareomat_MQTT_Vertrag.md Abschnitt 9/10. No-op if not
+        connected - the next settlement cycle retries; Emsomat's own local
+        fallback logic covers the gap until then, never a plain-MQTT
+        fallback (Hard Cut, Abschnitt 1/20)."""
+        if self._client is None or not self._connected.is_set():
+            logger.warning("SparkplugHost.publish_coordinator_ncmd: not connected, skipped")
+            return
+        now_ms = get_current_timestamp()
+        ncmd = NCmd(timestamp=now_ms, metrics=metrics)
+        self._client.publish(self._node_topic(MessageType.NCMD), ncmd.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
+
     # ------------------------------------------------------------------
     # getters
     # ------------------------------------------------------------------

@@ -79,10 +79,16 @@ Emsomat-zu-Shareomat-Ebene, für die es nicht entworfen ist.
 
 ## Betroffene Dateien
 
-* Shareomat: `shareomat/sparkplug/`, `shareomat/config.py`
-  (`SparkplugConfig`), `main.py`
+* Shareomat: `shareomat/sparkplug/` (inkl. `coordinator_mapping.py`,
+  `host.py::publish_coordinator_ncmd()`), `shareomat/config.py`
+  (`SparkplugConfig`), `shareomat/core/pipeline/leg_billing.py`
+  (`resolve_producer_rate_series()`), `main.py`. Die frühere Plain-JSON-
+  Schnittstelle (`shareomat/ha/mqtt_runtime.py::publish_energy_data_snapshot()`/
+  `publish_demand_forecast()`/`publish_manual_demand_test()`) ist entfernt
+  (Hard Cut, siehe Vertrag Abschnitt 30.6).
 * Emsomat: `Emsomat/sparkplug/`, `Emsomat/market/adapter.py`,
-  `Emsomat/market/models.py`, `Emsomat/manager.py`
+  `Emsomat/market/models.py`, `Emsomat/manager.py`,
+  `Emsomat/shareomat/adapter.py`, `Emsomat/shareomat/models.py`
 
 ## Überprüfung
 

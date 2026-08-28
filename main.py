@@ -47,16 +47,21 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from shareomat.config import RuntimeConfig, load_runtime_config, validate_leg_config
+from shareomat.config import LegConfig, RuntimeConfig, load_runtime_config, validate_leg_config
 from shareomat.core.leg_runner import run
 from shareomat.core.pipeline.consumption_forecast import LOOKBACK_WEEKS, compute_leg_demand_forecast
+from shareomat.core.pipeline.export_price_forecast import fetch_and_persist_day_ahead_prices
+from shareomat.core.pipeline.leg_billing import resolve_producer_rate_series
 from shareomat.database.config_builder import IncompleteConfigError, build_leg_config
-from shareomat.database.consumption_forecasts import latest_computed_at, save_consumption_forecast
+from shareomat.database.consumption_forecasts import latest_computed_at, list_consumption_forecasts, save_consumption_forecast
+from shareomat.database.day_ahead_prices import latest_fetched_at, list_day_ahead_prices
+from shareomat.database.external_settings import get_external_data_settings
 from shareomat.database.meter_readings import list_meter_readings
 from shareomat.database.settings import OperationSettings, get_operation_settings
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
-from shareomat.ha.mqtt_runtime import publish_demand_forecast, setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.sparkplug import coordinator_mapping
 from shareomat.sparkplug.bridge import mirror_host_to_uplink
 from shareomat.sparkplug.host import SparkplugHost
 from shareomat.sparkplug.participant_relay import ParticipantRelay
@@ -72,6 +77,7 @@ _RUNTIME_CONFIG_PATH = Path(
 
 _TZ = ZoneInfo(os.environ.get("SHAREOMAT_TZ", "Europe/Zurich"))
 _MIN_RECOMPUTE_INTERVAL_SECONDS = 1800  # weekday/time-of-day patterns don't change minute to minute
+_MIN_EXPORT_PRICE_FETCH_INTERVAL_SECONDS = 3600  # ENTSO-E day-ahead publishes ~once/day around noon CET
 
 logger = logging.getLogger(__name__)
 _RUN_LOCK = threading.Lock()
@@ -92,6 +98,72 @@ def _maybe_recompute_demand_forecast(db_path: Path) -> None:
         readings = list_meter_readings(db_path, start=now - timedelta(weeks=LOOKBACK_WEEKS), end=now)
         points = compute_leg_demand_forecast(readings, now=now, horizon_days=7, tz=_TZ)
         save_consumption_forecast(db_path, points)
+
+
+def _maybe_recompute_export_price_forecast(db_path: Path) -> None:
+    """Fetch/persist native-resolution ENTSO-E day-ahead prices if stale,
+    throttled independently of the settlement cycle (same pattern as
+    _maybe_recompute_demand_forecast above). No-op without a configured
+    ENTSO-E token - graceful degradation, not an error (see
+    fetch_and_persist_day_ahead_prices())."""
+    token = get_external_data_settings(db_path).entsoe_api_token
+    if not token:
+        return
+    now = datetime.now(timezone.utc)
+    last = latest_fetched_at(db_path)
+    if last is None or (now - last).total_seconds() >= _MIN_EXPORT_PRICE_FETCH_INTERVAL_SECONDS:
+        fetch_and_persist_day_ahead_prices(db_path, api_token=token)
+
+
+def _publish_coordinator_sparkplug(sparkplug_host: SparkplugHost, config: LegConfig, db_path: Path) -> None:
+    """Builds and sends the three Coordinator-/Market-Metrics
+    (LEG/DemandForecast, LEG/ExportPrice, LEG/FeedInPrice) to the local
+    Emsomat via one combined NCMD. Replaces the removed plain-MQTT
+    {prefix}/energy_data/* topics (Hard Cut, see
+    Emsomat_Shareomat_MQTT_Vertrag.md Abschnitt 1/20/21) - deliberately no
+    MQTT fallback if this fails; Emsomat's own local logic covers gaps
+    (leg.price_source handling on the Emsomat side)."""
+    now = datetime.now(timezone.utc)
+    ttl = timedelta(seconds=config.mqtt.energy_data_ttl_seconds)
+    created_at_iso = now.isoformat()
+    valid_until_iso = (now + ttl).isoformat()
+    now_ms = int(now.timestamp() * 1000)
+
+    # start liegt bewusst einen Tag VOR now, nicht bei now selbst - der
+    # gerade laufende native Slot (Demand: 15min, Preis: z.B. stuendlich)
+    # hat einen slot_start VOR now und muss trotzdem mitkommen, sonst
+    # findet Emsomats slot_for(now) ("letzter Slot <= ts") keinen Treffer
+    # fuer den aktuellen Zeitpunkt (siehe Testfund beim Bau dieser Abfrage).
+    query_start = now - timedelta(days=1)
+    demand_points = list_consumption_forecasts(db_path, scope="leg", start=query_start)
+    near_term = [p for p in demand_points if now <= p.slot_start < now + timedelta(days=2)]
+    ok_count = sum(1 for p in near_term if p.quality == "ok")
+    demand_quality = "ok" if near_term and ok_count / len(near_term) >= 0.5 else "insufficient_data"
+    demand_method = demand_points[0].method if demand_points else ""
+
+    price_points = list_day_ahead_prices(db_path, start=query_start, end=now + timedelta(days=7))
+
+    feed_in_series = resolve_producer_rate_series(
+        config.tariff, config.processing, start=now, horizon_hours=48, tz=_TZ,
+    )
+
+    metrics = (
+        coordinator_mapping.demand_forecast_to_metrics(
+            demand_points, timestamp_ms=now_ms, created_at_iso=created_at_iso,
+            valid_until_iso=valid_until_iso, quality=demand_quality, method=demand_method,
+        )
+        + coordinator_mapping.export_price_to_metrics(
+            price_points, timestamp_ms=now_ms, created_at_iso=created_at_iso, valid_until_iso=valid_until_iso,
+        )
+        + coordinator_mapping.feed_in_price_to_metrics(
+            feed_in_series, timestamp_ms=now_ms, created_at_iso=created_at_iso, valid_until_iso=valid_until_iso,
+        )
+    )
+    sparkplug_host.publish_coordinator_ncmd(metrics)
+    logger.info(
+        "Sparkplug coordinator NCMD published (demand_slots=%d quality=%s, price_points=%d, feed_in_slots=%d)",
+        len(demand_points), demand_quality, len(price_points), len(feed_in_series),
+    )
 
 
 def setup_logging() -> None:
@@ -129,7 +201,10 @@ def _update_web_state(runtime: RuntimeConfig, status: str, error: str = "") -> N
         logger.warning("Web state update failed: %s", exc)
 
 
-def _run_safe_cycle(runtime: RuntimeConfig, db_path: Path, mqtt_client: object | None) -> bool:
+def _run_safe_cycle(
+    runtime: RuntimeConfig, db_path: Path, mqtt_client: object | None,
+    sparkplug_host: SparkplugHost | None = None,
+) -> bool:
     """Build a fresh LegConfig from SQLite and run one settlement cycle, unless one is active.
 
     Every trigger path (startup, MQTT command, cron, file watcher, share
@@ -173,19 +248,17 @@ def _run_safe_cycle(runtime: RuntimeConfig, db_path: Path, mqtt_client: object |
             return True
         finally:
             # Published on every cycle, independent of run() outcome, so
-            # short-horizon prices/local-grid data stay fresh on the normal
-            # cron cadence even on cycles where the inbox had nothing new.
-            if mqtt_client is not None:
-                try:
-                    from shareomat.ha.mqtt_runtime import publish_energy_data_snapshot
-                    publish_energy_data_snapshot(mqtt_client, config.mqtt, db_path)
-                except Exception as exc:
-                    logger.error("MQTT energy_data publish failed: %s", exc)
+            # Coordinator-/Market-data stays fresh on the normal cron
+            # cadence even on cycles where the inbox had nothing new. Only
+            # the local Sparkplug channel (ADR-0004) - no plain-MQTT
+            # fallback if Sparkplug is unavailable (Hard Cut).
+            if sparkplug_host is not None:
                 try:
                     _maybe_recompute_demand_forecast(db_path)
-                    publish_demand_forecast(mqtt_client, config.mqtt, db_path)
+                    _maybe_recompute_export_price_forecast(db_path)
+                    _publish_coordinator_sparkplug(sparkplug_host, config, db_path)
                 except Exception as exc:
-                    logger.error("Demand forecast failed: %s", exc)
+                    logger.error("Sparkplug coordinator publish failed: %s", exc)
     finally:
         _RUN_LOCK.release()
 
@@ -408,11 +481,11 @@ def main() -> None:
         state = get_web_state()
         state.register_db(db_path)
         state.register_runtime(runtime)
-        state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client))
+        state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host))
         for warning in startup_warnings:
             state.add_warning(warning)
 
-    _run_safe_cycle(runtime, db_path, mqtt_client)
+    _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host)
 
     settings = get_operation_settings(db_path)
     if should_run_daemon(
@@ -421,7 +494,7 @@ def main() -> None:
     ):
         _run_daemon(
             runtime, mqtt_client, settings,
-            on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client),
+            on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host),
             sparkplug_components=sparkplug_components,
         )
     elif web_server is not None:

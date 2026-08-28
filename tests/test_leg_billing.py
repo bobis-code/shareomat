@@ -8,13 +8,15 @@ from pathlib import Path
 
 import pytest
 
+from zoneinfo import ZoneInfo
+
 from shareomat.config import LegConfig, MqttConfig, PathConfig, ProcessingConfig
-from shareomat.core.pipeline.leg_billing import compute_billing
+from shareomat.core.pipeline.leg_billing import compute_billing, resolve_producer_rate_series
 from shareomat.models.billing import MatchResult
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
-from shareomat.models.tariff import Tariff
+from shareomat.models.tariff import RATE_MODE_HT_NT, Tariff
 
 
 def _config(participants, meters):
@@ -283,3 +285,75 @@ def test_ht_nt_missing_nt_rate_falls_back_to_ht_rate():
     records = compute_billing(results, config, off_peak_ts, off_peak_ts + timedelta(minutes=15))
     p2 = next(r for r in records if r.participant_id == "P2")
     assert p2.local_cost_chf == pytest.approx(1.0 * 0.20)  # falls back to HT rate, not 0
+
+
+# ── resolve_producer_rate_series() - feeds LEG/FeedInPrice, never local_rate ──
+
+
+_TZ = ZoneInfo("Europe/Zurich")
+
+
+def test_resolve_producer_rate_series_flat_mode_ignores_ht_nt_window():
+    tariff = Tariff(
+        local_rate_chf_kwh=Decimal("0.12"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.08"), rate_mode="flat",
+    )
+    processing = ProcessingConfig(peak_start_hour=6, peak_end_hour=22, peak_weekdays_only=True)
+    start = datetime(2024, 1, 1, 22, 0, tzinfo=timezone.utc)  # 23:00 Europe/Zurich, would be NT if ht_nt
+
+    series = resolve_producer_rate_series(tariff, processing, start=start, horizon_hours=1, tz=_TZ, slot_minutes=15)
+
+    assert len(series) == 4
+    assert all(price == pytest.approx(0.08) for _, price in series)
+
+
+def test_resolve_producer_rate_series_ht_nt_splits_by_peak_window():
+    tariff = Tariff(
+        local_rate_chf_kwh=Decimal("0.20"), local_rate_nt_chf_kwh=Decimal("0.10"),
+        grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.15"), feed_in_rate_nt_chf_kwh=Decimal("0.05"),
+        rate_mode=RATE_MODE_HT_NT,
+    )
+    processing = ProcessingConfig(peak_start_hour=6, peak_end_hour=22, peak_weekdays_only=True)
+    peak_start = datetime(2024, 1, 1, 9, 0, tzinfo=timezone.utc)      # 10:00 Europe/Zurich Monday, peak
+
+    series = resolve_producer_rate_series(tariff, processing, start=peak_start, horizon_hours=24, tz=_TZ, slot_minutes=60)
+    by_slot = dict(series)
+
+    peak_slot = datetime(2024, 1, 1, 9, 0, tzinfo=timezone.utc)
+    off_peak_slot = datetime(2024, 1, 1, 21, 0, tzinfo=timezone.utc)  # 22:00 Europe/Zurich, off-peak boundary
+    assert by_slot[peak_slot] == pytest.approx(0.15)
+    assert by_slot[off_peak_slot] == pytest.approx(0.05)
+
+
+def test_resolve_producer_rate_series_ht_nt_missing_nt_rate_falls_back_to_ht():
+    """Same non-silent-zero guarantee as compute_billing() itself (see
+    test_ht_nt_missing_nt_rate_falls_back_to_ht_rate above)."""
+    tariff = Tariff(
+        local_rate_chf_kwh=Decimal("0.20"), grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.15"), rate_mode=RATE_MODE_HT_NT,
+    )
+    processing = ProcessingConfig(peak_start_hour=6, peak_end_hour=22, peak_weekdays_only=True)
+    off_peak_start = datetime(2024, 1, 1, 22, 0, tzinfo=timezone.utc)  # 23:00 Europe/Zurich, off-peak
+
+    series = resolve_producer_rate_series(tariff, processing, start=off_peak_start, horizon_hours=1, tz=_TZ, slot_minutes=15)
+
+    assert all(price == pytest.approx(0.15) for _, price in series)
+
+
+def test_resolve_producer_rate_series_never_uses_local_rate():
+    """Regression guard for the LEG-Exportpreis-Semantik: the producer rate
+    must come exclusively from feed_in_rate_chf_kwh, never local_rate_chf_kwh
+    (the consumer price, which includes admin_fee_chf_kwh)."""
+    tariff = Tariff(
+        local_rate_chf_kwh=Decimal("99.0"),  # deliberately absurd - must never leak into the result
+        grid_rate_chf_kwh=Decimal("0.28"),
+        feed_in_rate_chf_kwh=Decimal("0.08"),
+        rate_mode="flat",
+    )
+    processing = ProcessingConfig()
+    start = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+    series = resolve_producer_rate_series(tariff, processing, start=start, horizon_hours=1, tz=_TZ, slot_minutes=15)
+
+    assert all(price == pytest.approx(0.08) for _, price in series)
