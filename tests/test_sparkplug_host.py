@@ -218,3 +218,34 @@ def test_get_metric_value_returns_none_for_unknown_metric():
     host = SparkplugHost(_sp_config(), _mqtt_config(), client=client)
     host.start()
     assert host.get_metric_value("does/not/exist") is None
+
+
+# ---------------------------------------------------------------------------
+# publish_coordinator_ncmd() - LEG/DemandForecast + LEG/ExportPrice + LEG/FeedInPrice
+# ---------------------------------------------------------------------------
+
+def test_publish_coordinator_ncmd_sends_combined_metrics():
+    client = FakeClient()
+    host = SparkplugHost(_sp_config(), _mqtt_config(), client=client)
+    host.start()
+    client.published.clear()
+
+    metrics = (
+        Metric(timestamp=1, name="LEG/DemandForecast/Quality", datatype=DataType.STRING, value="ok"),
+        Metric(timestamp=1, name="LEG/ExportPrice/Quality", datatype=DataType.STRING, value="ok"),
+    )
+    host.publish_coordinator_ncmd(metrics)
+
+    ncmd_publishes = [p for p in client.published if p[0] == "spBv1.0/emsomat/NCMD/EMSOMAT-A"]
+    assert len(ncmd_publishes) == 1
+    decoded = NCmd.decode(ncmd_publishes[0][1])
+    names = {m.name for m in decoded.metrics}
+    assert "LEG/DemandForecast/Quality" in names
+    assert "LEG/ExportPrice/Quality" in names
+
+
+def test_publish_coordinator_ncmd_before_connected_is_noop():
+    client = FakeClient()
+    host = SparkplugHost(_sp_config(), _mqtt_config(), client=client)
+    host.publish_coordinator_ncmd((Metric(timestamp=1, name="LEG/DemandForecast/Quality", datatype=DataType.STRING, value="ok"),))
+    assert client.published == []

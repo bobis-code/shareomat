@@ -29,11 +29,8 @@ class NumberDef:
     icon: str | None = None
 
 
-# Dev/test aid: lets a developer manually inject a demand_forecast value from
-# the HA GUI to exercise a real consumer's (e.g. Emsomat's) ingestion path
-# without waiting for enough accumulated meter data for a real forecast —
-# see mqtt_runtime.publish_manual_demand_test().
-NUMBERS: list[NumberDef] = [
-    NumberDef("demand_test", "Shareomat Test-Bedarf (LEG)", "energy_data/demand_forecast/test_set",
-              "kWh", 0, 50, 0.1, icon="mdi:test-tube"),
-]
+# The former "demand_test" dev/test-aid entry (published to the now-removed
+# plain-MQTT energy_data/demand_forecast/test_set topic) was removed with
+# the Sparkplug Hard Cut (ADR-0004, Emsomat_Shareomat_MQTT_Vertrag.md
+# Abschnitt 30.6) - no replacement built, no Number entity needed it.
+NUMBERS: list[NumberDef] = []

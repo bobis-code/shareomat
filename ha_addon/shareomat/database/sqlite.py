@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 11
+_SCHEMA_VERSION = 12
 
 _SCHEMA_STATEMENTS = [
     """
@@ -321,6 +321,17 @@ _SCHEMA_STATEMENTS = [
     """,
     """
     CREATE INDEX IF NOT EXISTS idx_consumption_forecasts_slot ON consumption_forecasts(slot_start)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS day_ahead_prices (
+        id INTEGER PRIMARY KEY,
+        slot_start TEXT NOT NULL UNIQUE,
+        price_chf_kwh TEXT NOT NULL,
+        computed_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_day_ahead_prices_slot ON day_ahead_prices(slot_start)
     """,
     """
     CREATE TABLE IF NOT EXISTS contract_versions (

@@ -71,6 +71,22 @@ class PriceForecast:
 
 
 @dataclass
+class DayAheadPricePoint:
+    """One native-resolution ENTSO-E day-ahead price point (CHF/kWh).
+
+    Unlike PriceForecast (a single averaged value for a whole date range,
+    dashboard-only), this preserves whatever resolution ENTSO-E actually
+    publishes at (typically hourly, sometimes 15-minute) - for algorithmic
+    consumption via Sparkplug LEG/ExportPrice
+    (shareomat.sparkplug.coordinator_mapping), which must never see an
+    artificially daily-aggregated or interpolated curve."""
+
+    slot_start: datetime  # UTC
+    price_chf_kwh: Decimal
+    id: int | None = None
+
+
+@dataclass
 class ExternalDataSettings:
     """Credentials/settings for external data sources, entered via the web UI (never YAML)."""
 
