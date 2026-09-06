@@ -1,42 +1,69 @@
-# License
+# Shareomat License
 
-Copyright © 2026 Tobias Bürgin ([github.com/bobis-code](https://github.com/bobis-code)). All rights reserved.
+Copyright © 2026 Tobias Bürgin. All rights reserved.
 
-This repository and its contents (the "Software"), as of and after commit
-`8fe12cb13dc844db508d6c15a1fbc1784d1bf2a3` (2026-09-06), are proprietary and
-confidential. No license, right, or interest in the Software is granted to
-any person except as expressly set out in a separate written license
-agreement with the copyright holder — see [EULA_BETA.md](EULA_BETA.md) for
-the terms currently offered to evaluation/beta users.
-
-Without such an agreement you may **not** use, copy, modify, merge, publish,
-distribute, sublicense, sell, or create derivative works of the Software, in
-whole or in part.
-
-## Prior open-source version (MIT License)
-
-Every version of this project published up to and including commit
+Every version of Shareomat published up to and including commit
 `8fe12cb13dc844db508d6c15a1fbc1784d1bf2a3` (2026-09-06) was distributed
-under the MIT License — full text preserved in
-[LICENSE-MIT-HISTORICAL.md](LICENSE-MIT-HISTORICAL.md).
+under the MIT License. Versions published after that commit are
+proprietary and are governed by this license.
 
-That license does not include any revocation right and is understood to be
-**perpetual** for the exact code it covers. Anyone who obtained a copy of
-the Software at or before that commit under the MIT License keeps their MIT
-rights to that specific version — including the right to use, modify,
-merge, publish, distribute, sublicense and/or sell copies of it,
-commercially or not — for as long as they comply with the MIT License's
-condition of retaining the copyright/permission notice. **This document
-does not withdraw, revoke, or narrow those rights in any way.** It governs
-only versions of the Software published after that commit.
+Those versions remain licensed under the MIT License. This license does
+not revoke or restrict rights granted under that license. Full historical
+text: [LICENSE-MIT-HISTORICAL.md](LICENSE-MIT-HISTORICAL.md).
 
-## Third-party components
+No right to use Shareomat is granted except under the Closed Beta terms
+below, or under a separate written agreement with the Licensor.
 
-Third-party libraries used by the Software remain under their own
-respective licenses regardless of the above.
+## Closed Beta License
 
-## No warranty
+By installing or using Shareomat ("Software"), you agree to the following:
 
-The Software is provided "AS IS", without warranty of any kind, express or
-implied. See [EULA_BETA.md](EULA_BETA.md) for the full disclaimer and
-liability terms that apply to your use.
+1. **Grant.** You may install and use the Software for one private
+   household/community installation controlled by you, solely for testing
+   and evaluation. This grant is limited, non-exclusive, non-transferable
+   and royalty-free.
+
+2. **Restrictions.** Unless the Licensor authorizes it in writing, you may
+   not:
+   - distribute, publish, sublicense, sell, rent, or otherwise provide the
+     Software or its source code to third parties;
+   - use the Software commercially, or on behalf of a third party —
+     including running it as a paid coordination, billing, or platform
+     service for others;
+   - publish or disclose non-public Shareomat source code or technical
+     materials;
+   - bypass, disable, or manipulate license checks, feature gates, or
+     access-control mechanisms;
+   - use non-public Shareomat source code to build, or materially assist
+     in building, a competing commercial product.
+
+   Copies reasonably required for installation and backup are permitted.
+   Nothing here restricts rights that cannot legally be excluded.
+
+3. **Term.** This beta license runs for 90 days from first use, or until
+   terminated earlier for breach of these terms. Individual features may
+   additionally require license tokens and may have shorter validity
+   periods, independent of this term. After expiration or termination,
+   stop using the Software and delete your copies (except where retention
+   is required by law).
+
+4. **Energy data and billing context.** Shareomat coordinates energy,
+   import/export, forecast and pricing data between installations. It is
+   not a certified metering, billing, or settlement system. You are
+   solely responsible for independently verifying any billing-relevant
+   data before relying on it for actual payments or settlements, and for
+   complying with applicable ZEV/LEG and energy regulations.
+
+5. **No warranty.** The Software is provided "AS IS", without warranty of
+   any kind, express or implied. To the maximum extent permitted by law,
+   the Licensor is not liable for any damages arising from use of the
+   Software, including billing discrepancies, data loss, or lost
+   energy-cost savings.
+
+6. **Feedback.** Feedback you provide voluntarily may be used by the
+   Licensor without restriction or compensation.
+
+7. **Third-party components.** Third-party components used by the
+   Software remain under their own respective licenses.
+
+8. **Governing law.** Swiss law applies.
