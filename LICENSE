@@ -7,9 +7,10 @@ Every version of Shareomat published up to and including commit
 under the MIT License. Versions published after that commit are
 proprietary and are governed by this license.
 
-Those versions remain licensed under the MIT License. This license does
-not revoke or restrict rights granted under that license. Full historical
-text: [LICENSE-MIT-HISTORICAL.md](LICENSE-MIT-HISTORICAL.md).
+All versions published up to and including that commit remain licensed
+under the MIT License. This license does not revoke or restrict rights
+previously granted under that license. Full historical text:
+[LICENSE-MIT-HISTORICAL.md](LICENSE-MIT-HISTORICAL.md).
 
 No right to use Shareomat is granted except under the Closed Beta terms
 below, or under a separate written agreement with the Licensor.
@@ -32,6 +33,7 @@ By installing or using Shareomat ("Software"), you agree to the following:
      service for others;
    - publish or disclose non-public Shareomat source code or technical
      materials;
+   - remove, obscure, or alter copyright, license, or proprietary notices;
    - bypass, disable, or manipulate license checks, feature gates, or
      access-control mechanisms;
    - use non-public Shareomat source code to build, or materially assist
