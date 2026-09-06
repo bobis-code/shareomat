@@ -3,7 +3,8 @@
 Copyright © 2026 Tobias Bürgin. All rights reserved.
 
 This license applies to Shareomat versions expressly distributed under this
-license from [CUTOVER COMMIT / TAG / DATE] onward.
+license from commit `8fe12cb13dc844db508d6c15a1fbc1784d1bf2a3` (2026-09-06)
+onward.
 
 It does not change or revoke rights previously granted for earlier versions
 under another license, including the MIT License.

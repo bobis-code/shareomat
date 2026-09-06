@@ -1,21 +1,42 @@
-MIT License
+# License
 
-Copyright (c) 2026 bobis-code
+Copyright © 2026 Tobias Bürgin ([github.com/bobis-code](https://github.com/bobis-code)). All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This repository and its contents (the "Software"), as of and after commit
+`8fe12cb13dc844db508d6c15a1fbc1784d1bf2a3` (2026-09-06), are proprietary and
+confidential. No license, right, or interest in the Software is granted to
+any person except as expressly set out in a separate written license
+agreement with the copyright holder — see [EULA_BETA.md](EULA_BETA.md) for
+the terms currently offered to evaluation/beta users.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Without such an agreement you may **not** use, copy, modify, merge, publish,
+distribute, sublicense, sell, or create derivative works of the Software, in
+whole or in part.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+## Prior open-source version (MIT License)
+
+Every version of this project published up to and including commit
+`8fe12cb13dc844db508d6c15a1fbc1784d1bf2a3` (2026-09-06) was distributed
+under the MIT License — full text preserved in
+[LICENSE-MIT-HISTORICAL.md](LICENSE-MIT-HISTORICAL.md).
+
+That license does not include any revocation right and is understood to be
+**perpetual** for the exact code it covers. Anyone who obtained a copy of
+the Software at or before that commit under the MIT License keeps their MIT
+rights to that specific version — including the right to use, modify,
+merge, publish, distribute, sublicense and/or sell copies of it,
+commercially or not — for as long as they comply with the MIT License's
+condition of retaining the copyright/permission notice. **This document
+does not withdraw, revoke, or narrow those rights in any way.** It governs
+only versions of the Software published after that commit.
+
+## Third-party components
+
+Third-party libraries used by the Software remain under their own
+respective licenses regardless of the above.
+
+## No warranty
+
+The Software is provided "AS IS", without warranty of any kind, express or
+implied. See [EULA_BETA.md](EULA_BETA.md) for the full disclaimer and
+liability terms that apply to your use.
