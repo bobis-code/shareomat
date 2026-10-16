@@ -13,6 +13,16 @@
       <div class="field-hint">Eindeutige Kennung, z. B. ZEV-001.</div>
     </div>
     <div class="field">
+      <label for="eic_code">EIC (Swissgrid)</label>
+      <input type="text" id="eic_code" name="eic_code" maxlength="20"
+             autocomplete="off" spellcheck="false"
+             value="{{ community.eic_code if community else '' }}">
+      <div class="field-hint">16-stelliger Energy Identification Code des LEG-Vertreters
+        (Rolle CEM), von Swissgrid vergeben. Empfängeradresse für die
+        SDAT-Messdaten (E31/E66) vom Datahub. Ohne EIC werden SDAT-Nachrichten
+        abgewiesen.</div>
+    </div>
+    <div class="field">
       <label for="name">Name</label>
       <input type="text" id="name" name="name" required
              value="{{ community.name if community else '' }}">

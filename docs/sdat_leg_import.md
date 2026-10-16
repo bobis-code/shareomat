@@ -306,6 +306,14 @@ receiver.eic == community.eic_code
 Nachrichten für einen anderen Empfänger dürfen nicht automatisch
 verarbeitet werden.
 
+> **Umgesetzt (2026-10-17):** `Community.eic_code` (Gemeinschaft → „EIC
+> (Swissgrid)“), beim Speichern auf Länge und ENTSO-E-Prüfziffer geprüft.
+> Die Empfängerprüfung `validate_receiver()` in
+> [`sdat_ch.py`](../shareomat/core/pipeline/raw/sdat_ch.py) deckt §9–11 ab
+> (EIC, Rolle CEM, Business Reason C40; ohne hinterlegten EIC wird alles
+> abgewiesen). Sie wird aufgerufen, sobald der Parser die Empfängerfelder aus
+> dem XML liest — deren Elementpfade sind weiterhin offen (§32).
+
 ---
 
 ## 10. Rolle CEM
