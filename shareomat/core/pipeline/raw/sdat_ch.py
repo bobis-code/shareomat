@@ -28,6 +28,11 @@ Notes:
     _constants.py-equivalent section below (product IDs, role/business
     reason/status/condition codes, community types) IS confirmed by the
     reference document and safe to rely on once parsing exists.
+
+    EIC format/check-character validation and the receiver gate
+    (validate_receiver) do NOT depend on the XML structure and are
+    implemented: the EIC check character follows the public ENTSO-E EIC
+    reference manual and is verified against real codes in the tests.
 """
 
 from __future__ import annotations
@@ -109,9 +114,80 @@ class SdatChValidationError(SdatChError):
     """Raised for a structurally parseable document that fails a business check.
 
     E.g. WRONG_RECEIVER / WRONG_ROLE / WRONG_BUSINESS_REASON / UNKNOWN_COMMUNITY
-    from docs/sdat_leg_import.md §22 — reserved for use once validation.py
-    equivalent logic is implemented alongside the real parser.
+    from docs/sdat_leg_import.md §22. `code` carries that identifier so the
+    import log can record why a message was rejected.
     """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+# ── EIC (§9) ──────────────────────────────────────────────────────────────────
+
+EIC_LENGTH: int = 16
+_EIC_ALPHABET: str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-"
+
+
+def normalize_eic(value: str) -> str:
+    """Strip whitespace and upper-case an EIC as typed by a user or found in XML."""
+    return "".join(value.split()).upper()
+
+
+def eic_check_char(first15: str) -> str:
+    """Return the ENTSO-E check character for the first 15 EIC characters.
+
+    Weights 16..2 over the character values (0-9, A-Z = 10-35, '-' = 36);
+    check = 36 - ((sum - 1) mod 37). A result of '-' means no valid EIC can
+    end that way (such codes are never issued).
+    """
+    total = sum(_EIC_ALPHABET.index(c) * (16 - i) for i, c in enumerate(first15))
+    return _EIC_ALPHABET[36 - ((total - 1) % 37)]
+
+
+def is_valid_eic(value: str) -> bool:
+    """True if value (already normalized) is a 16-char EIC with a correct check character."""
+    if len(value) != EIC_LENGTH or any(c not in _EIC_ALPHABET for c in value):
+        return False
+    check = eic_check_char(value[:15])
+    return check != "-" and value[15] == check
+
+
+def validate_receiver(
+    receiver_eic: str,
+    receiver_role: str,
+    business_reason: str,
+    configured_eic: str,
+) -> None:
+    """Gate an incoming SDAT message on its receiver before any value is used (§9–11).
+
+    Raises SdatChValidationError unless the message is addressed to this
+    community's own EIC in the CEM role for business reason C40. An unset
+    configured EIC rejects everything — never accept by default.
+    """
+    configured = normalize_eic(configured_eic)
+    if not configured:
+        raise SdatChValidationError(
+            "EIC_NOT_CONFIGURED",
+            "Kein EIC für die Gemeinschaft hinterlegt — SDAT-Nachrichten können "
+            "keinem Empfänger zugeordnet werden (Gemeinschaft → EIC).",
+        )
+    if normalize_eic(receiver_eic) != configured:
+        raise SdatChValidationError(
+            "WRONG_RECEIVER",
+            f"Nachricht ist an EIC '{receiver_eic}' adressiert, nicht an den "
+            f"eigenen EIC '{configured}'.",
+        )
+    if receiver_role.strip() != ROLE_CEM:
+        raise SdatChValidationError(
+            "WRONG_ROLE",
+            f"Empfängerrolle '{receiver_role}' statt '{ROLE_CEM}'.",
+        )
+    if business_reason.strip() != BUSINESS_REASON_LEG:
+        raise SdatChValidationError(
+            "WRONG_BUSINESS_REASON",
+            f"Business Reason '{business_reason}' statt '{BUSINESS_REASON_LEG}'.",
+        )
 
 
 # ── Normalized record (§20, reduced to what leg_runner's pipeline expects) ──────

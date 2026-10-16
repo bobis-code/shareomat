@@ -375,6 +375,9 @@ _SCHEMA_STATEMENTS = [
 # SQLite's ALTER TABLE ADD COLUMN only supports one column at a time with a
 # constant default, which is all these need.
 _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
+    "communities": {
+        "eic_code": "TEXT NOT NULL DEFAULT ''",
+    },
     "tariffs": {
         "admin_fee_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
         "rate_mode": "TEXT NOT NULL DEFAULT 'flat'",

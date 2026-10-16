@@ -34,6 +34,7 @@ def _row_to_community(row: sqlite3.Row) -> Community:
         postal_code=row["postal_code"],
         city=row["city"],
         active=bool(row["active"]),
+        eic_code=row["eic_code"],
     )
 
 
@@ -55,26 +56,27 @@ def save_community(db_path: Path, community: Community) -> Community:
                     """
                     UPDATE communities
                     SET community_id=?, name=?, address_line=?, postal_code=?, city=?,
-                        active=?, updated_at=?
+                        active=?, eic_code=?, updated_at=?
                     WHERE id=?
                     """,
                     (
                         community.community_id, community.name, community.address_line,
                         community.postal_code, community.city, int(community.active),
-                        now, existing["id"],
+                        community.eic_code, now, existing["id"],
                     ),
                 )
             else:
                 conn.execute(
                     """
                     INSERT INTO communities
-                        (community_id, name, address_line, postal_code, city, active, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        (community_id, name, address_line, postal_code, city, active, eic_code,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         community.community_id, community.name, community.address_line,
                         community.postal_code, community.city, int(community.active),
-                        now, now,
+                        community.eic_code, now, now,
                     ),
                 )
     result = get_community(db_path)

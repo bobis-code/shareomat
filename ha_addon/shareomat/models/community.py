@@ -30,3 +30,8 @@ class Community:
     postal_code: str = ""
     city: str = ""
     active: bool = True
+    # Energy Identification Code issued by Swissgrid for the LEG representative
+    # in the CEM role — the receiver address for SDAT E31/E66 messages from the
+    # Datahub (docs/sdat_leg_import.md §9). Distinct from community_id. Empty
+    # until registered; incoming SDAT messages are then rejected.
+    eic_code: str = ""
