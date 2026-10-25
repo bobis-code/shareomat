@@ -20,6 +20,7 @@ import json
 from datetime import datetime
 from html import escape as _html_escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 from shareomat.web.state import get_state
 
@@ -106,7 +107,7 @@ def render_report_section(selected_stem: str, ingress_path: str) -> str:
         (f"community_summary_{date_suffix}.json", "Community Summary JSON"),
     ]
     dl_links = " &nbsp;&middot;&nbsp; ".join(
-        f'<a href="{ingress_path}/reports/download?f={_html_escape(fn)}" '
+        f'<a href="{_html_escape(ingress_path)}/reports/download?{_html_escape(urlencode({"f": fn}))}" '
         f'style="color:#2563eb;text-decoration:none">&#8659; {_html_escape(label)}</a>'
         for fn, label in dl_files
         if (path / fn).exists()
