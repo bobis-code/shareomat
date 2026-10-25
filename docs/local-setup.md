@@ -118,6 +118,10 @@ main.py` erneut aufrufen) verliert keine Daten.
 
 ## Fehlersuche
 
+Teilnehmer-IDs dürfen Umlaute, Leerzeichen und Sonderzeichen enthalten. Die
+Teilnehmerlinks kodieren diese als URL-Pfadsegment. Nach einer Änderung der ID
+muss ein alter Bearbeitungslink über die Teilnehmerliste neu geöffnet werden.
+
 - **`http://localhost:8099` antwortet nicht (Docker):** Prüfen, ob der
   Container läuft (`docker compose ps`) und ob Port 8099 bereits von einem
   anderen Prozess belegt ist. Bei Bedarf in `docker-compose.yml` und

@@ -29,8 +29,8 @@
             </span>
           </td>
           <td>
-            <a class="btn btn-muted btn-small" href="{{ url_for('participants', suffix='/' + p.participant_id + '/edit') }}">Bearbeiten</a>
-            <form method="post" style="display:inline" action="{{ url_for('participants', suffix='/' + p.participant_id + '/toggle') }}">
+            <a class="btn btn-muted btn-small" href="{{ url_for('participants', suffix='/' + (p.participant_id | path_segment) + '/edit') }}">Bearbeiten</a>
+            <form method="post" style="display:inline" action="{{ url_for('participants', suffix='/' + (p.participant_id | path_segment) + '/toggle') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="btn-small {{ 'btn-danger' if p.active else 'btn-secondary' }}">
                 {{ 'Deaktivieren' if p.active else 'Aktivieren' }}
