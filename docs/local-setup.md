@@ -118,9 +118,13 @@ main.py` erneut aufrufen) verliert keine Daten.
 
 ## Fehlersuche
 
-Teilnehmer-IDs dürfen Umlaute, Leerzeichen und Sonderzeichen enthalten. Die
-Teilnehmerlinks kodieren diese als URL-Pfadsegment. Nach einer Änderung der ID
-muss ein alter Bearbeitungslink über die Teilnehmerliste neu geöffnet werden.
+Teilnehmer- und Messpunkt-IDs dürfen Umlaute, Leerzeichen und Sonderzeichen
+enthalten. Die Bearbeitungslinks kodieren diese als URL-Pfadsegment. Nach einer
+Änderung der ID muss der Bearbeitungslink über die jeweilige Teilnehmer- oder
+Messpunktliste neu geöffnet werden.
+
+Downloadlinks für Berichte kodieren auch Sonderzeichen im Dateinamen als
+URL-Parameter, damit etwa `+`, `&` oder `#` unverändert beim Download ankommen.
 
 - **`http://localhost:8099` antwortet nicht (Docker):** Prüfen, ob der
   Container läuft (`docker compose ps`) und ob Port 8099 bereits von einem

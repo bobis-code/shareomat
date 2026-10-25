@@ -4,7 +4,7 @@
 {% block content %}
 <div class="card">
   <form class="form-card" method="post"
-        action="{{ url_for('meters', suffix='/' + (meter.meter_id if meter else 'new') + ('/edit' if meter else '')) }}">
+        action="{{ url_for('meters', suffix='/' + ((meter.meter_id | path_segment) if meter else 'new') + ('/edit' if meter else '')) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field">
       <label for="meter_id">Messpunkt-ID (MPID)</label>
