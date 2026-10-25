@@ -4,7 +4,7 @@
 {% block content %}
 <div class="card">
   <form class="form-card" method="post"
-        action="{{ url_for('participants', suffix='/' + (participant.participant_id if participant else 'new') + ('/edit' if participant else '')) }}">
+        action="{{ url_for('participants', suffix='/' + ((participant.participant_id | path_segment) if participant else 'new') + ('/edit' if participant else '')) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field">
       <label for="participant_id">Teilnehmer-ID</label>

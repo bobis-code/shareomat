@@ -31,7 +31,7 @@ import uuid
 from html import escape as _html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from shareomat.web.navigation import url_for
 from shareomat.web.pages import (
@@ -192,7 +192,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_download(parsed.query)
             return
 
-        segments = [s for s in path.split("/") if s]
+        segments = [unquote(s) for s in path.split("/") if s]
         # URLs use hyphens ("meter-data"), but route names (_PAGE_MODULES keys,
         # ROUTE_PATHS keys, url_for() arguments) use underscores throughout —
         # normalize once here so route always means the same thing everywhere.
@@ -263,7 +263,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_upload(ingress_path, content_type)
             return
 
-        segments = [s for s in path.split("/") if s]
+        segments = [unquote(s) for s in path.split("/") if s]
         route = segments[0].replace("-", "_") if segments else ""
         page = _PAGE_MODULES.get(route)
         if page is None or not hasattr(page, "handle_post"):

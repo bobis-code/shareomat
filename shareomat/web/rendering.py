@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import quote
 
 import jinja2
 
@@ -34,6 +35,7 @@ _env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
     autoescape=True,
 )
+_env.filters["path_segment"] = lambda value: quote(str(value), safe="")
 
 
 @dataclass

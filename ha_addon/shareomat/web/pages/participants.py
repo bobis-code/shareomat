@@ -97,7 +97,8 @@ def handle_get(ctx: RequestContext) -> str:
         participant = get_participant(ctx.db_path, ctx.segments[0])
         if participant is None:
             return render_page("placeholders/coming_soon.html", ctx, "participants",
-                                title="Teilnehmer nicht gefunden", description="")
+                                title="Teilnehmer nicht gefunden",
+                                description="Die Teilnehmer-ID wurde möglicherweise geändert. Bitte öffnen Sie den Teilnehmer erneut über die Teilnehmerliste.")
         return render_page(
             "participants/form.html", ctx, "participants",
             participant=participant, participant_types=PARTICIPANT_TYPES,
@@ -105,7 +106,8 @@ def handle_get(ctx: RequestContext) -> str:
         )
 
     return render_page("placeholders/coming_soon.html", ctx, "participants",
-                        title="Seite nicht gefunden", description="")
+                        title="Seite nicht gefunden",
+                        description="Diese Teilnehmeradresse ist ungültig. Bitte öffnen Sie die Teilnehmerliste erneut.")
 
 
 def handle_post(ctx: RequestContext) -> str | None:
