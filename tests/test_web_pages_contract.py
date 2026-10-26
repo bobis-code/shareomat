@@ -12,10 +12,14 @@ import shareomat.database.contract_versions as contract_versions_module
 from shareomat.database.community import save_community
 from shareomat.database.contract_versions import get_contract_version, get_contract_version_for_date, list_contract_versions
 from shareomat.database.participant_contract import list_assignments_for_version
-from shareomat.database.participants import create_participant, get_participant
+from shareomat.database.meters import create_meter
+from shareomat.database.participants import create_participant
 from shareomat.database.sqlite import init_db
+from shareomat.database.supplier_tariffs import create_supplier_tariff, delete_supplier_tariff
 from shareomat.database.tariffs import create_tariff
 from shareomat.models.community import Community
+from shareomat.models.external_data import SupplierTariff
+from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
 from shareomat.models.tariff import Tariff
 from shareomat.web.pages import contract
@@ -54,10 +58,8 @@ def _post(segments, form=None) -> RequestContext:
 
 _PRICE_FORM = {
     # Prices are entered in Rappen (Rp./kWh) on the form and converted to CHF/kWh
-    # server-side: 11.5 -> 0.115, 1.0 -> 0.01, 0.5 -> 0.005.
-    "rate_mode": "flat",
-    "vnb_reference_price_chf_kwh": "11.5",
-    "price_reduction_chf_kwh": "1.0",
+    # server-side: 11.0 -> 0.11, 0.5 -> 0.005.
+    "local_rate_chf_kwh": "11.0",
     "admin_fee_chf_kwh": "0.5",
     "grid_operator": "EBL",
     "price_notice_period_months": "4",
@@ -129,33 +131,59 @@ def test_draft_update_text_keeps_original_version_number(db_path) -> None:
     assert f"Version: {draft.version}" in updated.contract_text_snapshot
 
 
-def test_draft_create_derives_feed_in_and_local_rate_from_reference_price(db_path) -> None:
+def test_draft_create_derives_feed_in_from_local_rate_minus_admin_fee(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
     contract.handle_post(_post(["draft", "create"], _PRICE_FORM))
 
     draft = list_contract_versions(db_path)[0]
-    assert draft.feed_in_rate_chf_kwh == Decimal("0.105")  # (11.5 - 1.0) Rp. -> CHF
-    assert draft.local_rate_chf_kwh == Decimal("0.11")     # 0.105 + 0.005
+    assert draft.local_rate_chf_kwh == Decimal("0.11")     # entered: 11.0 Rp.
+    assert draft.feed_in_rate_chf_kwh == Decimal("0.105")  # 11.0 - 0.5 Rp. -> CHF
+    assert draft.rate_mode == "flat"
+    assert draft.reference_product == ""                   # no comparison picked
 
 
-def test_draft_create_rejects_reduction_larger_than_reference_price(db_path) -> None:
+def test_draft_create_rejects_admin_fee_larger_than_local_rate(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
-    form = dict(_PRICE_FORM, vnb_reference_price_chf_kwh="5", price_reduction_chf_kwh="10")
+    form = dict(_PRICE_FORM, local_rate_chf_kwh="5", admin_fee_chf_kwh="10")
     with pytest.raises(FormError):
         contract.handle_post(_post(["draft", "create"], form))
 
 
-def test_draft_create_derives_ht_nt_rates_separately(db_path) -> None:
+def test_draft_create_snapshots_reference_product_without_touching_leg_price(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
-    form = dict(
-        _PRICE_FORM, rate_mode="ht_nt",
-        vnb_reference_price_nt_chf_kwh="9", price_reduction_nt_chf_kwh="2",
-    )
-    contract.handle_post(_post(["draft", "create"], form))
+    grau = create_supplier_tariff(db_path, SupplierTariff(
+        source="EBL", product="EBL Grau 2027", valid_from=date(2027, 1, 1),
+        energy_rate_ht_chf_kwh=Decimal("0.096"),
+    ))
+    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, reference_tariff_id=str(grau.id))))
 
     draft = list_contract_versions(db_path)[0]
-    assert draft.feed_in_rate_nt_chf_kwh == Decimal("0.07")   # (9 - 2) Rp. -> CHF
-    assert draft.local_rate_nt_chf_kwh == Decimal("0.075")    # 0.07 + 0.005
+    assert draft.reference_product == "EBL – EBL Grau 2027"
+    assert draft.vnb_reference_price_chf_kwh == Decimal("0.096")
+    assert draft.local_rate_chf_kwh == Decimal("0.11")      # unchanged by the reference
+    assert "9.60" not in draft.contract_text_snapshot        # reference is never part of the contract text
+
+
+def test_edit_keeps_reference_snapshot_after_product_was_deleted(db_path) -> None:
+    save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
+    grau = create_supplier_tariff(db_path, SupplierTariff(
+        source="EBL", product="EBL Grau 2027", valid_from=date(2027, 1, 1),
+        energy_rate_ht_chf_kwh=Decimal("0.096"),
+    ))
+    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, reference_tariff_id=str(grau.id))))
+    draft = list_contract_versions(db_path)[0]
+    delete_supplier_tariff(db_path, grau.id)
+
+    html = contract.handle_get(_ctx(query={"edit": str(draft.id)}))
+    assert "EBL – EBL Grau 2027 (bisheriger Wert)" in html
+
+    contract.handle_post(_post(["draft", "update"], dict(
+        _PRICE_FORM, version_id=str(draft.id), reference_tariff_id="current",
+        current_reference_product="EBL – EBL Grau 2027", current_reference_price="0.096",
+    )))
+    updated = list_contract_versions(db_path)[0]
+    assert updated.reference_product == "EBL – EBL Grau 2027"
+    assert updated.vnb_reference_price_chf_kwh == Decimal("0.096")
 
 
 def test_draft_update_edits_in_place(db_path) -> None:
@@ -164,7 +192,7 @@ def test_draft_update_edits_in_place(db_path) -> None:
     draft = list_contract_versions(db_path)[0]
 
     updated_form = dict(
-        _PRICE_FORM, vnb_reference_price_chf_kwh="20", price_reduction_chf_kwh="0", admin_fee_chf_kwh="0",
+        _PRICE_FORM, local_rate_chf_kwh="20", admin_fee_chf_kwh="0",
         version_id=str(draft.id),
     )
     contract.handle_post(_post(["draft", "update"], updated_form))
@@ -256,7 +284,7 @@ def test_end_requires_matching_community_name(db_path, monkeypatch) -> None:
 def test_copy_from_prefills_form_for_new_draft(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
     contract.handle_post(_post(["draft", "create"], dict(
-        _PRICE_FORM, vnb_reference_price_chf_kwh="13", price_reduction_chf_kwh="0", admin_fee_chf_kwh="0",
+        _PRICE_FORM, local_rate_chf_kwh="13", admin_fee_chf_kwh="0",
     )))
     source = list_contract_versions(db_path)[0]
 
@@ -268,7 +296,7 @@ def test_copy_from_prefills_form_for_new_draft(db_path) -> None:
 def test_edit_prefills_form_for_existing_draft(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
     contract.handle_post(_post(["draft", "create"], dict(
-        _PRICE_FORM, vnb_reference_price_chf_kwh="13", price_reduction_chf_kwh="0", admin_fee_chf_kwh="0",
+        _PRICE_FORM, local_rate_chf_kwh="13", admin_fee_chf_kwh="0",
     )))
     draft = list_contract_versions(db_path)[0]
 
@@ -300,21 +328,21 @@ def _publish_v1(db_path, monkeypatch, *, valid_from: str = "2020-06-01") -> None
 
 def test_participants_add_requires_active_contract(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     with pytest.raises(FormError):
         contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-01-01"}))
 
 
 def test_participants_add_rejects_non_month_start(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     with pytest.raises(FormError):
         contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-01-15"}))
 
 
-def test_participants_add_creates_pending_assignment_and_sets_participant_valid_from(db_path, monkeypatch) -> None:
+def test_participants_add_creates_pending_assignment(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
 
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
@@ -322,12 +350,11 @@ def test_participants_add_creates_pending_assignment_and_sets_participant_valid_
     assert len(assignments) == 1
     assert assignments[0].accepted_at is None
     assert assignments[0].joined_at == date(2027, 3, 1)
-    assert get_participant(db_path, "p1").valid_from == date(2027, 3, 1)
 
 
 def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
@@ -341,7 +368,7 @@ def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -
 
 def test_participants_notify_only_sets_notified(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
@@ -356,7 +383,7 @@ def test_participants_notify_only_sets_notified(db_path, monkeypatch) -> None:
 
 def test_participants_depart_rejects_non_month_end(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
@@ -365,23 +392,22 @@ def test_participants_depart_rejects_non_month_end(db_path, monkeypatch) -> None
         contract.handle_post(_post(["participants", str(assignment.id), "depart"], {"end_date": "2027-05-15"}))
 
 
-def test_participants_depart_sets_valid_until_and_left_at(db_path, monkeypatch) -> None:
+def test_participants_depart_sets_left_at(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
 
     contract.handle_post(_post(["participants", str(assignment.id), "depart"], {"end_date": "2027-05-31"}))
 
-    assert get_participant(db_path, "p1").valid_until == date(2027, 5, 31)
     updated = list_assignments_for_version(db_path, current_version.id)[0]
     assert updated.left_at == date(2027, 5, 31)
 
 
 def test_declaration_view_shows_participant_and_version(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
@@ -389,6 +415,21 @@ def test_declaration_view_shows_participant_and_version(db_path, monkeypatch) ->
     html = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration"]))
     assert "Haus 1" in html
     assert f"Version {current_version.version}" in html
+
+
+def test_declaration_ticks_role_and_lists_meters_from_participant_meters(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-PV-1", "p1", "PV", "producer"))
+    create_meter(db_path, Meter("CH-BEZUG-1", "p1", "Bezug", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
+    assignment = list_assignments_for_version(db_path, current_version.id)[0]
+
+    html = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration"]))
+    assert "Messpunktnummer: CH-BEZUG-1, CH-PV-1" in html  # list_meters sorts by label
+    assert "☑ LEG Strom beziehen und liefern (Prosumer)" in html
+    assert "☐ LEG Strom beziehen (Endverbraucher)" in html
 
 
 def test_declaration_view_unknown_assignment_shows_placeholder(db_path) -> None:

@@ -61,16 +61,20 @@ class ContractVersion:
     status: str
     contract_text_snapshot: str
 
-    # Pricing (source for the tariff created at publish time). feed_in_rate_chf_kwh
-    # and local_rate_chf_kwh (and their _nt variants) are computed at save time from
-    # the fields below — see shareomat.web.pages.contract._compute_rates — and kept
-    # here too so a historical version's rendered text/tariff never depends on a
-    # later recomputation: feed_in_rate = vnb_reference_price - price_reduction,
-    # local_rate = feed_in_rate + admin_fee_chf_kwh.
+    # Pricing (source for the tariff created at publish time). The LEG sets its
+    # own price: local_rate_chf_kwh (LEG-Bezugspreis) and admin_fee_chf_kwh are
+    # entered, feed_in_rate = local_rate - admin_fee (Produzentenvergütung) is
+    # derived — see shareomat.web.pages.contract._compute_rates.
+    #
+    # vnb_reference_price_* / reference_product are an informational snapshot of
+    # the grid-operator product the LEG compares itself with (picked from the
+    # "Tarife" tab); they never feed into the LEG price. price_reduction_* are
+    # legacy fields from the old "reference minus reduction" input and stay 0/None.
     vnb_reference_price_chf_kwh: Decimal = Decimal("0")
     price_reduction_chf_kwh: Decimal = Decimal("0")
     vnb_reference_price_nt_chf_kwh: Decimal | None = None
     price_reduction_nt_chf_kwh: Decimal | None = None
+    reference_product: str = ""
     local_rate_chf_kwh: Decimal = Decimal("0")
     local_rate_nt_chf_kwh: Decimal | None = None
     feed_in_rate_chf_kwh: Decimal = Decimal("0")

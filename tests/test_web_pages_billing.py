@@ -18,8 +18,6 @@ from shareomat.database.tariffs import create_tariff
 from shareomat.leg_const import (
     METER_ROLE_CONSUMER,
     METER_ROLE_PRODUCER,
-    PARTICIPANT_TYPE_CONSUMER,
-    PARTICIPANT_TYPE_PRODUCER,
 )
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
@@ -50,8 +48,8 @@ def runtime(tmp_path, db_path):
     get_state().register_runtime(runtime)
 
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("solar", "Solar PV", PARTICIPANT_TYPE_PRODUCER))
-    create_participant(db_path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
     create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
     create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(

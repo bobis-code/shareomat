@@ -56,8 +56,8 @@ def _make_env(root: Path):
     db_path = root / "shareomat.db"
     init_db(db_path)
     save_community(db_path, Community(community_id="TEST-ZEV", name="Test"))
-    create_participant(db_path, Participant("solar", "Solar PV", "producer"))
-    create_participant(db_path, Participant("cons_a", "Consumer A", "consumer"))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
     create_meter(db_path, Meter(_METER_PROD, "solar", "PV Meter", "producer"))
     create_meter(db_path, Meter(_METER_A, "cons_a", "Meter A", "consumer"))
     create_tariff(db_path, Tariff(

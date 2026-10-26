@@ -72,7 +72,9 @@ def build_leg_config(db_path: Path, runtime: RuntimeConfig, *, as_of: date | Non
     if community is None or not community.community_id:
         raise IncompleteConfigError("Keine Gemeinschaft eingerichtet.")
 
-    participants = [p for p in list_participants(db_path) if _is_effective(p, today)]
+    # Participants have no validity window of their own (membership lives on
+    # the contract assignment, validity on the meter) — only the active switch.
+    participants = list_participants(db_path, include_inactive=False)
     if not participants:
         raise IncompleteConfigError("Keine aktiven Teilnehmer eingerichtet.")
 
@@ -134,7 +136,7 @@ def get_setup_status(db_path: Path, *, as_of: date | None = None) -> SetupStatus
     community = get_community(db_path)
     return SetupStatus(
         has_community=community is not None and bool(community.community_id),
-        has_participants=any(_is_effective(p, today) for p in list_participants(db_path)),
+        has_participants=bool(list_participants(db_path, include_inactive=False)),
         has_meters=any(_is_effective(m, today) for m in list_meters(db_path)),
         has_tariff=get_tariff_for_date(db_path, today) is not None,
     )

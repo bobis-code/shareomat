@@ -166,9 +166,9 @@ def _make_env(root: Path) -> types.SimpleNamespace:
     db_path = root / "shareomat.db"
     init_db(db_path)
     save_community(db_path, Community(community_id="TEST-ZEV-001", name="Test Community"))
-    create_participant(db_path, Participant("solar", "Solar PV", "producer"))
-    create_participant(db_path, Participant("cons_a", "Consumer A", "consumer"))
-    create_participant(db_path, Participant("cons_b", "Consumer B", "consumer"))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
+    create_participant(db_path, Participant("cons_b", "Consumer B"))
     create_meter(db_path, Meter(METER_PROD, "solar", "PV Meter", "producer"))
     create_meter(db_path, Meter(METER_A, "cons_a", "Meter A", "consumer"))
     create_meter(db_path, Meter(METER_B, "cons_b", "Meter B", "consumer"))

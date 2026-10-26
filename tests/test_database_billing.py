@@ -29,8 +29,6 @@ from shareomat.database.tariffs import create_tariff
 from shareomat.leg_const import (
     METER_ROLE_CONSUMER,
     METER_ROLE_PRODUCER,
-    PARTICIPANT_TYPE_CONSUMER,
-    PARTICIPANT_TYPE_PRODUCER,
 )
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
@@ -67,8 +65,8 @@ def _write_csv(directory: Path, filename: str, rows: list[tuple]) -> Path:
 
 def _seed_basic_community(db_path: Path, *, tariff_rate: str = "0.12", valid_from: date = date(2020, 1, 1)) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("solar", "Solar PV", PARTICIPANT_TYPE_PRODUCER))
-    create_participant(db_path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
     create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
     create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
@@ -140,8 +138,8 @@ def test_end_date_before_start_date_raises(db_path, runtime):
 
 def test_multiple_meters_per_participant_are_summed(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("solar", "Solar PV", PARTICIPANT_TYPE_PRODUCER))
-    create_participant(db_path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
     create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
     create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_meter(db_path, Meter("M3", "cons_a", "Meter B", METER_ROLE_CONSUMER))
@@ -166,8 +164,8 @@ def test_multiple_meters_per_participant_are_summed(db_path, runtime):
 
 def test_tariff_validity_window_picks_correct_rate(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("solar", "Solar PV", PARTICIPANT_TYPE_PRODUCER))
-    create_participant(db_path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
     create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
     create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
@@ -260,8 +258,8 @@ def test_release_unknown_run_raises(db_path):
 
 def test_rounding_uses_decimal_not_float_artifacts(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("solar", "Solar PV", PARTICIPANT_TYPE_PRODUCER))
-    create_participant(db_path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(db_path, Participant("solar", "Solar PV"))
+    create_participant(db_path, Participant("cons_a", "Consumer A"))
     create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
     create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(

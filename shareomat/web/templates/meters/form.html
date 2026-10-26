@@ -33,6 +33,8 @@
         <option value="{{ value }}" {{ 'selected' if meter and meter.role == value }}>{{ label }}</option>
         {% endfor %}
       </select>
+      <div class="field-hint">Die Rolle des Messpunkts bestimmt, ob der Teilnehmer LEG-Strom bezieht, liefert oder
+        beides. Bei „Speicher“: {{ storage_hint }}</div>
     </div>
     <div class="field">
       <label for="valid_from">Gültig ab</label>

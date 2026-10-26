@@ -34,16 +34,14 @@ METER_ROLE_PRODUCER: str = "producer"
 METER_ROLE_CONSUMER: str = "consumer"
 METER_ROLE_PRODUCER_CONSUMER: str = "producer_consumer"
 METER_ROLE_GRID: str = "grid"
-
-# ── Participant types ─────────────────────────────────────────────────────────
-
-PARTICIPANT_TYPE_PRODUCER: str = "producer"
-PARTICIPANT_TYPE_CONSUMER: str = "consumer"
-PARTICIPANT_TYPE_PRODUCER_CONSUMER: str = "producer_consumer"
-# Storage operators are both LEG-Bezüger and LEG-Produzent (see LEG-Mustervertrag
+# Storage meters are both LEG-Bezüger and LEG-Produzent (see LEG-Mustervertrag
 # Beitrittserklärung), and per Art. 19h Abs. 4 StromVV must not, in sum, feed more
 # electricity into the community per settlement period than they draw from it.
-PARTICIPANT_TYPE_STORAGE: str = "storage"
+METER_ROLE_STORAGE: str = "storage"
+
+# A participant has no type of its own — what it does in the LEG (beziehen,
+# liefern, Speicher) follows from the roles of its meters, see
+# shareomat.core.participant_roles.
 
 # ── Unknown meter handling ────────────────────────────────────────────────────
 

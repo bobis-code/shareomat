@@ -21,7 +21,7 @@
           <td style="font-family:monospace;font-size:.8rem">{{ m.meter_id }}</td>
           <td>{{ m.label }}</td>
           <td>{{ m.participant_id or '–' }}</td>
-          <td>{{ m.role }}</td>
+          <td>{{ meter_role_labels.get(m.role, m.role) }}</td>
           <td>{{ m.valid_from or '–' }}</td>
           <td>{{ m.valid_until or '–' }}</td>
           <td>

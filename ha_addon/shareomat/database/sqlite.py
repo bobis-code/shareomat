@@ -378,6 +378,11 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
     "communities": {
         "eic_code": "TEXT NOT NULL DEFAULT ''",
     },
+    "supplier_tariffs": {
+        # Product name within the grid operator's tariff sheet (e.g. "EBL Grau
+        # 2027") — one operator publishes several products per year.
+        "product": "TEXT NOT NULL DEFAULT ''",
+    },
     "tariffs": {
         "admin_fee_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
         "rate_mode": "TEXT NOT NULL DEFAULT 'flat'",
@@ -411,6 +416,9 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "price_reduction_chf_kwh": "TEXT NOT NULL DEFAULT '0'",
         "vnb_reference_price_nt_chf_kwh": "TEXT",
         "price_reduction_nt_chf_kwh": "TEXT",
+        # Which grid-operator product the reference price above was taken from
+        # (informational snapshot only — the LEG price does not depend on it).
+        "reference_product": "TEXT NOT NULL DEFAULT ''",
     },
     "participant_contract": {
         # Separate from accepted_at: accepted_at is the participant's original,

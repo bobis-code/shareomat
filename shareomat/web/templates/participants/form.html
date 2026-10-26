@@ -10,20 +10,13 @@
       <label for="participant_id">Teilnehmer-ID</label>
       <input type="text" id="participant_id" name="participant_id" required
              value="{{ participant.participant_id if participant else '' }}">
-      <div class="field-hint">Frei wählbare, eindeutige Kennung (z. B. Wohnungsnummer).</div>
+      <div class="field-hint">Frei wählbare, eindeutige Kennung der Person bzw. Partei (z. B. Wohnungsnummer) —
+        nicht die Messpunkt-ID des Netzbetreibers.</div>
     </div>
     <div class="field">
-      <label for="label">Bezeichnung</label>
+      <label for="label">Name</label>
       <input type="text" id="label" name="label" required value="{{ participant.label if participant else '' }}">
-    </div>
-    <div class="field">
-      <label for="participant_type">Typ</label>
-      <select id="participant_type" name="participant_type">
-        {% for value, label in participant_types %}
-        <option value="{{ value }}" {{ 'selected' if participant and participant.participant_type == value }}>{{ label }}</option>
-        {% endfor %}
-      </select>
-      <div class="field-hint">Bei „Speicherbetreiber": {{ participant_type_storage_hint }}</div>
+      <div class="field-hint">Name der Person oder Partei, wie er auf Rechnung und Beitrittserklärung erscheint.</div>
     </div>
     <div class="field">
       <label for="email">E-Mail</label>
@@ -41,14 +34,6 @@
       <label for="city">Ort</label>
       <input type="text" id="city" name="city" value="{{ participant.city if participant else '' }}">
     </div>
-    <div class="field">
-      <label for="valid_from">Gültig ab</label>
-      <input type="date" id="valid_from" name="valid_from" value="{{ participant.valid_from if participant else '' }}">
-    </div>
-    <div class="field">
-      <label for="valid_until">Gültig bis</label>
-      <input type="date" id="valid_until" name="valid_until" value="{{ participant.valid_until if participant else '' }}">
-    </div>
     <div class="field checkbox-row">
       <input type="checkbox" id="active" name="active" {{ 'checked' if participant is none or participant.active }}>
       <label for="active" style="margin:0">Aktiv</label>
@@ -58,5 +43,44 @@
       <a class="btn btn-muted" href="{{ url_for('participants') }}">Abbrechen</a>
     </div>
   </form>
+</div>
+
+<div class="card">
+  <h2>Messpunkte</h2>
+  <p class="field-hint" style="margin-bottom:10px">
+    Rolle (Erzeuger, Verbraucher, Speicher) und Gültigkeit gehören zum Messpunkt. Beitritt und Austritt
+    in die LEG werden im Vertrag erfasst.
+  </p>
+  {% if meters %}
+  <p>Rolle in der LEG: <strong>{{ roles.label }}</strong></p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>MPID</th><th>Bezeichnung</th><th>Rolle</th><th>Gültig ab</th><th>Gültig bis</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for m in meters %}
+        <tr>
+          <td style="font-family:monospace;font-size:.8rem">
+            <a href="{{ url_for('meters', suffix='/' + (m.meter_id | path_segment) + '/edit') }}">{{ m.meter_id }}</a>
+          </td>
+          <td>{{ m.label }}</td>
+          <td>{{ meter_role_labels.get(m.role, m.role) }}</td>
+          <td>{{ m.valid_from or '–' }}</td>
+          <td>{{ m.valid_until or '–' }}</td>
+          <td>{{ 'aktiv' if m.active else 'inaktiv' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif participant %}
+  <p class="ts">Noch kein Messpunkt zugewiesen.</p>
+  {% else %}
+  <p class="ts">Messpunkte können nach dem Speichern unter „Messpunkte“ zugewiesen werden.</p>
+  {% endif %}
+  {% if participant %}
+  <div class="actions-row">
+    <a class="btn btn-secondary" href="{{ url_for('meters_new') }}">+ Messpunkt anlegen</a>
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

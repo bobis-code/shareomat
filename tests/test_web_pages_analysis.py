@@ -13,7 +13,6 @@ from shareomat.database.community import save_community
 from shareomat.database.participants import create_participant
 from shareomat.database.settlement_history import save_settlement_snapshot
 from shareomat.database.sqlite import init_db
-from shareomat.leg_const import PARTICIPANT_TYPE_CONSUMER
 from shareomat.models.billing import BillingRecord
 from shareomat.models.community import Community
 from shareomat.models.participant import Participant
@@ -28,7 +27,7 @@ def db_path(tmp_path):
     init_db(path)
     get_state().register_db(path)
     save_community(path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(path, Participant("cons_a", "Consumer A"))
     return path
 
 

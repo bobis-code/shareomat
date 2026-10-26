@@ -16,15 +16,16 @@ Notes:
         participant_id — business/billing identity (house, flat, tenant)
         One participant may have one or more meters.
 
-    valid_from/valid_until describe the participant's membership window
-    (e.g. a tenant moving in/out mid-year); active is an independent
-    on/off switch a manager can flip regardless of dates.
+    A participant has neither a type nor a validity window of its own:
+    the role (Erzeuger/Verbraucher/Speicher) belongs to each meter (see
+    shareomat.core.participant_roles), meter validity lives on Meter, and
+    LEG membership (Beitritt/Austritt) on the contract assignment. active
+    is an independent on/off switch a manager can flip.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
 
 
 @dataclass
@@ -33,11 +34,8 @@ class Participant:
 
     participant_id: str
     label: str
-    participant_type: str  # PARTICIPANT_TYPE_* from shareomat.leg_const
     email: str = ""
     address_line: str = ""
     postal_code: str = ""
     city: str = ""
-    valid_from: date | None = None
-    valid_until: date | None = None
     active: bool = True
