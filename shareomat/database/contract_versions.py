@@ -139,6 +139,29 @@ def get_contract_version_for_date(db_path: Path, as_of: date | None = None) -> C
         return _row_to_version(row, community_id) if row else None
 
 
+def get_participant_version(db_path: Path, as_of: date | None = None) -> ContractVersion | None:
+    """Return the version new participants join: the one in force on `as_of`, else the next scheduled one.
+
+    Before the LEG starts (Gründungsvertrag published for a future date) no
+    version is in force yet, but the founding members must already be
+    assigned and sign their Beitrittserklärung — so fall back to the
+    earliest published version that only takes effect later.
+    """
+    in_force = get_contract_version_for_date(db_path, as_of)
+    if in_force is not None:
+        return in_force
+    as_of = as_of or date.today()
+    with connect(db_path) as conn:
+        community_id = _community_id(conn)
+        if not community_id:
+            return None
+        row = conn.execute(
+            "SELECT * FROM contract_versions WHERE status = ? AND valid_from > ? ORDER BY valid_from LIMIT 1",
+            (CONTRACT_STATUS_PUBLISHED, date_to_str(as_of)),
+        ).fetchone()
+        return _row_to_version(row, community_id) if row else None
+
+
 def get_latest_relevant_version(db_path: Path) -> ContractVersion | None:
     """Return the published version with the latest valid_from — in force or merely announced.
 
@@ -273,11 +296,15 @@ def _required_notice_months(draft: ContractVersion, prior: ContractVersion | Non
     Only price fields changed -> the prior version's price_notice_period_months.
     Any master-data field or either notice period itself changed -> the
     prior version's contract_notice_period_months. Both -> the stricter
-    (larger) of the two. No prior version (first-ever publish) -> the
-    draft's own price_notice_period_months, since there is nothing to diff.
+    (larger) of the two. No prior version (first-ever publish, i.e. the
+    Gründungsvertrag) -> 0: the notice periods (LEG-Mustervertrag §3/§8)
+    protect existing members against *changes*; founding members sign the
+    Beitrittserklärung for exactly this version, so there is nothing to
+    announce. (The separate 3-month notice to the grid operator for forming
+    the LEG is a reminder in the UI, not a publishing block.)
     """
     if prior is None:
-        return draft.price_notice_period_months
+        return 0
 
     price_changed = (
         draft.local_rate_chf_kwh != prior.local_rate_chf_kwh
@@ -313,9 +340,11 @@ def publish_version(db_path: Path, version_id: int) -> ContractVersion:
     """Publish a draft: enforce the contractually required notice period, create its tariff.
 
     Raises ContractWorkflowError if: the version is not a draft, valid_from
-    is unset or too soon (message names the earliest allowed date), or no
-    existing tariff provides a grid_rate_chf_kwh to carry forward (no
-    silent 0-fallback). On success, in one transaction: the prior in-force/
+    is unset or too soon (message names the earliest allowed date). The
+    tariff's grid_rate_chf_kwh is carried forward from the latest existing
+    tariff; for the very first contract there is none and it starts at 0 —
+    it is informational only (the grid operator bills grid usage itself)
+    and must not block founding the LEG. On success, in one transaction: the prior in-force/
     announced version (if any) gets valid_until capped the day before this
     version's valid_from, its tariff likewise; a new tariff is created from
     this version's prices; this version becomes published, recording
@@ -354,12 +383,7 @@ def publish_version(db_path: Path, version_id: int) -> ContractVersion:
             base_tariff_row = conn.execute(
                 "SELECT grid_rate_chf_kwh FROM tariffs ORDER BY valid_from DESC, id DESC LIMIT 1"
             ).fetchone()
-            if base_tariff_row is None:
-                raise ContractWorkflowError(
-                    "Kein bestehender Tarif für die Netznutzung gefunden — zuerst über die "
-                    "Tarife-Seite einen Ausgangstarif mit Netznutzungssatz anlegen."
-                )
-            grid_rate_chf_kwh = base_tariff_row["grid_rate_chf_kwh"]
+            grid_rate_chf_kwh = base_tariff_row["grid_rate_chf_kwh"] if base_tariff_row else "0"
 
             now = now_iso()
             community_row_id = ensure_community_row_id(conn)

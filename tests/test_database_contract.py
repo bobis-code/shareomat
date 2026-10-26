@@ -159,23 +159,32 @@ def test_publish_rejects_missing_valid_from(db_path):
         publish_version(db_path, v.id)
 
 
-def test_publish_blocks_without_existing_tariff_no_zero_fallback(db_path):
+def test_first_publish_without_existing_tariff_starts_grid_rate_at_zero(db_path):
+    """Founding the LEG must not require a hand-made base tariff (grid_rate is informational only)."""
     v = save_draft_version(db_path, _draft(valid_from=date(2030, 1, 1)))
-    with pytest.raises(ContractWorkflowError, match="Netznutzung"):
-        publish_version(db_path, v.id)
+    published = publish_version(db_path, v.id)
+    from shareomat.database.tariffs import get_tariff
+    assert get_tariff(db_path, published.tariff_id).grid_rate_chf_kwh == Decimal("0")
 
 
-def test_publish_rejects_too_early_first_publish(db_path, monkeypatch):
-    from shareomat.database.tariffs import create_tariff
-    from shareomat.models.tariff import Tariff
-    create_tariff(db_path, Tariff(
-        local_rate_chf_kwh=Decimal("0.05"), grid_rate_chf_kwh=Decimal("0.28"),
-        feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
+def test_founding_contract_can_start_next_month_without_notice_period(db_path, monkeypatch):
+    """Gründungsvertrag on 26.10.2026 for 01.11.2026: no prior version -> no price/contract notice period."""
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    v = save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1), price_notice_period_months=4))
+    published = publish_version(db_path, v.id)
+    assert published.status == "published"
+    assert published.valid_from == date(2026, 11, 1)
+
+
+def test_change_after_founding_still_needs_notice_period(db_path, monkeypatch):
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    v1 = save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1), price_notice_period_months=4))
+    publish_version(db_path, v1.id)
+    v2 = save_draft_version(db_path, _draft(
+        valid_from=date(2026, 12, 1), price_notice_period_months=4, local_rate_chf_kwh=Decimal("0.12"),
     ))
-    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 6, 1)))
-    v = save_draft_version(db_path, _draft(valid_from=date(2026, 7, 1), price_notice_period_months=4))
     with pytest.raises(ContractWorkflowError, match="Ankündigungsfrist"):
-        publish_version(db_path, v.id)
+        publish_version(db_path, v2.id)
 
 
 def test_publish_accepts_sufficient_notice_and_creates_tariff(db_path, monkeypatch):
