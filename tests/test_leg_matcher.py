@@ -155,6 +155,70 @@ class TestMatchSlot:
         result = match_slot(_slot(prod=0.25, a=0.3, b=0.4))
         assert sum(result.meter_local_supplied_kwh.values()) == pytest.approx(result.local_shared_kwh)
 
+    def test_prosumer_with_import_and_export_gets_same_key_as_everyone(self):
+        """No self-exclusion: same pro-rata key for every importer (Art. 19g Abs. 3 StromVV, EBL E66 LEGE)."""
+        slot = EnergySlot(
+            slot_start=TS,
+            producer_export={"M1": 5.0, "M2": 3.0},
+            consumer_import={"M1": 5.0, "M2": 1.0, "M3": 20.0},
+        )
+        result = match_slot(slot)
+
+        assert result.local_shared_kwh == pytest.approx(8.0)
+        assert result.meter_local_received_kwh["M1"] == pytest.approx(5.0 * 8 / 26)
+        assert result.meter_local_received_kwh["M2"] == pytest.approx(1.0 * 8 / 26)
+        assert result.meter_local_received_kwh["M3"] == pytest.approx(20.0 * 8 / 26)
+        assert result.meter_local_supplied_kwh["M1"] == pytest.approx(5.0)
+        assert result.meter_local_supplied_kwh["M2"] == pytest.approx(3.0)
+        assert result.meter_grid_export_kwh["M1"] == pytest.approx(0.0)
+
+    def test_spec_example_a_two_producers_three_consumers(self):
+        """LEG_ONE_Mehrparteien §5: P=12, C=8 → P1 sells 6, P2 sells 2, every consumer fully covered."""
+        slot = EnergySlot(
+            slot_start=TS,
+            producer_export={"P1": 9.0, "P2": 3.0},
+            consumer_import={"C1": 4.0, "C2": 3.0, "C3": 1.0},
+        )
+        result = match_slot(slot)
+
+        assert result.local_shared_kwh == pytest.approx(8.0)
+        assert result.meter_local_supplied_kwh["P1"] == pytest.approx(6.0)
+        assert result.meter_local_supplied_kwh["P2"] == pytest.approx(2.0)
+        assert result.meter_grid_export_kwh["P1"] == pytest.approx(3.0)
+        assert result.meter_grid_export_kwh["P2"] == pytest.approx(1.0)
+        assert result.meter_local_received_kwh == pytest.approx({"C1": 4.0, "C2": 3.0, "C3": 1.0})
+        # Clearing matrix (§5.2)
+        assert result.flows["P1"] == pytest.approx({"C1": 3.0, "C2": 2.25, "C3": 0.75})
+        assert result.flows["P2"] == pytest.approx({"C1": 1.0, "C2": 0.75, "C3": 0.25})
+
+    def test_spec_example_b_shortfall(self):
+        """LEG_ONE_Mehrparteien §6: P=5, C=10 → every consumer 50 %, clearing P1→C1 1.8 etc."""
+        slot = EnergySlot(
+            slot_start=TS,
+            producer_export={"P1": 3.0, "P2": 2.0},
+            consumer_import={"C1": 6.0, "C2": 4.0},
+        )
+        result = match_slot(slot)
+
+        assert result.meter_local_received_kwh == pytest.approx({"C1": 3.0, "C2": 2.0})
+        assert result.meter_grid_import_kwh == pytest.approx({"C1": 3.0, "C2": 2.0})
+        assert result.flows["P1"] == pytest.approx({"C1": 1.8, "C2": 1.2})
+        assert result.flows["P2"] == pytest.approx({"C1": 1.2, "C2": 0.8})
+
+    def test_flows_sum_to_supplied_and_received(self):
+        """Clearing matrix rows sum to supplied, columns to received — also with a prosumer."""
+        slot = EnergySlot(
+            slot_start=TS,
+            producer_export={"M1": 5.0, "M2": 3.0},
+            consumer_import={"M1": 5.0, "M2": 1.0, "M3": 20.0},
+        )
+        result = match_slot(slot)
+
+        for exp_id, targets in result.flows.items():
+            assert sum(targets.values()) == pytest.approx(result.meter_local_supplied_kwh[exp_id])
+        for imp_id, received in result.meter_local_received_kwh.items():
+            assert sum(t.get(imp_id, 0.0) for t in result.flows.values()) == pytest.approx(received)
+
     def test_empty_slot(self):
         """Empty slot produces all-zero result without error."""
         result = match_slot(EnergySlot(slot_start=TS))
