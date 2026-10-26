@@ -475,6 +475,12 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "effective_start_at": "TEXT",
         "effective_end_at": "TEXT",
         "exit_reason": "TEXT NOT NULL DEFAULT ''",
+        # The personal Beitrittserklärung as handed out/signed (participant data,
+        # roles, meters at that moment) — frozen so a later reprint can't differ.
+        "declaration_snapshot": "TEXT NOT NULL DEFAULT ''",
+        "declaration_sha256": "TEXT NOT NULL DEFAULT ''",
+        # Where the paper original is kept when no scan was uploaded.
+        "paper_original_location": "TEXT NOT NULL DEFAULT ''",
     },
 }
 

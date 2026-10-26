@@ -190,7 +190,7 @@ def _settings_from_form(ctx: RequestContext) -> ContractSettings:
         representative_city=(ctx.form.get("representative_city") or "").strip(),
         representative_email=(ctx.form.get("representative_email") or "").strip(),
         grid_operator=_check_grid_operator(ctx, form_required(ctx, "grid_operator", label="Netzbetreiber")),
-        distribution_method=(ctx.form.get("distribution_method") or "proportional zum Verbrauch").strip(),
+        distribution_method=_form_distribution_method(ctx),
     )
 
 
@@ -262,7 +262,7 @@ def _version_from_form(ctx: RequestContext) -> ContractVersion:
         representative_city=(ctx.form.get("representative_city") or "").strip(),
         representative_email=(ctx.form.get("representative_email") or "").strip(),
         grid_operator=_check_grid_operator(ctx, form_required(ctx, "grid_operator", label="Netzbetreiber")),
-        distribution_method=(ctx.form.get("distribution_method") or "proportional zum Verbrauch").strip(),
+        distribution_method=_form_distribution_method(ctx),
         price_notice_period_months=_form_int(ctx, "price_notice_period_months", default=4),
         contract_notice_period_months=_form_int(ctx, "contract_notice_period_months", default=6),
         termination_notice_period_months=_form_int(ctx, "termination_notice_period_months", default=4),
@@ -271,6 +271,22 @@ def _version_from_form(ctx: RequestContext) -> ContractVersion:
         valid_from=form_date(ctx, "valid_from"),
         valid_until=form_date(ctx, "valid_until"),
     )
+
+
+_DISTRIBUTION_METHOD = "proportional zum Verbrauch"
+
+
+def _form_distribution_method(ctx: RequestContext) -> str:
+    """Only the statutory proportional key is supported — the contract text and the settlement implement exactly that.
+
+    Another key would need matching contract wording AND a matching
+    allocation in the billing; until both exist it is rejected rather than
+    printed into a contract the software doesn't honour.
+    """
+    value = (ctx.form.get("distribution_method") or _DISTRIBUTION_METHOD).strip()
+    if value != _DISTRIBUTION_METHOD:
+        raise FormError(f"Als Verteilschlüssel wird nur „{_DISTRIBUTION_METHOD}“ unterstützt.")
+    return value
 
 
 def _form_billing_cycle(ctx: RequestContext) -> str:
@@ -430,8 +446,27 @@ def _declaration_context(ctx: RequestContext):
         return None
     community = get_community(ctx.db_path)
     roles = participant_roles(m for m in list_meters(ctx.db_path) if m.participant_id == participant.participant_id)
+    if assignment.declaration_snapshot:
+        # Frozen when handed out/signed: never re-rendered from today's master data.
+        return assignment, participant, version, assignment.declaration_snapshot, []
     text = render_declaration(assignment, participant, version, community.name if community else "", roles)
     return assignment, participant, version, text, _declaration_issues(participant, version, roles)
+
+
+def _current_declaration_text(ctx: RequestContext, assignment_id: int) -> str:
+    """The declaration as it would print right now — frozen by the issue/confirm actions."""
+    original = ctx.segments
+    ctx.segments = ["participants", str(assignment_id)]
+    try:
+        found = _declaration_context(ctx)
+    finally:
+        ctx.segments = original
+    if found is None:
+        return ""
+    _assignment, _participant, _version, text, issues = found
+    if issues:
+        raise FormError("Beitrittserklärung nicht unterschriftsreif: " + " ".join(issues))
+    return text
 
 
 def _declaration_issues(participant: Participant, version: ContractVersion, roles: ParticipantRoles) -> list[str]:
@@ -482,10 +517,15 @@ def handle_get(ctx: RequestContext) -> str:
                                 title="Beitrittserklärung nicht gefunden", description="")
         assignment, participant, version, text, issues = found
         package = ctx.segments[2] == "package"
+        package_sha256 = ""
+        if package and assignment.declaration_sha256 and version.text_sha256:
+            package_sha256 = hashlib.sha256(
+                (assignment.declaration_sha256 + version.text_sha256).encode("ascii")).hexdigest()
         return jinja_env.get_template("contract/print.html").render(
             title=("Vertragspaket " if package else "Beitrittserklärung ") + participant.label,
             body=text, appendix=version.contract_text_snapshot if package else "",
             version=version, sha256=version.text_sha256, issues=issues,
+            declaration_sha256=assignment.declaration_sha256, package_sha256=package_sha256,
         )
 
     if len(ctx.segments) == 3 and ctx.segments[0] == "participants" and ctx.segments[2] == "declaration":
@@ -766,8 +806,9 @@ def handle_post(ctx: RequestContext) -> str | None:
 
         if action == "issue":
             issued_at = form_date(ctx, "issued_at") or date.today()
-            _run(lambda: mark_declaration_issued(ctx.db_path, assignment_id, issued_at),
-                 "Beitrittserklärung als ausgestellt erfasst.")
+            snapshot = _current_declaration_text(ctx, assignment_id)
+            _run(lambda: mark_declaration_issued(ctx.db_path, assignment_id, issued_at, snapshot=snapshot),
+                 "Beitrittserklärung als ausgestellt erfasst und in dieser Fassung eingefroren.")
             return None
 
         if action == "confirm":
@@ -776,13 +817,21 @@ def handle_post(ctx: RequestContext) -> str | None:
                 raise FormError("Das Datum der Unterschrift ist erforderlich.")
             method = form_required(ctx, "acceptance_method", label="Art der Zustimmung")
             signed_by = form_required(ctx, "signed_by", label="Unterzeichnet von")
+            paper_location = (ctx.form.get("paper_original_location") or "").strip()
+            if not ctx.form.get("_uploaded_sha256") and not paper_location:
+                raise FormError(
+                    "Nachweis fehlt: das unterschriebene Dokument hochladen oder den Ablageort des "
+                    "Papieroriginals angeben."
+                )
+            snapshot = _current_declaration_text(ctx, assignment_id)
             _run(lambda: mark_accepted(
                 ctx.db_path, assignment_id, signed_at, method=method, signed_by=signed_by,
                 recorded_by=_recorded_by(ctx),
                 document_location=ctx.form.get("_uploaded_location", ""),
                 document_sha256=ctx.form.get("_uploaded_sha256", ""),
+                paper_location=paper_location, snapshot=snapshot,
             ), "Unterschrift erfasst." + (" Dokument gespeichert." if ctx.form.get("_uploaded_sha256") else
-                                          " Hinweis: kein unterschriebenes Dokument hinterlegt."))
+                                          f" Papieroriginal: {paper_location}."))
             return None
 
         if action == "notify":
