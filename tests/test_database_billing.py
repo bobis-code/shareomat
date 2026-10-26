@@ -220,7 +220,7 @@ def test_released_run_cannot_be_released_again_or_re_saved_over(db_path, runtime
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     run = save_draft(db_path, preview)
-    release_billing_run(db_path, run.id)
+    release_billing_run(db_path, run.id, override_reason="Testdaten: nur ein Messwert")
 
     with pytest.raises(BillingWorkflowError):
         release_billing_run(db_path, run.id)
@@ -289,7 +289,7 @@ def test_billing_run_survives_reload_from_a_fresh_connection(db_path, runtime):
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     run = save_draft(db_path, preview)
-    release_billing_run(db_path, run.id)
+    release_billing_run(db_path, run.id, override_reason="Testdaten: nur ein Messwert")
 
     # Simulate "process restart": look the run up again via a brand new query,
     # touching no in-memory state from the calls above.

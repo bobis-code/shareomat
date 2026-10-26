@@ -81,7 +81,7 @@ def _write_csv(directory: Path, filename: str, rows: list[tuple]) -> Path:
 def _draft(**overrides) -> ContractVersion:
     fields = dict(
         community_id="", version=0, status="draft", contract_text_snapshot="<p>Vertrag</p>",
-        feed_in_rate_chf_kwh=Decimal("0.15"), admin_fee_chf_kwh=Decimal("0.005"), grid_operator="EBL",
+        feed_in_rate_chf_kwh=Decimal("0.105"), admin_fee_chf_kwh=Decimal("0.005"), grid_operator="EBL",
         representative_name="Jane Doe", representative_address_line="Musterweg 1",
         representative_postal_code="4443", representative_city="Wittinsburg",
         representative_email="jane@example.ch",
@@ -95,7 +95,12 @@ def test_billing_uses_the_contract_rate_that_was_in_force_on_that_date(db_path, 
     # v1: gültig 01.01.2026-31.12.2026, LEG-Bezug 11 Rp. — published well in advance.
     monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2025, 1, 1)))
     v1 = save_draft_version(db_path, _draft(local_rate_chf_kwh=Decimal("0.11"), valid_from=date(2026, 1, 1)))
-    publish_version(db_path, v1.id)
+    v1 = publish_version(db_path, v1.id)
+    # Contract mode: only signed members are billed. Both join v1 and are carried to v2 at publish.
+    from shareomat.database.participant_contract import assign_contract, mark_accepted
+    for pid in ("solar", "cons_a"):
+        a = assign_contract(db_path, pid, v1.id, v1.tariff_id, joined_at=date(2026, 1, 1))
+        mark_accepted(db_path, a.id, date(2025, 12, 1), method="paper", signed_by=pid)
 
     # v2: veröffentlicht 01.09.2026, gültig ab 01.01.2027, LEG-Bezug 10 Rp.
     monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 9, 1)))
@@ -129,3 +134,32 @@ def test_billing_uses_the_contract_rate_that_was_in_force_on_that_date(db_path, 
     january_preview_after_withdraw = compute_billing_preview(db_path, runtime, date(2027, 1, 1), date(2027, 1, 31))
     consumer_after_withdraw = next(i for i in january_preview_after_withdraw.line_items if i.participant_id == "cons_a")
     assert consumer_after_withdraw.local_amount_chf == Decimal("0.066")  # back to 0.6 * 0.11
+
+
+def test_only_effective_members_are_billed_per_day(db_path, runtime, monkeypatch):
+    """Join on 15.10. (signed): energy before the join is not LEG energy; an unsigned member is never billed."""
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 9, 1)))
+    v1 = publish_version(db_path, save_draft_version(db_path, _draft(
+        local_rate_chf_kwh=Decimal("0.11"), feed_in_rate_chf_kwh=Decimal("0.11"), admin_fee_chf_kwh=Decimal("0"),
+        valid_from=date(2026, 10, 1))).id)
+    monkeypatch.setattr(contract_versions_module, "date", date)
+    from shareomat.database.participant_contract import assign_contract, mark_accepted
+    solar = assign_contract(db_path, "solar", v1.id, v1.tariff_id, joined_at=date(2026, 10, 1))
+    mark_accepted(db_path, solar.id, date(2026, 9, 20), method="paper", signed_by="solar")
+    cons = assign_contract(db_path, "cons_a", v1.id, v1.tariff_id, joined_at=date(2026, 10, 15))
+    mark_accepted(db_path, cons.id, date(2026, 9, 20), method="paper", signed_by="cons_a")
+
+    _write_csv(runtime.paths.inbox, "oct.csv", [
+        ("2026-10-10T10:00:00+00:00", "M1", "1.0", "export"),   # before cons_a joined
+        ("2026-10-10T10:00:00+00:00", "M2", "0.5", "import"),
+        ("2026-10-20T10:00:00+00:00", "M1", "1.0", "export"),   # after the join
+        ("2026-10-20T10:00:00+00:00", "M2", "0.5", "import"),
+    ])
+    preview = compute_billing_preview(db_path, runtime, date(2026, 10, 1), date(2026, 10, 31))
+    by_pid = {i.participant_id: i for i in preview.line_items}
+    assert by_pid["cons_a"].local_received_kwh == Decimal("0.5")      # only the 20.10. quarter hour
+    assert by_pid["solar"].local_supplied_kwh == Decimal("0.5")
+    assert by_pid["solar"].producer_credit_chf == Decimal("0.055")    # Gutschrift 0.5 kWh x 11 Rp.
+    assert by_pid["cons_a"].local_amount_chf == Decimal("0.055")
+    assert preview.availability.excluded["M2"] == "vor dem Beitritt"
+    assert any("Gemeinschaft" in i for i in preview.availability.blocking_issues)  # EBL start not recorded

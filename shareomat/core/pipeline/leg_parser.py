@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import math
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -80,8 +81,8 @@ def parse_csv(
                     raise ValueError(f"invalid direction '{direction}' — must be import or export")
 
                 value = float(row["value_kwh"])
-                if value < 0:
-                    raise ValueError(f"value_kwh must be >= 0, got {value}")
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError(f"value_kwh must be a finite number >= 0, got {row['value_kwh']!r}")
 
                 meter_id = _read_meter_id(row)
                 if not meter_id:
@@ -168,8 +169,8 @@ def parse_sdat(
                 continue
             try:
                 value = float(vol_elem.text.strip())
-                if value < 0:
-                    raise ValueError(f"Volume must be >= 0, got {value}")
+                if not math.isfinite(value) or value < 0:
+                    raise ValueError(f"Volume must be a finite number >= 0, got {vol_elem.text!r}")
                 readings.append(IntervalReading(
                     meter_id=meter_id,
                     slot_start=_snap_to_slot(_parse_timestamp(date_elem.text), slot_minutes),

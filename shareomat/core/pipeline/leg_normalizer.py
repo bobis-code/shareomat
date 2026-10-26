@@ -65,15 +65,20 @@ def normalize_ebl_row(row: EblRow, slot_minutes: int = SLOT_MINUTES) -> list[Int
     """
     # Localize the naive EBL timestamp to Zürich, then subtract slot duration
     # to get slot_start, then convert to UTC for internal storage
-    ts_zurich = row.timestamp_end.replace(tzinfo=_TZ_ZURICH)
+    ts_zurich = row.timestamp_end.replace(tzinfo=_TZ_ZURICH, fold=getattr(row, "fold", 0))
+    # Convert to UTC BEFORE subtracting: arithmetic on a local aware datetime is
+    # wall-clock arithmetic and drops `fold`, which would map the repeated
+    # autumn hour onto the first pass again.
     slot_start = snap_to_slot(
-        (ts_zurich - timedelta(minutes=slot_minutes)).astimezone(timezone.utc),
+        ts_zurich.astimezone(timezone.utc) - timedelta(minutes=slot_minutes),
         slot_minutes,
     )
 
+    # Zero is a real measurement (e.g. no PV export at night) — both directions are
+    # always emitted so completeness checks can tell "0 kWh" from "no data".
     readings: list[IntervalReading] = []
 
-    if row.bezug_kwh > 0:
+    if row.bezug_kwh >= 0:
         readings.append(IntervalReading(
             meter_id=row.meter_id,
             slot_start=slot_start,
@@ -83,7 +88,7 @@ def normalize_ebl_row(row: EblRow, slot_minutes: int = SLOT_MINUTES) -> list[Int
             source_file=row.source_file,
         ))
 
-    if row.ruecklieferung_kwh > 0:
+    if row.ruecklieferung_kwh >= 0:
         readings.append(IntervalReading(
             meter_id=row.meter_id,
             slot_start=slot_start,

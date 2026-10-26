@@ -2,6 +2,16 @@
 {% block title %}Abrechnung{% endblock %}
 {% block heading %}Abrechnung {{ detail.run.period_start }} – {{ detail.run.period_end }} (Version {{ detail.run.version }}){% endblock %}
 {% block content %}
+{% set issues = detail.run.quality_issues if detail.run.status == 'draft' else [] %}
+{% if issues %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Freigabe gesperrt — offene Prüfpunkte:</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in issues %}<li>{{ i }}</li>{% endfor %}</ul>
+    <div class="ts" style="margin-top:6px">Daten ergänzen und neu berechnen. Eine Freigabe trotzdem ist nur mit
+      schriftlicher Begründung möglich und wird protokolliert.</div>
+  </div>
+</div>
+{% endif %}
 
 <div class="card">
   <div class="grid">
@@ -12,7 +22,8 @@
     </div><div class="tile-label">Status</div></div>
     <div class="tile"><div class="tile-value">{{ detail.run.participant_count }}</div><div class="tile-label">Teilnehmer</div></div>
     <div class="tile"><div class="tile-value">{{ detail.run.total_local_kwh }}</div><div class="tile-label">Lokal kWh</div></div>
-    <div class="tile"><div class="tile-value">{{ detail.run.total_leg_amount_chf }}</div><div class="tile-label">Gesamtbetrag CHF</div></div>
+    <div class="tile"><div class="tile-value">{{ detail.run.total_leg_amount_chf }}</div><div class="tile-label">Rechnungen CHF</div></div>
+    <div class="tile"><div class="tile-value">{{ detail.run.total_producer_credit_chf }}</div><div class="tile-label">Gutschriften CHF</div></div>
   </div>
   <div class="ts" style="margin-top:12px">
     Gemeinschaft: {{ detail.run.community_name }} ({{ detail.run.community_id }}) &middot;
@@ -20,11 +31,18 @@
     Berechnet am {{ detail.run.computed_at.strftime("%Y-%m-%d %H:%M") }}
     {% if detail.run.released_at %} &middot; Freigegeben am {{ detail.run.released_at.strftime("%Y-%m-%d %H:%M") }}{% endif %}
   </div>
+  {% if detail.run.release_override_reason %}
+  <div class="error-box">Trotz offener Prüfpunkte freigegeben. Begründung: {{ detail.run.release_override_reason }}
+    <ul>{% for i in detail.run.quality_issues %}<li>{{ i }}</li>{% endfor %}</ul></div>
+  {% endif %}
 
   {% if detail.run.status == 'draft' %}
   <div class="actions-row">
     <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/release') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if issues %}
+      <input type="text" name="override_reason" placeholder="Begründung für Freigabe trotz Prüfpunkten" style="min-width:320px">
+      {% endif %}
       <button type="submit">Freigeben</button>
     </form>
     <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/cancel') }}">
@@ -49,8 +67,10 @@
       <thead>
         <tr>
           <th>Teilnehmer</th><th>Messpunkte</th>
-          <th>Lokal kWh</th><th>LEG-Betrag CHF</th>
-          <th>Netzbezug kWh (Info)</th><th>Netzbetrag CHF (Info)</th>
+          <th>LEG-Bezug kWh</th><th>Rechnung CHF</th>
+          <th>LEG-Lieferung kWh</th><th>Gutschrift CHF</th>
+          <th>Saldo CHF</th>
+          <th>Netzbezug kWh (Info)</th>
         </tr>
       </thead>
       <tbody>
@@ -59,9 +79,12 @@
           <td>{{ item.participant_label }}</td>
           <td style="font-family:monospace;font-size:.8rem">{{ item.meter_ids | join(", ") }}</td>
           <td>{{ item.local_received_kwh }}</td>
-          <td><strong>{{ item.local_amount_chf }}</strong></td>
+          <td>{{ item.charge_chf }}</td>
+          <td>{{ item.local_supplied_kwh }}</td>
+          <td>{{ item.credit_chf }}</td>
+          <td><strong>{{ item.net_amount_chf }}</strong>
+            <div class="ts">{{ 'zu bezahlen' if item.net_amount_chf > 0 else ('Auszahlung' if item.net_amount_chf < 0 else '—') }}</div></td>
           <td class="ts">{{ item.grid_import_kwh }}</td>
-          <td class="ts">{{ item.grid_amount_chf }}</td>
         </tr>
         {% endfor %}
       </tbody>
