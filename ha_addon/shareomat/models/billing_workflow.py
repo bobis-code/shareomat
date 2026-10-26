@@ -52,6 +52,10 @@ class BillingLineItem:
     grid_amount_chf: Decimal           # informational only — never added to local_amount_chf
     local_supplied_kwh: Decimal = Decimal(0)
     grid_export_kwh: Decimal = Decimal(0)
+    producer_credit_chf: Decimal = Decimal(0)   # Gutschrift for LEG energy supplied (unrounded, 4 dp)
+    charge_chf: Decimal = Decimal(0)            # local_amount_chf rounded to 0.01 — the invoice line
+    credit_chf: Decimal = Decimal(0)            # producer_credit_chf rounded to 0.01 — the credit line
+    net_amount_chf: Decimal = Decimal(0)        # charge - credit: > 0 to pay, < 0 to be paid out
     id: int | None = None
 
 
@@ -85,6 +89,9 @@ class BillingRun:
     total_grid_amount_chf: Decimal
     computed_at: datetime
     released_at: datetime | None = None
+    total_producer_credit_chf: Decimal = Decimal(0)
+    quality_issues: list[str] = field(default_factory=list)
+    release_override_reason: str = ""
     period_start: date | None = None  # joined in from billing_periods for display convenience
     period_end: date | None = None
     period_label: str = ""
@@ -109,6 +116,12 @@ class DataAvailability:
     unknown_meter_ids: list[str]
     reading_count: int
     sources: list[BillingSourceFile] = field(default_factory=list)
+    # Reasons a computed billing must not be released as is (missing quarter
+    # hours, conflicting duplicates, unparseable files, unconfirmed members,
+    # clearing mismatch, ...). Empty = quality gate passed.
+    blocking_issues: list[str] = field(default_factory=list)
+    # Meters with data that were deliberately not counted, with the reason.
+    excluded: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -133,6 +146,11 @@ class BillingPreview:
     def total_leg_amount_chf(self) -> Decimal:
         """Sum of the amount Shareomat actually bills (local share only)."""
         return sum((i.local_amount_chf for i in self.line_items), Decimal(0))
+
+    @property
+    def total_producer_credit_chf(self) -> Decimal:
+        """Sum of the credits owed to producers for LEG energy supplied."""
+        return sum((i.producer_credit_chf for i in self.line_items), Decimal(0))
 
     @property
     def total_grid_kwh(self) -> Decimal:

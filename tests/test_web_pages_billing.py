@@ -113,7 +113,7 @@ def test_full_workflow_save_release(db_path, runtime):
     assert "Freigeben" in detail_html
 
     release_ctx = RequestContext(
-        method="POST", ingress_path="", segments=[run_id, "release"], form={"csrf_token": csrf},
+        method="POST", ingress_path="", segments=[run_id, "release"], form={"csrf_token": csrf, "override_reason": "Testdaten"},
     )
     with pytest.raises(Redirect):
         billing_page.handle_post(release_ctx)

@@ -42,7 +42,7 @@ METER_ROLES = [
     (METER_ROLE_PRODUCER, "Erzeuger"),
     (METER_ROLE_CONSUMER, "Verbraucher"),
     (METER_ROLE_PRODUCER_CONSUMER, "Erzeuger & Verbraucher"),
-    (METER_ROLE_STORAGE, "Speicher"),
+    (METER_ROLE_STORAGE, "Speicher (Abrechnung nach Art. 19h Abs. 4 noch nicht unterstützt)"),
     (METER_ROLE_GRID, "Netz"),
 ]
 

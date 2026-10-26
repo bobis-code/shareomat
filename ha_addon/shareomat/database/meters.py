@@ -105,17 +105,46 @@ def create_meter(db_path: Path, meter: Meter) -> Meter:
     return result
 
 
+def _guard_reassignment(conn, meter_id: str, old_participant_row_id, new_participant_row_id) -> None:
+    """Refuse moving an already-billed meter to another participant.
+
+    Meter -> participant is not historised yet, so a re-computation of an
+    earlier period would credit the new participant with the old one's
+    energy. Until a dated assignment history exists, a meter that appears
+    in a released billing run keeps its participant (end it and register
+    the successor's meter data under a new assignment instead).
+    """
+    if old_participant_row_id == new_participant_row_id:
+        return
+    billed = conn.execute(
+        """
+        SELECT 1 FROM billing_records br
+        JOIN billing_runs r ON r.id = br.billing_run_id
+        WHERE r.status = 'released' AND (',' || br.meter_ids || ',') LIKE ?
+        LIMIT 1
+        """,
+        (f"%,{meter_id},%",),
+    ).fetchone()
+    if billed:
+        raise ValueError(
+            f"Messpunkt '{meter_id}' ist bereits in einer freigegebenen Abrechnung enthalten und kann nicht "
+            "einem anderen Teilnehmer zugeordnet werden — frühere Abrechnungen würden sonst dem neuen "
+            "Teilnehmer zugerechnet. Ein Zuordnungswechsel per Stichtag wird noch nicht unterstützt."
+        )
+
+
 def update_meter(db_path: Path, meter_id: str, meter: Meter) -> Meter:
     """Update an existing meter by business id, including its participant assignment."""
     now = now_iso()
     with connect(db_path) as conn:
         with conn:
             existing = conn.execute(
-                "SELECT id FROM meters WHERE meter_id = ?", (meter_id,)
+                "SELECT id, participant_id FROM meters WHERE meter_id = ?", (meter_id,)
             ).fetchone()
             if not existing:
                 raise ValueError(f"Messpunkt '{meter_id}' wurde nicht gefunden.")
             participant_row_id = _resolve_participant_row_id(conn, meter.participant_id)
+            _guard_reassignment(conn, meter_id, existing["participant_id"], participant_row_id)
             conn.execute(
                 """
                 UPDATE meters
@@ -139,6 +168,9 @@ def assign_meter_to_participant(db_path: Path, meter_id: str, participant_id: st
     with connect(db_path) as conn:
         with conn:
             participant_row_id = _resolve_participant_row_id(conn, participant_id)
+            current = conn.execute("SELECT participant_id FROM meters WHERE meter_id = ?", (meter_id,)).fetchone()
+            if current is not None:
+                _guard_reassignment(conn, meter_id, current["participant_id"], participant_row_id)
             cursor = conn.execute(
                 "UPDATE meters SET participant_id=?, updated_at=? WHERE meter_id=?",
                 (participant_row_id, now_iso(), meter_id),

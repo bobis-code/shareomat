@@ -92,6 +92,22 @@ def _stem(prefix: str, period_start: datetime) -> str:
     return f"{prefix}_{period_start.astimezone(_TZ_CH).strftime('%Y%m%d_%H%M%S')}"
 
 
+def _new_report_path(reports_dir: Path, prefix: str, period_start: datetime, suffix: str) -> Path:
+    """Path for a new report file that never overwrites an earlier one.
+
+    A second run for the same period (e.g. after corrected meter data) gets
+    '_v2', '_v3', … appended, so reports already referenced by the archive
+    or audit trail stay byte-for-byte as they were.
+    """
+    stem = _stem(prefix, period_start)
+    path = reports_dir / f"{stem}{suffix}"
+    version = 2
+    while path.exists():
+        path = reports_dir / f"{stem}_v{version}{suffix}"
+        version += 1
+    return path
+
+
 def _round_kwh(v: float) -> float:
     """Round an energy value to kWh precision."""
     return round(v, _KWH_PLACES)
@@ -112,7 +128,7 @@ def write_billing_csv(
 ) -> Path:
     """Write one billing row per participant to a timestamped CSV report file."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{_stem('billing', period_start)}.csv"
+    path = _new_report_path(reports_dir, "billing", period_start, ".csv")
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=_BILLING_FIELDS)
         writer.writeheader()
@@ -149,7 +165,7 @@ def write_billing_json(
 ) -> Path:
     """Write all billing records as JSON to a timestamped report file."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{_stem('billing', period_start)}.json"
+    path = _new_report_path(reports_dir, "billing", period_start, ".json")
     payload = [
         {
             "participant_id":   r.participant_id,
@@ -191,7 +207,7 @@ def write_match_csv(
 ) -> Path:
     """Write per-slot sharing detail to CSV (one row per 15-minute interval)."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{_stem('match_detail', period_start)}.csv"
+    path = _new_report_path(reports_dir, "match_detail", period_start, ".csv")
 
     all_consumer_ids = sorted({m for r in results for m in r.meter_local_received_kwh})
     all_supplier_ids = sorted({m for r in results for m in r.meter_local_supplied_kwh})
@@ -238,7 +254,7 @@ def write_community_audit_csv(
 ) -> Path:
     """Write the energy balance audit to CSV — all balance fields must be 0.0."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{_stem('community_audit', period_start)}.csv"
+    path = _new_report_path(reports_dir, "community_audit", period_start, ".csv")
 
     total_export      = sum(r.total_export_kwh    for r in records)
     total_import      = sum(r.total_import_kwh    for r in records)
@@ -295,7 +311,7 @@ def write_ledger_csv(
 ) -> Path:
     """Write the Energy Ledger report: per-flow detail, per-meter summary, and audit section."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{_stem('energy_ledger', period_start)}.csv"
+    path = _new_report_path(reports_dir, "energy_ledger", period_start, ".csv")
 
     def _label(meter_id: str) -> str:
         if meter_labels:
@@ -469,7 +485,7 @@ def write_community_summary_json(
 ) -> Path:
     """Write community-level KPI summary to JSON."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    path = reports_dir / f"{_stem('community_summary', period_start)}.json"
+    path = _new_report_path(reports_dir, "community_summary", period_start, ".json")
 
     total_export  = sum(r.total_export_kwh   for r in records)
     total_import  = sum(r.total_import_kwh   for r in records)

@@ -2,6 +2,16 @@
 {% block title %}Abrechnung – Vorschau{% endblock %}
 {% block heading %}Vorschau: {{ preview.period_start }} – {{ preview.period_end }}{% endblock %}
 {% block content %}
+{% set issues = preview.availability.blocking_issues %}
+{% if issues %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Freigabe gesperrt — offene Prüfpunkte:</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in issues %}<li>{{ i }}</li>{% endfor %}</ul>
+    <div class="ts" style="margin-top:6px">Daten ergänzen und neu berechnen. Eine Freigabe trotzdem ist nur mit
+      schriftlicher Begründung möglich und wird protokolliert.</div>
+  </div>
+</div>
+{% endif %}
 
 <div class="card">
   <h2>2. Verfügbare Messdaten</h2>
@@ -22,6 +32,12 @@
   <div class="error-box">
     <strong>Unbekannte Messpunkte in den Dateien (nicht in der Abrechnung berücksichtigt):</strong>
     <ul>{% for m in preview.availability.unknown_meter_ids %}<li>{{ m }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  {% if preview.availability.excluded %}
+  <div class="field-hint" style="margin-top:12px"><strong>Nicht abgerechnet (zu diesem Zeitpunkt nicht wirksam Mitglied):</strong>
+    <ul>{% for m, reason in preview.availability.excluded.items() %}<li>{{ m }}: {{ reason }}</li>{% endfor %}</ul>
   </div>
   {% endif %}
 
@@ -47,8 +63,10 @@
       <thead>
         <tr>
           <th>Teilnehmer</th><th>Messpunkte</th>
-          <th>Lokal kWh</th><th>LEG-Betrag CHF</th>
-          <th>Netzbezug kWh (Info)</th><th>Netzbetrag CHF (Info)</th>
+          <th>LEG-Bezug kWh</th><th>Rechnung CHF</th>
+          <th>LEG-Lieferung kWh</th><th>Gutschrift CHF</th>
+          <th>Saldo CHF</th>
+          <th>Netzbezug kWh (Info)</th>
         </tr>
       </thead>
       <tbody>
@@ -57,24 +75,30 @@
           <td>{{ item.participant_label }}</td>
           <td style="font-family:monospace;font-size:.8rem">{{ item.meter_ids | join(", ") }}</td>
           <td>{{ item.local_received_kwh }}</td>
-          <td><strong>{{ item.local_amount_chf }}</strong></td>
+          <td>{{ item.charge_chf }}</td>
+          <td>{{ item.local_supplied_kwh }}</td>
+          <td>{{ item.credit_chf }}</td>
+          <td><strong>{{ item.net_amount_chf }}</strong>
+            <div class="ts">{{ 'zu bezahlen' if item.net_amount_chf > 0 else ('Auszahlung' if item.net_amount_chf < 0 else '—') }}</div></td>
           <td class="ts">{{ item.grid_import_kwh }}</td>
-          <td class="ts">{{ item.grid_amount_chf }}</td>
         </tr>
         {% endfor %}
         <tr style="font-weight:bold;border-top:2px solid #e5e7eb">
           <td colspan="2">Summe</td>
           <td>{{ preview.total_local_kwh }}</td>
           <td>{{ preview.total_leg_amount_chf }}</td>
+          <td></td>
+          <td>{{ preview.total_producer_credit_chf }}</td>
+          <td></td>
           <td class="ts">{{ preview.total_grid_kwh }}</td>
-          <td class="ts">{{ preview.total_grid_amount_chf }}</td>
         </tr>
       </tbody>
     </table>
   </div>
   <div class="field-hint" style="margin-top:8px">
-    Nur die LEG-Beträge (lokal) werden von Shareomat in Rechnung gestellt. Der Netzbezug ist ein
-    Kontrollwert — dieser wird direkt von EBL verrechnet.
+    Rechnung = LEG-Bezug × Bezugspreis, Gutschrift = LEG-Lieferung × Produzentenvergütung, je auf 0.01 CHF
+    gerundet; bei Prosumern wird verrechnet (Saldo). Netzbezug ist ein Kontrollwert — Reststrom, Netz und
+    Abgaben verrechnet der Netzbetreiber direkt.
   </div>
   {% else %}
   <p class="ts">Für diesen Zeitraum liegen keine abrechenbaren Messdaten vor.</p>

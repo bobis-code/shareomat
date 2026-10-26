@@ -449,6 +449,21 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         # carried members then need recorded consent, not a mere notification.
         "consent_based": "INTEGER NOT NULL DEFAULT 0",
     },
+    "billing_runs": {
+        # Producer credits (Gutschriften) and the quality gate: issues found while
+        # computing, and the documented reason when a run was released anyway.
+        "total_producer_credit_chf": "TEXT NOT NULL DEFAULT '0'",
+        "quality_issues": "TEXT NOT NULL DEFAULT ''",
+        "release_override_reason": "TEXT NOT NULL DEFAULT ''",
+    },
+    "billing_records": {
+        "producer_credit_chf": "TEXT NOT NULL DEFAULT '0'",
+        # Rounded to 0.01 CHF per document: charge (Rechnung) and credit
+        # (Gutschrift) are shown separately, net = charge - credit (Saldo).
+        "charge_chf": "TEXT NOT NULL DEFAULT '0'",
+        "credit_chf": "TEXT NOT NULL DEFAULT '0'",
+        "net_amount_chf": "TEXT NOT NULL DEFAULT '0'",
+    },
     "participant_contract": {
         # Separate from accepted_at: accepted_at is the participant's original,
         # immutable join confirmation (never touched again); notified_at tracks

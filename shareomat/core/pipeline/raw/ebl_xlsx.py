@@ -28,6 +28,8 @@ Notes:
 
 from __future__ import annotations
 
+import math
+
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -61,6 +63,9 @@ class EblRow:
     bezug_kwh: float = 0.0           # consumption from grid (Bezug)
     ruecklieferung_kwh: float = 0.0  # feed-in to grid (Rücklieferung)
     source_file: str = ""
+    # 1 for the second pass through the repeated local hour when summer time
+    # ends (the same naive wall-clock time appears twice in the export).
+    fold: int = 0
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
@@ -78,16 +83,28 @@ def _extract_meter_id(rows: list) -> str:
 def _build_ebl_rows(rows: list, meter_id: str, source_file: str) -> list[EblRow]:
     """Convert raw XLSX rows into EblRow objects, skipping non-data rows."""
     result: list[EblRow] = []
+    seen_naive: set[datetime] = set()
     for row in rows[_HEADER_ROWS:]:
         ts = row[_COL_TIMESTAMP]
         if not isinstance(ts, datetime):
             continue
+        bezug = float(row[_COL_BEZUG] or 0.0)
+        rueck = float(row[_COL_RUECK] or 0.0)
+        if not (math.isfinite(bezug) and math.isfinite(rueck)) or bezug < 0 or rueck < 0:
+            raise ValueError(f"{source_file}: ungültiger Messwert bei {ts}: Bezug={bezug}, Rücklieferung={rueck}")
+        # The repeated hour at the end of summer time appears twice with the same
+        # naive timestamp; the second occurrence is the winter-time (fold=1) one.
+        # NOTE: how EBL labels the boundary quarter hour (03:00 vs. 02:00) must be
+        # confirmed against a real October export before relying on it.
+        fold = 1 if ts in seen_naive else 0
+        seen_naive.add(ts)
         result.append(EblRow(
             meter_id=meter_id,
             timestamp_end=ts,
-            bezug_kwh=float(row[_COL_BEZUG] or 0.0),
-            ruecklieferung_kwh=float(row[_COL_RUECK] or 0.0),
+            bezug_kwh=bezug,
+            ruecklieferung_kwh=rueck,
             source_file=source_file,
+            fold=fold,
         ))
     return result
 

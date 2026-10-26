@@ -103,7 +103,7 @@ def handle_post(ctx: RequestContext) -> str | None:
     if len(ctx.segments) == 2 and ctx.segments[1] == "release":
         run_id = int(ctx.segments[0])
         try:
-            release_billing_run(ctx.db_path, run_id)
+            release_billing_run(ctx.db_path, run_id, override_reason=ctx.form.get("override_reason", ""))
         except BillingWorkflowError as exc:
             raise FormError(str(exc))
         get_state().set_flash("Abrechnung freigegeben.", ok=True)
