@@ -5,7 +5,15 @@
    with the "ODER"/checkbox variants resolved per the community's decisions
    (VNB-Verhältnis Variante A; Preis-Varianten "Einheitstarif", HT/NT-fähig
    angepasst; Kostentragung "Rp./kWh bezogener Solarstrom") — see
-   shareomat/web/pages/contract.py for how this template is invoked. #}
+   shareomat/web/pages/contract.py for how this template is invoked.
+   Deliberate, minimal deviations from the Mustervertrag (review 26.10.2026):
+   §1 allocation among several producers + Herkunftsnachweise (what the
+   settlement actually does), §3.3 wording when no fee is charged, new §3.4
+   billing rhythm/payment term (§5 refers to "der definierten Zahlungsfrist",
+   which the Mustervertrag never defines), §5 notice period as its own
+   parameter. Everything else is the Mustervertrag's wording on purpose.
+   Any change here changes template_sha256 and therefore needs the contract
+   notice period for the next version. #}
 <h2>Gesellschaftsvertrag «{{ community_name }}»</h2>
 
 <p>Unter dem Namen «{{ community_name }}» (nachfolgend «LEG») besteht eine
@@ -37,6 +45,14 @@ Rolle(n) er wahrnimmt.</p>
 LEG-Bezüger aufgeteilt. Innerhalb einer Viertelstunde haben alle
 teilnehmenden LEG-Bezüger den gleichen prozentualen Anteil an LEG-Strom im
 Verhältnis zum Verbrauch zugute.</p>
+<p>Speisen in einer Viertelstunde mehrere LEG-Produzenten ein, wird die
+innerhalb der LEG abgesetzte Elektrizität den LEG-Produzenten im Verhältnis
+ihrer Einspeisung in derselben Viertelstunde zugeordnet. Massgebend sind die
+vom VNB ermittelten Werte (Art. 19g Abs. 3 StromVV).</p>
+<p>Die innerhalb der LEG abgesetzte Elektrizität wird einschliesslich der
+zugehörigen Herkunftsnachweise abgesetzt; diese werden nicht zusätzlich
+gehandelt. Herkunftsnachweise stehen den LEG-Produzenten nur für ihren
+Überschuss ausserhalb der LEG zu.</p>
 <p>Die Gesellschaft «LEG» verfügt über kein Gesellschaftsvermögen. Die
 Gesellschaft «LEG» erwirtschaftet weder Gewinn noch Verlust. Ebenso haben
 die Gesellschafter keine Beiträge an die Gesellschaft «LEG» zu leisten.</p>
@@ -113,12 +129,29 @@ verstehen.</p>
 <p>Der VNB legt die Preise für die Netznutzung und die Messung fest.</p>
 
 <h4>3.3 Kostentragung Abrechnung</h4>
+{% if tariff.admin_fee_chf_kwh > 0 %}
 <p>Die Kosten für die interne Datenbearbeitung, Verwaltung und Abrechnung
-werden den teilnehmenden Gesellschaftern in Rechnung gestellt. Diese
-Kosten betragen {{ "%.2f"|format(tariff.admin_fee_chf_kwh * 100) }}
-Rp./kWh bezogener Solarstrom. Sie sind im Preis gemäss Ziffer 3.2 enthalten
-und werden nicht zusätzlich verrechnet; der Preis gemäss Ziffer 3.1 ergibt
-sich aus dem Preis gemäss Ziffer 3.2 abzüglich dieser Kosten.</p>
+betragen {{ "%.2f"|format(tariff.admin_fee_chf_kwh * 100) }} Rp./kWh
+bezogener Solarstrom. Sie sind im Preis gemäss Ziffer 3.2 enthalten und
+werden nicht zusätzlich verrechnet; der Preis gemäss Ziffer 3.1 ergibt sich
+aus dem Preis gemäss Ziffer 3.2 abzüglich dieser Kosten.</p>
+{% else %}
+<p>Für die interne Datenbearbeitung, Verwaltung und Abrechnung wird derzeit
+keine Gebühr erhoben (0.00 Rp./kWh bezogener Solarstrom). Die Preise gemäss
+Ziffer 3.1 und 3.2 sind deshalb gleich hoch. Eine spätere Gebühr gilt als
+Preisänderung gemäss Ziffer 3.1 und 3.2.</p>
+{% endif %}
+
+<h4>3.4 Abrechnung und Zahlung</h4>
+<p>Der LEG-Vertreter rechnet den LEG-Strom {{ billing_cycle_label }} ab,
+sobald die Messdaten des VNB für die Abrechnungsperiode vorliegen. Die
+LEG-Bezüger erhalten eine Rechnung, die LEG-Produzenten eine Gutschrift.</p>
+<p>Rechnungen sind innerhalb von {{ payment_term_days }} Tagen ab
+Rechnungsdatum zu bezahlen (Zahlungsfrist gemäss Ziffer 5). Gutschriften
+werden innerhalb derselben Frist ab Abrechnungsdatum ausbezahlt.</p>
+<p>Korrigiert der VNB Messdaten nachträglich, wird die Abrechnung mit einer
+Korrekturabrechnung berichtigt. Beanstandungen einer Abrechnung sind
+innerhalb der Zahlungsfrist schriftlich an den LEG-Vertreter zu richten.</p>
 
 <h3>4. Vertretung</h3>
 <p>Die Gesellschafter sind einzeln nicht ermächtigt, Verpflichtungen oder
@@ -155,7 +188,7 @@ unter Berücksichtigung der anwendbaren gesetzlichen Bestimmungen zur
 Bildung der Gesellschaft «LEG» in Kraft und wird auf unbestimmte Zeit
 abgeschlossen.</p>
 <p>Jeder Gesellschafter kann mit einer Kündigungsfrist von
-{{ price_notice_period_months }} Monaten den vorliegenden Gesellschaftsvertrag
+{{ termination_notice_period_months }} Monaten den vorliegenden Gesellschaftsvertrag
 jeweils auf ein Monatsende schriftlich kündigen.</p>
 <p>Die Teilnahme eines LEG-Teilnehmers an der Gesellschaft «LEG» endet
 automatisch, sobald die anwendbaren gesetzlichen Voraussetzungen für den

@@ -1,0 +1,28 @@
+{# Standalone printable page (no navigation) — the browser's "Drucken -> als PDF
+   speichern" produces the document to sign/archive. The body is the stored
+   snapshot, byte-identical to what text_sha256 was computed from. #}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    body { font-family: Georgia, "Times New Roman", serif; max-width: 46rem; margin: 2rem auto; line-height: 1.45; color: #111; }
+    h2 { font-size: 1.4rem; } h3 { font-size: 1.1rem; margin-top: 1.4rem; } h4 { font-size: 1rem; }
+    .ts { color: #444; font-size: .85rem; }
+    .meta { border-top: 1px solid #999; margin-top: 2rem; padding-top: .5rem; font-size: .8rem; color: #444; }
+    .noprint { margin-bottom: 1rem; }
+    @media print { .noprint { display: none; } body { margin: 0 auto; } }
+  </style>
+</head>
+<body>
+  <div class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></div>
+  {{ body | safe }}
+  <div class="meta">
+    Gesellschaftsvertrag Version {{ version.version }}
+    {% if version.valid_from %} · gültig ab {{ version.valid_from.strftime('%d.%m.%Y') }}{% endif %}
+    {% if sha256 %}<br>SHA-256 Vertragstext: <span style="font-family:monospace;word-break:break-all">{{ sha256 }}</span>
+    {% else %}<br>Entwurf — noch nicht veröffentlicht, keine Prüfsumme.{% endif %}
+  </div>
+</body>
+</html>

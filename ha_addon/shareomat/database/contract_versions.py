@@ -26,14 +26,16 @@ Part of:
 from __future__ import annotations
 
 import calendar
+import hashlib
 import sqlite3
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from shareomat.database.audit import record_event
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
-from shareomat.leg_const import CONTRACT_STATUS_DRAFT, CONTRACT_STATUS_PUBLISHED
+from shareomat.leg_const import CONTRACT_STATUS_DRAFT, CONTRACT_STATUS_PUBLISHED, CONTRACT_STATUS_WITHDRAWN
 from shareomat.models.contract import ContractVersion
 
 
@@ -84,8 +86,15 @@ def _row_to_version(row: sqlite3.Row, community_id: str) -> ContractVersion:
         contract_notice_period_months=row["contract_notice_period_months"],
         valid_from=str_to_date(row["valid_from"]),
         valid_until=str_to_date(row["valid_until"]),
+        termination_notice_period_months=row["termination_notice_period_months"],
+        payment_term_days=row["payment_term_days"],
+        billing_cycle=row["billing_cycle"],
         tariff_id=row["tariff_id"],
         supersedes_version_id=row["supersedes_version_id"],
+        template_sha256=row["template_sha256"],
+        text_sha256=row["text_sha256"],
+        published_at=datetime.fromisoformat(row["published_at"]) if row["published_at"] else None,
+        consent_based=bool(row["consent_based"]),
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
         id=row["id"],
@@ -189,6 +198,7 @@ _EDITABLE_COLUMNS = (
     "representative_name", "representative_address_line", "representative_postal_code",
     "representative_city", "representative_email", "grid_operator", "distribution_method",
     "price_notice_period_months", "contract_notice_period_months", "reference_product",
+    "termination_notice_period_months", "payment_term_days", "billing_cycle", "template_sha256",
 )
 
 
@@ -214,6 +224,10 @@ def _editable_values(version: ContractVersion) -> tuple:
         version.price_notice_period_months,
         version.contract_notice_period_months,
         version.reference_product,
+        version.termination_notice_period_months,
+        version.payment_term_days,
+        version.billing_cycle,
+        version.template_sha256,
     )
 
 
@@ -324,6 +338,13 @@ def _required_notice_months(draft: ContractVersion, prior: ContractVersion | Non
         or draft.distribution_method != prior.distribution_method
         or draft.price_notice_period_months != prior.price_notice_period_months
         or draft.contract_notice_period_months != prior.contract_notice_period_months
+        or draft.termination_notice_period_months != prior.termination_notice_period_months
+        or draft.payment_term_days != prior.payment_term_days
+        or draft.billing_cycle != prior.billing_cycle
+        # Different template revision = different contract wording, even with
+        # identical prices and master data. A prior version from before this
+        # was tracked ('') counts as different: its wording can't be proven equal.
+        or draft.template_sha256 != prior.template_sha256
     )
 
     required = 0
@@ -336,7 +357,46 @@ def _required_notice_months(draft: ContractVersion, prior: ContractVersion | Non
     return required
 
 
-def publish_version(db_path: Path, version_id: int) -> ContractVersion:
+_REQUIRED_REPRESENTATIVE_FIELDS = (
+    ("representative_name", "LEG-Vertreter: Name"),
+    ("representative_address_line", "LEG-Vertreter: Adresse"),
+    ("representative_postal_code", "LEG-Vertreter: PLZ"),
+    ("representative_city", "LEG-Vertreter: Ort"),
+    ("representative_email", "LEG-Vertreter: E-Mail"),
+)
+
+
+def _validate_publishable(draft: ContractVersion, prior: ContractVersion | None) -> None:
+    """Reject drafts whose rendered contract would be incomplete or whose dates make no sense.
+
+    A published version is what participants sign — missing representative
+    data would print as "—", and a valid_until before valid_from or a start
+    not after the version it supersedes would leave overlapping or empty
+    validity windows.
+    """
+    if draft.valid_from is None:
+        raise ContractWorkflowError('„Gültig ab" muss gesetzt sein, um eine Version zu veröffentlichen.')
+    if draft.valid_from.day != 1:
+        raise ContractWorkflowError('„Gültig ab" muss ein Monatserster sein (Eintritte/Änderungen per Monatsbeginn).')
+    if draft.valid_until is not None and draft.valid_until < draft.valid_from:
+        raise ContractWorkflowError('„Gültig bis" darf nicht vor „Gültig ab" liegen.')
+    if prior is not None and prior.valid_from is not None and draft.valid_from <= prior.valid_from:
+        raise ContractWorkflowError(
+            f"Die neue Version muss nach der bisherigen (gültig ab {prior.valid_from.strftime('%d.%m.%Y')}) "
+            "in Kraft treten."
+        )
+    missing = [label for field, label in _REQUIRED_REPRESENTATIVE_FIELDS if not getattr(draft, field).strip()]
+    if not draft.grid_operator.strip():
+        missing.append("Netzbetreiber")
+    if missing:
+        raise ContractWorkflowError("Für die Veröffentlichung fehlen: " + ", ".join(missing) + ".")
+    if draft.local_rate_chf_kwh <= 0:
+        raise ContractWorkflowError("Der LEG-Bezugspreis muss grösser als 0 sein.")
+    if draft.payment_term_days <= 0 or draft.termination_notice_period_months <= 0:
+        raise ContractWorkflowError("Zahlungsfrist und Kündigungsfrist müssen grösser als 0 sein.")
+
+
+def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = False) -> ContractVersion:
     """Publish a draft: enforce the contractually required notice period, create its tariff.
 
     Raises ContractWorkflowError if: the version is not a draft, valid_from
@@ -349,6 +409,12 @@ def publish_version(db_path: Path, version_id: int) -> ContractVersion:
     version's valid_from, its tariff likewise; a new tariff is created from
     this version's prices; this version becomes published, recording
     tariff_id/supersedes_version_id so withdraw_version() can undo it.
+
+    consent_of_all=True publishes an amendment that every member agreed to:
+    no notice period applies (the periods protect members against changes
+    they did not agree to), but the version is marked consent_based and each
+    carried member's consent must then be recorded (mark_notified with the
+    consent as evidence) — the UI asks for "Zustimmung", not "Mitteilung".
     """
     with connect(db_path) as conn:
         with conn:
@@ -368,11 +434,15 @@ def publish_version(db_path: Path, version_id: int) -> ContractVersion:
             ).fetchone()
             prior = _row_to_version(prior_row, community_id) if prior_row else None
 
-            if draft.valid_from is None:
-                raise ContractWorkflowError('„Gültig ab" muss gesetzt sein, um eine Version zu veröffentlichen.')
+            _validate_publishable(draft, prior)
 
-            required_months = _required_notice_months(draft, prior)
+            required_months = 0 if consent_of_all else _required_notice_months(draft, prior)
             earliest = _add_months(date.today(), required_months)
+            if draft.valid_from < earliest and required_months == 0:
+                raise ContractWorkflowError(
+                    f"„Gültig ab\" ({draft.valid_from.strftime('%d.%m.%Y')}) liegt in der Vergangenheit — "
+                    "eine Vertragsversion kann nicht rückwirkend in Kraft gesetzt werden."
+                )
             if draft.valid_from < earliest:
                 raise ContractWorkflowError(
                     f"Erforderliche Ankündigungsfrist: {required_months} Monate. "
@@ -425,26 +495,57 @@ def publish_version(db_path: Path, version_id: int) -> ContractVersion:
                 # amendment, not a fresh Beitrittserklärung. accepted_at (their original
                 # join confirmation) is preserved as-is; notified_at always starts NULL
                 # for the new version and must be recorded separately (see mark_notified()).
+                # Carried over: the ORIGINAL join evidence (accepted_at,
+                # accepted_version, signature fields) travels along unchanged and
+                # keeps pointing at the version actually signed — it is never
+                # presented as consent to this new version; that is notified_at
+                # (+ notice_evidence), which always starts empty here. Members
+                # who leave before the new version starts are not carried; those
+                # leaving later keep their left_at.
                 conn.execute(
                     """
                     INSERT INTO participant_contract
                         (participant_id, contract_version_id, tariff_id, joined_at, left_at,
-                         accepted_at, notified_at, created_at)
-                    SELECT participant_id, ?, ?, joined_at, NULL, accepted_at, NULL, ?
+                         accepted_at, notified_at, accepted_version, declaration_issued_at,
+                         acceptance_method, signed_at, signed_by, signed_document_location,
+                         signed_document_sha256, recorded_by, recorded_at, vnb_notified_at,
+                         vnb_confirmed_at, effective_start_at, effective_end_at, exit_reason, created_at)
+                    SELECT participant_id, ?, ?, joined_at, left_at,
+                           accepted_at, NULL, accepted_version, declaration_issued_at,
+                           acceptance_method, signed_at, signed_by, signed_document_location,
+                           signed_document_sha256, recorded_by, recorded_at, vnb_notified_at,
+                           vnb_confirmed_at, effective_start_at, effective_end_at, exit_reason, ?
                     FROM participant_contract
-                    WHERE contract_version_id = ? AND left_at IS NULL
+                    WHERE contract_version_id = ? AND (left_at IS NULL OR left_at >= ?)
                     """,
-                    (version_id, new_tariff_id, now, prior.id),
+                    (version_id, new_tariff_id, now, prior.id, date_to_str(draft.valid_from)),
                 )
 
+            text_sha256 = hashlib.sha256(draft.contract_text_snapshot.encode("utf-8")).hexdigest()
             conn.execute(
                 "UPDATE contract_versions SET status = ?, tariff_id = ?, supersedes_version_id = ?, "
-                "updated_at = ? WHERE id = ?",
-                (CONTRACT_STATUS_PUBLISHED, new_tariff_id, prior.id if prior else None, now, version_id),
+                "text_sha256 = ?, published_at = ?, consent_based = ?, updated_at = ? WHERE id = ?",
+                (CONTRACT_STATUS_PUBLISHED, new_tariff_id, prior.id if prior else None,
+                 text_sha256, now, int(consent_of_all and prior is not None), now, version_id),
+            )
+            record_event(
+                conn, "contract_version", version_id, "published",
+                f"v{draft.version} gültig ab {date_to_str(draft.valid_from)}, Text-SHA-256 {text_sha256}"
+                + (", mit Zustimmung aller Gesellschafter (ohne Ankündigungsfrist)" if consent_of_all and prior else ""),
             )
     result = get_contract_version(db_path, version_id)
     assert result is not None
     return result
+
+
+def _restore_superseded(conn: sqlite3.Connection, supersedes_id: int | None, now: str) -> None:
+    """Re-open the version (and its tariff) a withdrawn version had capped at publish time."""
+    if supersedes_id is None:
+        return
+    conn.execute("UPDATE contract_versions SET valid_until = NULL, updated_at = ? WHERE id = ?", (now, supersedes_id))
+    prior_tariff_row = conn.execute("SELECT tariff_id FROM contract_versions WHERE id = ?", (supersedes_id,)).fetchone()
+    if prior_tariff_row and prior_tariff_row["tariff_id"] is not None:
+        conn.execute("UPDATE tariffs SET valid_until = NULL, updated_at = ? WHERE id = ?", (now, prior_tariff_row["tariff_id"]))
 
 
 def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
@@ -452,10 +553,14 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
 
     Deletes the tariff this version created (safe — it never took effect,
     so it was never used for a billing run), restores the previously
-    superseded version's valid_until/tariff to open-ended, deletes any
-    participant_contract rows carried forward to this version (same
-    reasoning — never in force, never relied on), and turns this version
-    back into a plain, editable draft.
+    superseded version's valid_until/tariff to open-ended, deletes the
+    participant_contract rows of this version, and turns it back into a
+    plain, editable draft. As soon as any participant row carries evidence
+    for THIS version (declaration issued/signed, amendment notified,
+    reported to the grid operator) nothing is deleted: the version becomes
+    'withdrawn' — read-only, with all assignments and its text kept as
+    evidence, its tariff deactivated — and a corrected version can be
+    published (even for the same start date; participants sign again).
     """
     with connect(db_path) as conn:
         with conn:
@@ -474,31 +579,50 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
                     'dafür „Vertrag beenden" verwenden.'
                 )
 
+            evidence = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM participant_contract
+                WHERE contract_version_id = ?
+                  AND ((accepted_version = ? AND accepted_at IS NOT NULL) OR notified_at IS NOT NULL
+                       OR declaration_issued_at IS NOT NULL OR vnb_notified_at IS NOT NULL)
+                """,
+                (version_id, version.version),
+            ).fetchone()["n"]
             now = now_iso()
             tariff_id_to_delete = version.tariff_id
             supersedes_id = version.supersedes_version_id
 
-            conn.execute(
-                "UPDATE contract_versions SET status = ?, tariff_id = NULL, supersedes_version_id = NULL, "
-                "updated_at = ? WHERE id = ?",
-                (CONTRACT_STATUS_DRAFT, now, version_id),
-            )
-            conn.execute("DELETE FROM participant_contract WHERE contract_version_id = ?", (version_id,))
-            if tariff_id_to_delete is not None:
-                conn.execute("DELETE FROM tariffs WHERE id = ?", (tariff_id_to_delete,))
-            if supersedes_id is not None:
+            if evidence:
+                # Participants already hold paper/notices for THIS version — archive it
+                # read-only with all assignments instead of deleting anything. Its
+                # tariff is deactivated (never took effect, never billed); a corrected
+                # version can then be published, even with the same start date.
                 conn.execute(
-                    "UPDATE contract_versions SET valid_until = NULL, updated_at = ? WHERE id = ?",
-                    (now, supersedes_id),
+                    "UPDATE contract_versions SET status = ?, updated_at = ? WHERE id = ?",
+                    (CONTRACT_STATUS_WITHDRAWN, now, version_id),
                 )
-                prior_tariff_row = conn.execute(
-                    "SELECT tariff_id FROM contract_versions WHERE id = ?", (supersedes_id,)
-                ).fetchone()
-                if prior_tariff_row and prior_tariff_row["tariff_id"] is not None:
-                    conn.execute(
-                        "UPDATE tariffs SET valid_until = NULL, updated_at = ? WHERE id = ?",
-                        (now, prior_tariff_row["tariff_id"]),
-                    )
+                if tariff_id_to_delete is not None:
+                    conn.execute("UPDATE tariffs SET active = 0, updated_at = ? WHERE id = ?", (now, tariff_id_to_delete))
+                _restore_superseded(conn, supersedes_id, now)
+                record_event(
+                    conn, "contract_version", version_id, "withdrawn_archived",
+                    f"v{version.version}: {evidence} Teilnehmer mit Nachweisen — archiviert, nichts gelöscht",
+                )
+                return_version = True
+            else:
+                return_version = False
+
+            if not return_version:
+                conn.execute(
+                    "UPDATE contract_versions SET status = ?, tariff_id = NULL, supersedes_version_id = NULL, "
+                    "text_sha256 = '', published_at = NULL, consent_based = 0, updated_at = ? WHERE id = ?",
+                    (CONTRACT_STATUS_DRAFT, now, version_id),
+                )
+                record_event(conn, "contract_version", version_id, "withdrawn", f"v{version.version}")
+                conn.execute("DELETE FROM participant_contract WHERE contract_version_id = ?", (version_id,))
+                if tariff_id_to_delete is not None:
+                    conn.execute("DELETE FROM tariffs WHERE id = ?", (tariff_id_to_delete,))
+                _restore_superseded(conn, supersedes_id, now)
     result = get_contract_version(db_path, version_id)
     assert result is not None
     return result
@@ -515,6 +639,26 @@ def end_contract(db_path: Path, version_id: int, end_date: date) -> ContractVers
             version = _row_to_version(row, community_id)
             if version.status != CONTRACT_STATUS_PUBLISHED or version.valid_from is None or version.valid_from > date.today():
                 raise ContractWorkflowError("Nur ein aktuell aktiver Vertrag kann beendet werden.")
+            if version.valid_until is not None and version.valid_until < date.today():
+                raise ContractWorkflowError("Diese Vertragsversion ist bereits abgelaufen.")
+            if end_date < version.valid_from:
+                raise ContractWorkflowError("Das Enddatum darf nicht vor dem Inkrafttreten liegen.")
+            if end_date < date.today():
+                raise ContractWorkflowError(
+                    "Das Enddatum darf nicht in der Vergangenheit liegen — bereits abgerechnete Zeiträume "
+                    "bleiben unverändert."
+                )
+            last_day = calendar.monthrange(end_date.year, end_date.month)[1]
+            if end_date.day != last_day:
+                raise ContractWorkflowError("Das Enddatum muss ein Monatsletzter sein.")
+            later = conn.execute(
+                "SELECT version FROM contract_versions WHERE status = ? AND valid_from > ?",
+                (CONTRACT_STATUS_PUBLISHED, date_to_str(version.valid_from)),
+            ).fetchone()
+            if later is not None:
+                raise ContractWorkflowError(
+                    f"Es ist bereits eine Folgeversion v{later['version']} veröffentlicht — diese zuerst zurückziehen."
+                )
 
             now = now_iso()
             conn.execute(
@@ -526,6 +670,7 @@ def end_contract(db_path: Path, version_id: int, end_date: date) -> ContractVers
                     "UPDATE tariffs SET valid_until = ?, updated_at = ? WHERE id = ?",
                     (date_to_str(end_date), now, version.tariff_id),
                 )
+            record_event(conn, "contract_version", version_id, "ended", f"v{version.version} per {date_to_str(end_date)}")
     result = get_contract_version(db_path, version_id)
     assert result is not None
     return result

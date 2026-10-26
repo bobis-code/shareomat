@@ -6,10 +6,15 @@
    later version, not asked to sign again (LEG-Mustervertrag §8). #}
 <h2>Beitrittserklärung zur Gesellschaft «{{ community_name }}»</h2>
 
-<p>Mit Ihren Angaben und Ihrer Unterschrift (oder digitaler Bestätigung) melden
-Sie sich verbindlich zur Teilnahme an und akzeptieren den aktuell gültigen
-Gesellschaftsvertrag «{{ community_name }}», Version {{ version.version }}
-{% if version.valid_from %}(gültig ab {{ version.valid_from.strftime('%d.%m.%Y') }}){% endif %}.</p>
+<p>Mit Ihren Angaben und Ihrer Unterschrift melden Sie sich verbindlich zur
+Teilnahme an und akzeptieren den Gesellschaftsvertrag «{{ community_name }}»,
+Version {{ version.version }}{% if version.valid_from %}, gültig ab
+{{ version.valid_from.strftime('%d.%m.%Y') }}{% endif %}, der dieser Erklärung
+vollständig beiliegt.</p>
+{% if version.text_sha256 %}
+<p class="ts">Prüfsumme des beiliegenden Vertragstexts (SHA-256):<br>
+<span style="font-family:monospace;word-break:break-all">{{ version.text_sha256 }}</span></p>
+{% endif %}
 
 <p><strong>LEG-Teilnehmer:</strong></p>
 <p>
@@ -17,6 +22,7 @@ Gesellschaftsvertrag «{{ community_name }}», Version {{ version.version }}
   Adresse: {{ participant.address_line or "—" }}<br>
   PLZ/Ort: {{ participant.postal_code }} {{ participant.city }}<br>
   E-Mail: {{ participant.email or "—" }}<br>
+  Tel: ____________________<br>
   Messpunktnummer: {{ roles.meter_ids | join(", ") if roles.meter_ids else "—" }}
 </p>
 
@@ -31,9 +37,9 @@ Gesellschaftsvertrag «{{ community_name }}», Version {{ version.version }}
 <p>Beitritt per: {{ assignment.joined_at.strftime('%d.%m.%Y') if assignment.joined_at else "—" }}</p>
 
 <p>__________________________________<br>
-Datum, Unterschrift LEG-Teilnehmer (oder digitale Bestätigung durch den LEG-Vertreter)</p>
+Datum, Unterschrift LEG-Teilnehmer</p>
 
-<p class="ts">Hinweis: Der LEG-Vertreter meldet Beitritte üblicherweise mindestens
-1 Monat im Voraus dem Netzbetreiber (3 Monate bei einer LEG-Neugründung bzw. falls
-dafür ein intelligentes Messsystem installiert oder getauscht werden muss),
-gemäss VSE BD LEG-CH 2025.</p>
+<p class="ts">Hinweis: Der LEG-Vertreter meldet Beitritte mindestens 1 Monat im
+Voraus dem Netzbetreiber, die Bildung der LEG 3 Monate im Voraus
+(Art. 19g Abs. 1 StromVV). LEG-Strom wird erst ab dem vom Netzbetreiber
+bestätigten Beginn zugeteilt.</p>

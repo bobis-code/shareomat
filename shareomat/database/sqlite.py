@@ -361,6 +361,16 @@ _SCHEMA_STATEMENTS = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS audit_events (
+        id INTEGER PRIMARY KEY,
+        occurred_at TEXT NOT NULL,
+        entity TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at TEXT NOT NULL
@@ -377,6 +387,11 @@ _SCHEMA_STATEMENTS = [
 _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
     "communities": {
         "eic_code": "TEXT NOT NULL DEFAULT ''",
+        # Founding notice to the grid operator (Art. 19g Abs. 1 StromVV: 3 months
+        # ahead) and the start date the grid operator actually confirmed — the
+        # contract's valid_from alone does not prove the LEG is live at the VNB.
+        "vnb_registered_at": "TEXT",
+        "vnb_confirmed_start": "TEXT",
     },
     "supplier_tariffs": {
         # Product name within the grid operator's tariff sheet (e.g. "EBL Grau
@@ -419,6 +434,20 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         # Which grid-operator product the reference price above was taken from
         # (informational snapshot only — the LEG price does not depend on it).
         "reference_product": "TEXT NOT NULL DEFAULT ''",
+        # Contract parameters that used to be implicit or borrowed from another
+        # field (§5 Kündigungsfrist was rendered from price_notice_period_months).
+        "termination_notice_period_months": "INTEGER NOT NULL DEFAULT 4",
+        "payment_term_days": "INTEGER NOT NULL DEFAULT 30",
+        "billing_cycle": "TEXT NOT NULL DEFAULT 'monthly'",
+        # Provenance of the rendered text: hash of the template revision it was
+        # rendered from (a changed template = changed contract wording, which
+        # needs the contract notice period) and hash of the final text itself.
+        "template_sha256": "TEXT NOT NULL DEFAULT ''",
+        "text_sha256": "TEXT NOT NULL DEFAULT ''",
+        "published_at": "TEXT",
+        # Published as an amendment all members agreed to (no notice period);
+        # carried members then need recorded consent, not a mere notification.
+        "consent_based": "INTEGER NOT NULL DEFAULT 0",
     },
     "participant_contract": {
         # Separate from accepted_at: accepted_at is the participant's original,
@@ -427,6 +456,25 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         # to NULL whenever an assignment is carried forward to a new version at
         # publish time (see contract_versions.publish_version()).
         "notified_at": "TEXT",
+        # Evidence chain of the join (see participant_contract module docstring):
+        # which version was originally signed, by whom, how, and the stored
+        # signed document; then grid-operator notification/confirmation and the
+        # effective membership window actually confirmed by the grid operator.
+        "accepted_version": "INTEGER",
+        "declaration_issued_at": "TEXT",
+        "acceptance_method": "TEXT NOT NULL DEFAULT ''",
+        "signed_at": "TEXT",
+        "signed_by": "TEXT NOT NULL DEFAULT ''",
+        "signed_document_location": "TEXT NOT NULL DEFAULT ''",
+        "signed_document_sha256": "TEXT NOT NULL DEFAULT ''",
+        "recorded_by": "TEXT NOT NULL DEFAULT ''",
+        "recorded_at": "TEXT",
+        "notice_evidence": "TEXT NOT NULL DEFAULT ''",
+        "vnb_notified_at": "TEXT",
+        "vnb_confirmed_at": "TEXT",
+        "effective_start_at": "TEXT",
+        "effective_end_at": "TEXT",
+        "exit_reason": "TEXT NOT NULL DEFAULT ''",
     },
 }
 
