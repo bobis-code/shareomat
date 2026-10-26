@@ -16,7 +16,7 @@ In der Grundversorgung liefert die EBL standardmässig das Produkt **EBL Blau**.
 | Preisblatt P27_OSM | Grundversorgung < 50'000 kWh/Jahr **ohne Smart Meter** | [PDF](https://www.ebl.ch/hubfs/2026.08.27_EBL_Preisblatt_Grundversorgung_P27_ohneSmartMeter.pdf) |
 | Preisblatt FP27 | Förderprodukte EBL Standard und EBL Grün | [PDF](https://www.ebl.ch/hubfs/EBL_Preisblatt_F%C3%B6rderprodukte_FP27.pdf) |
 | Preisblatt E27 | Vergütung für Rücklieferung und HKN | [PDF](https://www.ebl.ch/hubfs/EBL_Preisblatt_E27.pdf) |
-| EBL 2027.json | Maschinenlesbare Tarifdaten aller Kundengruppen (2026 und 2027) | [JSON](https://www.ebl.ch/hubfs/EBL%202027.json), lokale Kopie: [EBL_2027.json](EBL_2027.json) |
+| EBL 2027.json | Maschinenlesbare Tarifdaten aller Kundengruppen (2026 und 2027) | [JSON](https://www.ebl.ch/hubfs/EBL%202027.json) |
 
 Die Werte unten stammen aus der JSON-Datei und wurden mit den Preisblättern abgeglichen.
 Sie stimmen überein, mit Ausnahme der unter [Offene Punkte](#offene-punkte) genannten Stellen.
@@ -212,7 +212,7 @@ So funktioniert die Vergütung:
 - **Leistungspreis.** Für die Abrechnung des Netzbezugs braucht es neu die monatliche
   15-Minuten-Leistungsspitze pro Messpunkt. Shareomat bildet diese Komponente bisher
   nicht ab.
-- **Maschinenlesbare Quelle.** [EBL_2027.json](EBL_2027.json) enthält alle Werte strukturiert
+- **Maschinenlesbare Quelle.** Die [EBL-Tarifdatei](https://www.ebl.ch/hubfs/EBL%202027.json) enthält alle Werte strukturiert
   (`tariffType` = `grid` / `electricity` / `metering` / `regional_fees`, Preise in CHF/kWh).
   Die Funktion „Referenzpreis automatisch ermitteln“ kann diese Datei als Quelle nutzen:
   Gesucht ist der Eintrag `tariffType == "electricity"` mit dem Namen

@@ -17,7 +17,8 @@ from shareomat.web.pages import tariffs
 from shareomat.web.rendering import FormError, RequestContext
 from shareomat.web.state import get_state
 
-_EBL_2027_JSON = Path(__file__).resolve().parents[1] / "docs" / "Energieversorgungsunternehmen" / "EBL" / "EBL_2027.json"
+# Own minimal sample in the published DSO tariff JSON format (structure as in EBL 2027).
+_SAMPLE_JSON = Path(__file__).resolve().parent / "fixtures" / "vnb_tariff_sample.json"
 
 
 @pytest.fixture
@@ -45,14 +46,15 @@ def _get() -> RequestContext:
 # ── JSON parser ─────────────────────────────────────────────────────────────
 
 
-def test_parse_ebl_2027_energy_products():
-    operator, products = parse_vnb_tariff_json(json.loads(_EBL_2027_JSON.read_text(encoding="utf-8")))
-    assert operator == "EBL"
+def test_parse_energy_products():
+    operator, products = parse_vnb_tariff_json(json.loads(_SAMPLE_JSON.read_text(encoding="utf-8")))
+    assert operator == "Beispiel-Netz"
     by_name = {p.product: p for p in products if p.valid_from == date(2027, 1, 1)}
-    grau = by_name["Strombezug < 50’000 kWh/Jahr Netz Energie EBL Grau 2027"]
+    assert set(by_name) == {"Standard Energie Blau 2027", "Standard Energie Grau 2027", "Flexa Energie Grau 2027"}
+    grau = by_name["Standard Energie Grau 2027"]
     assert grau.energy_rate_ht_chf_kwh == Decimal("0.096")
     assert grau.energy_rate_nt_chf_kwh is None
-    flexa = by_name["Wahltarif Flexa Energie EBL Grau 2027"]
+    flexa = by_name["Flexa Energie Grau 2027"]
     assert (flexa.energy_rate_ht_chf_kwh, flexa.energy_rate_nt_chf_kwh) == (Decimal("0.106"), Decimal("0.077"))
     # Only energy products — never grid usage, metering or levies.
     assert all("Messtarif" not in p.product for p in products)
@@ -67,14 +69,14 @@ def test_parse_rejects_unknown_structure():
 
 
 def test_import_stores_products_and_reimport_replaces_them(db_path, monkeypatch):
-    data = json.loads(_EBL_2027_JSON.read_text(encoding="utf-8"))
+    data = json.loads(_SAMPLE_JSON.read_text(encoding="utf-8"))
     monkeypatch.setattr(tariffs, "fetch_vnb_tariff_json", lambda url: data)
 
     tariffs.handle_post(_post(["vnb", "import"], {"url": "https://example.invalid/EBL.json"}))
     first = len(list_supplier_tariffs(db_path))
     tariffs.handle_post(_post(["vnb", "import"], {"url": "https://example.invalid/EBL.json"}))
 
-    assert first == 40
+    assert first == 3
     assert len(list_supplier_tariffs(db_path)) == first  # idempotent per operator + year
 
 
