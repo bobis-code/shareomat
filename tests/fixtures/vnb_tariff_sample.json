@@ -1,0 +1,20 @@
+{
+  "dsoName": "Beispiel-Netz (Muster Genossenschaft)",
+  "tariffs": [
+    {"tariffName": "Standard Netz 2027", "tariffType": "grid", "startDate": "2027-01-01", "endDate": "2027-12-31",
+     "prices": {"base": {"price": 4, "priceUnit": "CHF/M"},
+                "energy": [{"from": "00:00", "to": "00:00", "price": 0.09, "priceUnit": "CHF/kWh"}]}},
+    {"tariffName": "Standard Energie Blau 2027", "tariffType": "electricity", "startDate": "2027-01-01", "endDate": "2027-12-31",
+     "prices": {"base": {"price": 4.9, "priceUnit": "CHF/M"},
+                "energy": [{"from": "00:00", "to": "00:00", "price": 0.098, "priceUnit": "CHF/kWh"}]}},
+    {"tariffName": "Standard Energie Grau 2027", "tariffType": "electricity", "startDate": "2027-01-01", "endDate": "2027-12-31",
+     "prices": {"base": {"price": 4.9, "priceUnit": "CHF/M"},
+                "energy": [{"from": "00:00", "to": "00:00", "price": 0.096, "priceUnit": "CHF/kWh"}]}},
+    {"tariffName": "Flexa Energie Grau 2027", "tariffType": "electricity", "startDate": "2027-01-01", "endDate": "2027-12-31",
+     "prices": {"base": {"price": 4.9, "priceUnit": "CHF/M"},
+                "energy": [{"from": "05:00", "to": "23:00", "price": 0.106, "priceUnit": "CHF/kWh"},
+                           {"from": "23:00", "to": "05:00", "price": 0.077, "priceUnit": "CHF/kWh"}]}},
+    {"tariffName": "Standard Messtarif 2027", "tariffType": "metering", "startDate": "2027-01-01", "endDate": "2027-12-31",
+     "prices": {"base": {"price": 5, "priceUnit": "CHF/M"}}}
+  ]
+}
