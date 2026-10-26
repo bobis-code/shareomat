@@ -4,7 +4,7 @@ contract_versions (draft/publish/withdraw/end lifecycle), and participant_contra
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -33,9 +33,13 @@ from shareomat.database.participant_contract import (
     has_any_assignment,
     list_assignments_for_version,
     mark_accepted,
+    mark_declaration_issued,
     mark_notified,
+    mark_vnb_confirmed,
+    mark_vnb_notified,
     record_departure,
 )
+from shareomat.database.audit import list_events
 from shareomat.database.participants import create_participant
 from shareomat.database.sqlite import init_db
 from shareomat.database.tariffs import get_tariff_for_date
@@ -57,7 +61,9 @@ def _draft(*, text: str = "<p>Entwurf</p>", **overrides) -> ContractVersion:
         community_id="", version=0, status="draft", contract_text_snapshot=text,
         local_rate_chf_kwh=Decimal("0.11"), feed_in_rate_chf_kwh=Decimal("0.15"),
         admin_fee_chf_kwh=Decimal("0.005"), grid_operator="EBL",
-        representative_name="Jane Doe",
+        representative_name="Jane Doe", representative_address_line="Musterweg 1",
+        representative_postal_code="4443", representative_city="Wittinsburg",
+        representative_email="jane@example.ch",
     )
     fields.update(overrides)
     return ContractVersion(**fields)
@@ -463,15 +469,15 @@ def test_list_assignments_for_version(db_path):
     assert {a.participant_id for a in assignments} == {"p1", "p2"}
 
 
-def test_reassigning_same_participant_and_version_updates_not_duplicates(db_path):
+def test_reassigning_same_participant_and_version_is_refused_and_keeps_evidence(db_path):
     create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
-    assign_contract(db_path, "p1", v.id, accepted_at=None)
     assign_contract(db_path, "p1", v.id, accepted_at=date(2024, 1, 1))
+    with pytest.raises(ParticipantContractError, match="bereits zugeordnet"):
+        assign_contract(db_path, "p1", v.id, accepted_at=None)
 
-    assignments = list_assignments_for_version(db_path, v.id)
-    assert len(assignments) == 1
-    assert assignments[0].accepted_at == date(2024, 1, 1)
+    [assignment] = list_assignments_for_version(db_path, v.id)
+    assert assignment.accepted_at == date(2024, 1, 1)  # never overwritten
 
 
 def test_mark_accepted_sets_accepted_and_notified_together(db_path):
@@ -479,9 +485,155 @@ def test_mark_accepted_sets_accepted_and_notified_together(db_path):
     v = save_draft_version(db_path, _draft())
     assignment = assign_contract(db_path, "p1", v.id)
 
-    updated = mark_accepted(db_path, assignment.id, date(2027, 1, 1))
-    assert updated.accepted_at == date(2027, 1, 1)
-    assert updated.notified_at == date(2027, 1, 1)
+    updated = mark_accepted(
+        db_path, assignment.id, date(2026, 10, 1), method="paper", signed_by="Hans Muster", recorded_by="Jane Doe",
+    )
+    assert updated.accepted_at == date(2026, 10, 1)
+    assert updated.notified_at == date(2026, 10, 1)
+    assert updated.accepted_version == v.version
+    assert (updated.acceptance_method, updated.signed_by, updated.recorded_by) == ("paper", "Hans Muster", "Jane Doe")
+    assert updated.status_label == "Unterschrift eingegangen"
+
+
+def test_mark_accepted_never_overwrites_and_rejects_future_date(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v = save_draft_version(db_path, _draft())
+    assignment = assign_contract(db_path, "p1", v.id)
+    with pytest.raises(ParticipantContractError, match="Zukunft"):
+        mark_accepted(db_path, assignment.id, date.today() + timedelta(days=1))
+    mark_accepted(db_path, assignment.id, date(2026, 10, 1))
+    with pytest.raises(ParticipantContractError, match="nicht überschrieben"):
+        mark_accepted(db_path, assignment.id, date(2026, 10, 2))
+    assert get_assignment(db_path, assignment.id).accepted_at == date(2026, 10, 1)
+
+
+def test_join_status_chain_and_audit_trail(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v = save_draft_version(db_path, _draft())
+    a = assign_contract(db_path, "p1", v.id, joined_at=date(2026, 11, 1))
+    assert a.status_label == "angelegt"
+    assert mark_declaration_issued(db_path, a.id, date(2026, 10, 26)).status_label == "Erklärung ausgestellt"
+    mark_accepted(db_path, a.id, date(2026, 10, 26), method="scan", signed_by="Haus 1")
+    with pytest.raises(ParticipantContractError, match="Meldung"):
+        mark_vnb_confirmed(db_path, a.id, date(2026, 10, 30), date(2026, 11, 1))
+    assert mark_vnb_notified(db_path, a.id, date(2026, 10, 27)).status_label == "beim Netzbetreiber gemeldet"
+    confirmed = mark_vnb_confirmed(db_path, a.id, date(2026, 10, 30), date(2026, 11, 1))
+    assert confirmed.status_label == "vom Netzbetreiber bestätigt"
+    assert confirmed.effective_start_at == date(2026, 11, 1)
+    actions = [e.action for e in list_events(db_path, entity="participant", entity_id="p1")]
+    assert actions == ["vnb_confirmed", "vnb_notified", "accepted", "declaration_issued", "assigned"]
+
+
+def test_record_departure_is_write_once_and_not_before_join(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v = save_draft_version(db_path, _draft())
+    a = assign_contract(db_path, "p1", v.id, joined_at=date(2026, 11, 1))
+    with pytest.raises(ParticipantContractError, match="vor dem Beitritt"):
+        record_departure(db_path, a.id, date(2026, 10, 31))
+    left = record_departure(db_path, a.id, date(2027, 3, 31), reason="Wegzug")
+    assert (left.left_at, left.exit_reason) == (date(2027, 3, 31), "Wegzug")
+    with pytest.raises(ParticipantContractError, match="bereits"):
+        record_departure(db_path, a.id, date(2027, 4, 30))
+
+
+def test_withdraw_with_signatures_archives_and_allows_corrected_founding_version(db_path, monkeypatch):
+    """Early-phase correction: v1 already signed -> withdraw archives it (nothing deleted), v2 replaces it same start."""
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v1 = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1))).id)
+    a = assign_contract(db_path, "p1", v1.id, v1.tariff_id, joined_at=date(2026, 11, 1))
+    mark_accepted(db_path, a.id, date(2026, 10, 26), method="paper", signed_by="Haus 1")
+
+    archived = withdraw_version(db_path, v1.id)
+    assert archived.status == "withdrawn"
+    assert archived.text_sha256 == v1.text_sha256                       # text + hash kept as evidence
+    assert get_assignment(db_path, a.id).accepted_at == date(2026, 10, 26)  # signature kept
+    from shareomat.database.tariffs import get_tariff
+    assert get_tariff(db_path, v1.tariff_id).active is False             # never billed
+
+    v2 = publish_version(db_path, save_draft_version(db_path, _draft(
+        valid_from=date(2026, 11, 1), local_rate_chf_kwh=Decimal("0.105"))).id)  # founding again, no notice period
+    assert v2.status == "published" and v2.supersedes_version_id is None
+    assert list_assignments_for_version(db_path, v2.id) == []             # members sign the corrected text anew
+    assert get_contract_version_for_date(db_path, date(2026, 11, 1)).id == v2.id
+
+
+def test_amendment_with_consent_of_all_needs_no_notice_period(db_path, monkeypatch):
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v1 = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1))).id)
+    a = assign_contract(db_path, "p1", v1.id, v1.tariff_id, joined_at=date(2026, 11, 1))
+    mark_accepted(db_path, a.id, date(2026, 10, 26), method="paper", signed_by="Haus 1")
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 11, 10)))  # v1 now in force
+
+    draft = save_draft_version(db_path, _draft(valid_from=date(2026, 12, 1), template_sha256="neu"))
+    with pytest.raises(ContractWorkflowError, match="Ankündigungsfrist: 6 Monate"):
+        publish_version(db_path, draft.id)                   # unilateral change: 6 months
+    with pytest.raises(ContractWorkflowError, match="nach der bisherigen"):
+        publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1))).id,
+                        consent_of_all=True)
+    v2 = publish_version(db_path, draft.id, consent_of_all=True)
+    assert v2.consent_based is True
+    [carried] = list_assignments_for_version(db_path, v2.id)
+    assert carried.notified_at is None                      # each consent still has to be recorded
+    consented = mark_notified(db_path, carried.id, date(2026, 11, 12), evidence="unterschriebene Änderung")
+    assert consented.notice_evidence == "unterschriebene Änderung"
+
+
+def test_publish_records_text_hash_and_rejects_incomplete_or_overlapping_versions(db_path, monkeypatch):
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    with pytest.raises(ContractWorkflowError, match="E-Mail"):
+        publish_version(db_path, save_draft_version(db_path, _draft(
+            valid_from=date(2026, 11, 1), representative_email="")).id)
+    with pytest.raises(ContractWorkflowError, match="Monatserster"):
+        publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 15))).id)
+    with pytest.raises(ContractWorkflowError, match="Gültig bis"):
+        publish_version(db_path, save_draft_version(db_path, _draft(
+            valid_from=date(2026, 12, 1), valid_until=date(2026, 11, 30))).id)
+
+    v1 = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1))).id)
+    import hashlib
+    assert v1.text_sha256 == hashlib.sha256(v1.contract_text_snapshot.encode("utf-8")).hexdigest()
+    assert v1.published_at is not None
+    with pytest.raises(ContractWorkflowError, match="nach der bisherigen"):
+        publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1))).id)
+
+
+def test_text_only_change_needs_contract_notice_period(db_path, monkeypatch):
+    """A different template revision is a contract change (6 months), even with identical prices."""
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1), template_sha256="a")).id)
+    draft = save_draft_version(db_path, _draft(valid_from=date(2027, 3, 1), template_sha256="b"))
+    with pytest.raises(ContractWorkflowError, match="6 Monate"):
+        publish_version(db_path, draft.id)
+
+
+def test_carried_member_keeps_original_signed_version(db_path, monkeypatch):
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 10, 26)))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v1 = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 11, 1))).id)
+    a1 = assign_contract(db_path, "p1", v1.id, v1.tariff_id, joined_at=date(2026, 11, 1))
+    mark_accepted(db_path, a1.id, date(2026, 10, 26), method="paper", signed_by="Haus 1")
+    v2 = publish_version(db_path, save_draft_version(db_path, _draft(
+        valid_from=date(2027, 3, 1), local_rate_chf_kwh=Decimal("0.12"))).id)
+
+    [carried] = list_assignments_for_version(db_path, v2.id)
+    assert carried.accepted_version == v1.version        # consent belongs to v1, not v2
+    assert carried.notified_at is None                    # v2 still has to be notified
+    assert carried.signed_by == "Haus 1"
+
+
+def test_end_contract_validates_end_date(db_path, monkeypatch):
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 6, 1)))
+    v = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 6, 1))).id)
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 8, 10)))
+    with pytest.raises(ContractWorkflowError, match="Monatsletzter"):
+        end_contract(db_path, v.id, date(2026, 12, 15))
+    with pytest.raises(ContractWorkflowError, match="Vergangenheit"):
+        end_contract(db_path, v.id, date(2026, 7, 31))
+    with pytest.raises(ContractWorkflowError, match="Inkrafttreten"):
+        end_contract(db_path, v.id, date(2026, 5, 31))
+    assert end_contract(db_path, v.id, date(2026, 12, 31)).valid_until == date(2026, 12, 31)
 
 
 def test_mark_accepted_unknown_assignment_raises(db_path):
@@ -492,12 +644,15 @@ def test_mark_accepted_unknown_assignment_raises(db_path):
 def test_mark_notified_leaves_accepted_at_untouched(db_path):
     create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
-    assignment = assign_contract(db_path, "p1", v.id)
-    mark_accepted(db_path, assignment.id, date(2026, 1, 1))
+    # A carried-forward row: original acceptance present, this version not yet notified.
+    assignment = assign_contract(db_path, "p1", v.id, accepted_at=date(2026, 1, 1))
 
-    updated = mark_notified(db_path, assignment.id, date(2027, 6, 1))
+    updated = mark_notified(db_path, assignment.id, date(2027, 6, 1), evidence="E-Mail vom 01.06.2027")
     assert updated.accepted_at == date(2026, 1, 1)  # original join confirmation, never re-set
     assert updated.notified_at == date(2027, 6, 1)
+    assert updated.notice_evidence == "E-Mail vom 01.06.2027"
+    with pytest.raises(ParticipantContractError, match="bereits"):
+        mark_notified(db_path, assignment.id, date(2027, 6, 2))
 
 
 def test_mark_notified_unknown_assignment_raises(db_path):

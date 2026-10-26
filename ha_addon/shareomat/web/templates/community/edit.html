@@ -42,6 +42,20 @@
       <input type="text" id="city" name="city"
              value="{{ community.city if community else '' }}">
     </div>
+    <h2 style="margin-top:20px">Gründung beim Netzbetreiber</h2>
+    <div class="field">
+      <label for="vnb_registered_at">Bildung der LEG gemeldet am</label>
+      <input type="date" id="vnb_registered_at" name="vnb_registered_at"
+             value="{{ community.vnb_registered_at if community and community.vnb_registered_at else '' }}">
+      <div class="field-hint">Die Bildung ist dem Netzbetreiber 3 Monate im Voraus zu melden (Art. 19g Abs. 1 StromVV).</div>
+    </div>
+    <div class="field">
+      <label for="vnb_confirmed_start">Vom Netzbetreiber bestätigter Start</label>
+      <input type="date" id="vnb_confirmed_start" name="vnb_confirmed_start"
+             value="{{ community.vnb_confirmed_start if community and community.vnb_confirmed_start else '' }}">
+      <div class="field-hint">Erst ab diesem Datum teilt der Netzbetreiber LEG-Strom zu. Der Vertragsbeginn allein
+        reicht dafür nicht.</div>
+    </div>
     <div class="actions-row">
       <button type="submit">Speichern</button>
     </div>

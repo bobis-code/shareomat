@@ -74,6 +74,10 @@ BILLING_STATUS_CANCELLED: str = "cancelled"
 
 CONTRACT_STATUS_DRAFT: str = "draft"
 CONTRACT_STATUS_PUBLISHED: str = "published"
+# A published version withdrawn before taking effect after participants had
+# already signed/been notified/been reported: kept read-only with all its
+# assignments as evidence instead of being turned back into a draft.
+CONTRACT_STATUS_WITHDRAWN: str = "withdrawn"
 
 # ── MQTT status values ────────────────────────────────────────────────────────
 

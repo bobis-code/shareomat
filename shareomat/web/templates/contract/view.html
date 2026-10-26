@@ -28,9 +28,15 @@
   {% endif %}
 </div>
 
+{% if founding_warning %}
+<div class="card">
+  <div class="error-box" style="margin-top:0">{{ founding_warning }}</div>
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Teilnehmer</h2>
-  {% if not participant_version %}
+  {% if not joinable_versions %}
   <p class="ts">Zuerst einen Vertrag veröffentlichen, um Teilnehmer zuzuordnen.</p>
   {% else %}
   {% if not current_version %}
@@ -38,56 +44,39 @@
     {{ participant_version.valid_from.strftime('%d.%m.%Y') }} in Kraft. Teilnehmer können bereits jetzt zugeordnet
     und ihre Beitrittserklärungen erstellt werden.</p>
   {% endif %}
-  {% if assignments %}
+  <p class="field-hint" style="margin-bottom:10px">Ablauf pro Teilnehmer: angelegt → Erklärung ausgestellt →
+    Unterschrift eingegangen → beim Netzbetreiber gemeldet → vom Netzbetreiber bestätigt. Nachweise unter „Details“.</p>
+  {% for v, v_assignments in version_assignments %}
+  <h3 style="margin-top:12px">Version {{ v.version }} — {{ 'gültig' if current_version and v.id == current_version.id else 'gilt ab' }}
+    {{ v.valid_from.strftime('%d.%m.%Y') }}</h3>
+  {% if v_assignments %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Teilnehmer</th><th>Rolle</th><th>seit</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Teilnehmer</th><th>Rolle</th><th>Beitritt per</th><th>Status</th><th>Unterschrift</th><th></th></tr></thead>
       <tbody>
-        {% for a in assignments %}
+        {% for a in v_assignments %}
         {% set p = participant_lookup.get(a.participant_id) %}
         <tr>
           <td>{{ p.label if p else a.participant_id }}</td>
           <td>{{ participant_roles[a.participant_id].label if a.participant_id in participant_roles else "kein Messpunkt" }}</td>
           <td class="ts">{{ a.joined_at.strftime('%d.%m.%Y') if a.joined_at else "—" }}</td>
           <td>
-            {% if a.accepted_at is none %}
-            <span class="status-pill status-pill-inactive">⏳ Beitritt ausstehend</span>
-            {% elif a.notified_at is none %}
-            <span class="status-pill status-pill-inactive">⏳ Mitteilung ausstehend</span>
-            {% else %}
-            <span class="status-pill status-pill-active">✓ bestätigt</span>
+            <span class="status-pill {{ 'status-pill-active' if a.vnb_confirmed_at and not a.left_at else 'status-pill-inactive' }}">
+              {{ a.status_label }}</span>
+            {% if a.accepted_version and a.accepted_version != v.version %}
+            {% set word = 'Zustimmung zu' if v.consent_based else 'Mitteilung über' %}
+            <div class="ts">{{ word ~ ' v' ~ v.version ~ ' am ' ~ a.notified_at.strftime('%d.%m.%Y') if a.notified_at
+                              else '⏳ ' ~ word ~ ' v' ~ v.version ~ ' ausstehend' }}</div>
             {% endif %}
           </td>
+          <td class="ts">
+            {% if a.accepted_at %}v{{ a.accepted_version or v.version }}, {{ a.accepted_at.strftime('%d.%m.%Y') }}
+              {% if a.signed_document_sha256 %}· Dokument ✓{% else %}· <span style="color:#b45309">kein Dokument</span>{% endif %}
+            {% else %}—{% endif %}
+          </td>
           <td>
-            <a class="btn-small btn-muted"
-               href="{{ url_for('contract', suffix='/participants/' + a.id|string + '/declaration') }}">Beitrittserklärung</a>
-            {% if a.accepted_at is none %}
-            <form method="post" action="{{ url_for('contract', suffix='/participants/' + a.id|string + '/confirm') }}"
-                  style="display:inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="btn-small btn-secondary">Beitritt bestätigen</button>
-            </form>
-            {% elif a.notified_at is none %}
-            <form method="post" action="{{ url_for('contract', suffix='/participants/' + a.id|string + '/notify') }}"
-                  style="display:inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="btn-small btn-secondary">Mitteilung erfassen</button>
-            </form>
-            {% endif %}
-            {% if a.left_at is none %}
-            <details style="display:inline-block">
-              <summary class="btn-small btn-danger" style="display:inline-block;cursor:pointer">Austritt erfassen</summary>
-              <form method="post" action="{{ url_for('contract', suffix='/participants/' + a.id|string + '/depart') }}"
-                    style="margin-top:8px;max-width:260px">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="field">
-                  <label>Austritt per (Monatsletzter)</label>
-                  <input type="date" name="end_date" required>
-                </div>
-                <button type="submit" class="btn-small btn-danger">Austritt bestätigen</button>
-              </form>
-            </details>
-            {% endif %}
+            <a class="btn-small btn-secondary"
+               href="{{ url_for('contract', suffix='/participants/' + a.id|string + '/declaration') }}">Details</a>
           </td>
         </tr>
         {% endfor %}
@@ -95,8 +84,9 @@
     </table>
   </div>
   {% else %}
-  <p class="ts">Noch keine Teilnehmer diesem Vertrag zugeordnet.</p>
+  <p class="ts">Noch keine Teilnehmer dieser Version zugeordnet.</p>
   {% endif %}
+  {% endfor %}
 
   {% if unassigned_participants %}
   <form class="form-card" method="post" action="{{ url_for('contract', suffix='/participants/add') }}" style="margin-top:16px">
@@ -109,6 +99,18 @@
         {% endfor %}
       </select>
     </div>
+    {% if joinable_versions|length > 1 %}
+    <div class="field">
+      <label for="contract_version_id">Vertragsversion</label>
+      <select id="contract_version_id" name="contract_version_id">
+        {% for v in joinable_versions %}
+        <option value="{{ v.id }}" {{ 'selected' if loop.last }}>v{{ v.version }} (ab {{ v.valid_from.strftime('%d.%m.%Y') }})</option>
+        {% endfor %}
+      </select>
+      <div class="field-hint">Neue Teilnehmer gehören in der Regel zur neusten Version — Mitglieder der aktuellen
+        Version werden beim Veröffentlichen einer Folgeversion automatisch übernommen, später Hinzugefügte nicht.</div>
+    </div>
+    {% endif %}
     <div class="field">
       <label for="participant_valid_from">Beitritt per (Monatserster)</label>
       <input type="date" id="participant_valid_from" name="valid_from" required>
@@ -267,6 +269,25 @@
       <input type="text" id="distribution_method" name="distribution_method" value="{{ form_version.distribution_method }}">
     </div>
     <div class="field">
+      <label for="billing_cycle">Abrechnungsrhythmus (§3.4)</label>
+      <select id="billing_cycle" name="billing_cycle">
+        {% for value, label in billing_cycles.items() %}
+        <option value="{{ value }}" {{ 'selected' if form_version.billing_cycle == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="payment_term_days">Zahlungsfrist (Tage, §3.4)</label>
+      <input type="number" id="payment_term_days" name="payment_term_days" min="1"
+             value="{{ form_version.payment_term_days }}">
+    </div>
+    <div class="field">
+      <label for="termination_notice_period_months">Kündigungsfrist (Monate, §5)</label>
+      <input type="number" id="termination_notice_period_months" name="termination_notice_period_months" min="1"
+             value="{{ form_version.termination_notice_period_months }}">
+      <div class="field-hint">LEG-Mustervertrag §5: viermonatige Kündigungsfrist.</div>
+    </div>
+    <div class="field">
       <label for="price_notice_period_months">Ankündigungsfrist Preisänderung (Monate)</label>
       <input type="number" id="price_notice_period_months" name="price_notice_period_months" min="1"
              value="{{ form_version.price_notice_period_months }}">
@@ -364,6 +385,7 @@
       <tbody>
         {% for v in versions %}
         {% set is_draft = v.status == 'draft' %}
+        {% set is_withdrawn = v.status == 'withdrawn' %}
         {% set is_scheduled = v.status == 'published' and v.valid_from and v.valid_from > today %}
         {% set is_historic = v.status == 'published' and v.valid_until and v.valid_until < today %}
         {% set is_active = v.status == 'published' and not is_scheduled and not is_historic %}
@@ -372,7 +394,8 @@
           <td>
             <span class="status-pill {{ 'status-pill-active' if is_active else 'status-pill-inactive' }}">
               {% if is_draft %}Entwurf
-              {% elif is_scheduled %}Geplant ab {{ v.valid_from.strftime('%d.%m.%Y') }}
+              {% elif is_withdrawn %}Zurückgezogen (archiviert)
+              {% elif is_scheduled %}Veröffentlicht – gilt ab {{ v.valid_from.strftime('%d.%m.%Y') }}
               {% elif is_historic %}Historisch
               {% else %}Aktiv
               {% endif %}
@@ -386,15 +409,28 @@
           <td>
             <details style="display:inline-block">
               <summary class="btn-small btn-muted" style="display:inline-block;cursor:pointer">Anzeigen</summary>
+              {% if v.text_sha256 %}<div class="ts" style="margin-top:6px">SHA-256: <span style="font-family:monospace;word-break:break-all">{{ v.text_sha256 }}</span></div>{% endif %}
               <div class="contract-text" style="margin-top:8px">{{ v.contract_text_snapshot | safe }}</div>
             </details>
+            <a class="btn-small btn-muted" target="_blank" rel="noopener"
+               href="{{ url_for('contract', suffix='/versions/' + v.id|string + '/print') }}">Druckansicht</a>
             {% if is_draft %}
             <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?edit={{ v.id }}">Bearbeiten</a>
-            <form method="post" action="{{ url_for('contract', suffix='/publish') }}" style="display:inline">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <input type="hidden" name="version_id" value="{{ v.id }}">
-              <button type="submit" class="btn-small">Veröffentlichen</button>
-            </form>
+            <details style="display:inline-block">
+              <summary class="btn-small" style="display:inline-block;cursor:pointer">Veröffentlichen</summary>
+              <form method="post" action="{{ url_for('contract', suffix='/publish') }}" style="margin-top:8px;max-width:360px">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="version_id" value="{{ v.id }}">
+                {% if current_version or participant_version %}
+                <div class="field checkbox-row">
+                  <input type="checkbox" id="consent_{{ v.id }}" name="consent_of_all">
+                  <label for="consent_{{ v.id }}" style="margin:0">Alle Gesellschafter stimmen dieser Änderung zu
+                    (keine Ankündigungsfrist; Zustimmung jedes Teilnehmers wird danach mit Nachweis erfasst)</label>
+                </div>
+                {% endif %}
+                <button type="submit" class="btn-small">Jetzt veröffentlichen</button>
+              </form>
+            </details>
             <form method="post" action="{{ url_for('contract', suffix='/draft/delete') }}" style="display:inline"
                   onsubmit="return confirm('Entwurf wirklich löschen?')">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -403,7 +439,7 @@
             </form>
             {% elif is_scheduled %}
             <form method="post" action="{{ url_for('contract', suffix='/withdraw') }}" style="display:inline"
-                  onsubmit="return confirm('Veröffentlichung wirklich zurückziehen? Die Version wird wieder zum Entwurf.')">
+                  onsubmit="return confirm('Veröffentlichung wirklich zurückziehen? Ohne Unterschriften wird die Version wieder zum Entwurf; mit Unterschriften wird sie samt Nachweisen archiviert und eine korrigierte Fassung kann neu veröffentlicht werden.')">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="version_id" value="{{ v.id }}">
               <button type="submit" class="btn-small btn-muted">Veröffentlichung zurückziehen</button>

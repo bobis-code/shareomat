@@ -18,6 +18,7 @@ Notes:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 
 
 @dataclass
@@ -35,3 +36,8 @@ class Community:
     # Datahub (docs/sdat_leg_import.md §9). Distinct from community_id. Empty
     # until registered; incoming SDAT messages are then rejected.
     eic_code: str = ""
+    # Founding at the grid operator (Art. 19g Abs. 1 StromVV: formation must be
+    # reported 3 months ahead). vnb_confirmed_start is the start date the grid
+    # operator actually confirmed — the contract date alone proves nothing.
+    vnb_registered_at: date | None = None
+    vnb_confirmed_start: date | None = None

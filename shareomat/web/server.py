@@ -61,6 +61,9 @@ __all__ = ["WebServer", "get_state"]
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _ALLOWED_UPLOAD_EXT = {".csv", ".xml", ".xlsx"}
+_ALLOWED_DOCUMENT_EXT = {".pdf", ".jpg", ".jpeg", ".png"}
+_MAX_DOCUMENT_BYTES = 20 * 1024 * 1024  # 20 MB per signed declaration
+_DOCUMENT_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
 _MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 _SOCKET_TIMEOUT_SECONDS = 30
 _UPLOAD_CHUNK_SIZE = 64 * 1024  # 64 KB chunks for binary streaming
@@ -193,6 +196,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         segments = [unquote(s) for s in path.split("/") if s]
+        if len(segments) == 4 and segments[0] == "contract" and segments[1] == "participants" and segments[3] == "document":
+            self._serve_signed_document(segments[2])
+            return
         # URLs use hyphens ("meter-data"), but route names (_PAGE_MODULES keys,
         # ROUTE_PATHS keys, url_for() arguments) use underscores throughout —
         # normalize once here so route always means the same thing everywhere.
@@ -271,7 +277,14 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        form = self._parse_urlencoded_form()
+        if "multipart/form-data" in content_type and route == "contract" and len(segments) == 4 \
+                and segments[1] == "participants" and segments[3] == "confirm":
+            form = self._receive_signed_document(segments[2], content_type)
+            if form is None:
+                self._redirect(url_for(ingress_path, "contract"))
+                return
+        else:
+            form = self._parse_urlencoded_form()
         ctx = RequestContext(method="POST", ingress_path=ingress_path, segments=segments[1:], form=form)
 
         try:
@@ -296,6 +309,73 @@ class _Handler(BaseHTTPRequestHandler):
         if redirect_to is None:
             redirect_to = url_for(ingress_path, route)
         self._redirect(redirect_to)
+
+    # ── Signed join declarations (stored next to the database) ─────────
+
+    def _serve_signed_document(self, assignment_id_raw: str) -> None:
+        """Serve one stored signed Beitrittserklärung (only behind the admin UI's own access control) and log the access."""
+        from shareomat.database.audit import log_event
+        from shareomat.web.pages.contract import document_for_assignment
+
+        db_path = get_state().db_path
+        try:
+            assignment_id = int(assignment_id_raw)
+        except ValueError:
+            assignment_id = -1
+        doc = document_for_assignment(db_path, assignment_id) if db_path else None
+        if doc is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        log_event(db_path, "assignment", assignment_id, "document_viewed", doc.name)
+        data = doc.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", _DOCUMENT_MIME.get(doc.suffix.lower(), "application/octet-stream"))
+        self.send_header("Content-Disposition", f'inline; filename="{doc.name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _receive_signed_document(self, assignment_id_raw: str, content_type: str) -> dict[str, str] | None:
+        """Parse the multipart signature form; store an attached document under its SHA-256.
+
+        Returns the form fields (plus _uploaded_location/_uploaded_sha256 when
+        a file came along) for the normal page handler, or None after setting
+        a flash message when the upload itself failed.
+        """
+        import hashlib
+
+        from shareomat.web.pages.contract import documents_dir
+
+        db_path = get_state().db_path
+        if db_path is None:
+            get_state().set_flash("Upload fehlgeschlagen: System noch nicht bereit.", ok=False)
+            return None
+        target = documents_dir(db_path)
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            fields, saved = self._read_multipart(
+                target, content_type, allowed_ext=_ALLOWED_DOCUMENT_EXT, max_bytes=_MAX_DOCUMENT_BYTES,
+            )
+        except Exception as exc:
+            logger.error("Signed document upload failed: %s", exc)
+            get_state().set_flash(f"Upload fehlgeschlagen: {_html_escape(str(exc))}", ok=False)
+            return None
+        if fields is None:
+            get_state().set_flash("Upload fehlgeschlagen: ungültige Formulardaten.", ok=False)
+            return None
+        if saved is not None:
+            _name, path, _size = saved
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            final = target / f"beitritt-{assignment_id_raw}-{digest[:16]}{path.suffix.lower()}"
+            if final.exists():
+                path.unlink()
+            else:
+                path.replace(final)
+            fields["_uploaded_location"] = final.name
+            fields["_uploaded_sha256"] = digest
+        return fields
 
     # ── File upload (multipart, streamed) ───────────────────────────────
 
@@ -344,15 +424,29 @@ class _Handler(BaseHTTPRequestHandler):
         self._redirect(redirect_target)
 
     def _save_file_upload(self, inbox: Path, content_type: str) -> tuple[str, str, int] | None:
-        """Parse multipart/form-data and stream the uploaded file to inbox.
+        """Parse a meter-data upload: returns (csrf_token, filename, bytes_written) or None without a valid file."""
+        fields, saved = self._read_multipart(inbox, content_type, allowed_ext=_ALLOWED_UPLOAD_EXT,
+                                             max_bytes=_MAX_UPLOAD_BYTES, keep_name=True)
+        if fields is None or saved is None:
+            return None
+        filename, _path, size = saved
+        return fields.get("csrf_token", ""), filename, size
 
-        Returns (csrf_token, filename, bytes_written) or None if the
-        request had no valid file part. The parser is intentionally small
-        and dependency-free — Shareomat's web layer uses only the Python
-        standard library plus Jinja2.
+    def _read_multipart(
+        self, dest_dir: Path, content_type: str, *, allowed_ext: set[str], max_bytes: int, keep_name: bool = False,
+    ) -> tuple[dict[str, str] | None, tuple[str, Path, int] | None]:
+        """Parse multipart/form-data, streaming at most one file part into dest_dir.
+
+        Returns (fields, saved) — fields are the plain form fields BEFORE the
+        file part (so forms must put the file input last), saved is
+        (original filename, stored path, bytes) or None when no file was
+        attached. (None, None) for a malformed request. keep_name stores the
+        file under its own (sanitised) name, otherwise under a temporary
+        name the caller renames. Intentionally small and dependency-free —
+        Shareomat's web layer uses only the standard library plus Jinja2.
         """
         if "multipart/form-data" not in content_type:
-            return None
+            return None, None
 
         boundary = b""
         for segment in content_type.split(";"):
@@ -361,16 +455,18 @@ class _Handler(BaseHTTPRequestHandler):
                 boundary = seg[9:].strip('"').encode()
                 break
         if not boundary:
-            return None
+            return None, None
 
         length = int(self.headers.get("Content-Length", 0))
-        if length <= 0 or length > _MAX_UPLOAD_BYTES:
+        if length <= 0 or length > max_bytes:
             logger.warning("Upload: invalid Content-Length %d", length)
-            return None
+            if length > max_bytes:
+                raise ValueError(f"Datei zu gross (max. {max_bytes // (1024 * 1024)} MB).")
+            return None, None
 
         remaining = length
         deadline = time.monotonic() + _MAX_UPLOAD_SECONDS
-        csrf_token = ""
+        fields: dict[str, str] = {}
 
         def _check_deadline() -> None:
             if time.monotonic() > deadline:
@@ -404,9 +500,9 @@ class _Handler(BaseHTTPRequestHandler):
             if line == boundary_line:
                 break
             if line == end_boundary_line:
-                return None
+                return fields, None
         else:
-            return None
+            return None, None
 
         filename = ""
         while remaining > 0:
@@ -433,35 +529,32 @@ class _Handler(BaseHTTPRequestHandler):
                 filename = part_filename
                 break
 
-            # Non-file field: read its (short) value, remembering csrf_token, then skip to next part.
+            # Plain field (or an empty file input): read its value, then go on with the next part.
             value_lines: list[bytes] = []
-            found_next = False
+            next_part = False
             while remaining > 0:
                 line = _readline()
                 stripped = line.rstrip(b"\r\n")
                 if stripped == boundary_line:
-                    found_next = True
+                    next_part = True
                     break
                 if stripped == end_boundary_line:
-                    return None
+                    break
                 value_lines.append(stripped)
-            if not found_next:
-                return None
-            if part_name == "csrf_token":
-                csrf_token = b"".join(value_lines).decode("utf-8", errors="ignore")
+            if part_name:
+                fields[part_name] = b"\n".join(value_lines).decode("utf-8", errors="replace")
+            if not next_part:
+                return fields, None
         else:
-            return None
-
-        if not filename:
-            return None
+            return fields, None
 
         ext = Path(filename).suffix.lower()
-        if ext not in _ALLOWED_UPLOAD_EXT:
+        if ext not in allowed_ext:
             logger.warning("Upload: rejected file type '%s'", ext)
-            raise ValueError(f"unsupported file type '{ext}'. Use .csv, .xml, or .xlsx.")
+            raise ValueError(f"Dateityp '{ext}' nicht erlaubt ({', '.join(sorted(allowed_ext))}).")
 
-        dest = inbox / filename
-        temp_dest = inbox / f".{filename}.upload-{uuid.uuid4().hex}.tmp"
+        dest = dest_dir / filename if keep_name else dest_dir / f".upload-{uuid.uuid4().hex}{ext}"
+        temp_dest = dest_dir / f".{filename}.upload-{uuid.uuid4().hex}.tmp"
         total = 0
         overlap = len(body_boundary)
         buf = b""
@@ -488,10 +581,10 @@ class _Handler(BaseHTTPRequestHandler):
                         break
 
             if not found_boundary:
-                return None
+                return None, None
 
             temp_dest.replace(dest)
-            return csrf_token, filename, total
+            return fields, (filename, dest, total)
         finally:
             if temp_dest.exists():
                 temp_dest.unlink()

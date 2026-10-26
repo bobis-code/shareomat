@@ -82,6 +82,9 @@ def _draft(**overrides) -> ContractVersion:
     fields = dict(
         community_id="", version=0, status="draft", contract_text_snapshot="<p>Vertrag</p>",
         feed_in_rate_chf_kwh=Decimal("0.15"), admin_fee_chf_kwh=Decimal("0.005"), grid_operator="EBL",
+        representative_name="Jane Doe", representative_address_line="Musterweg 1",
+        representative_postal_code="4443", representative_city="Wittinsburg",
+        representative_email="jane@example.ch",
     )
     fields.update(overrides)
     return ContractVersion(**fields)

@@ -22,7 +22,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from shareomat.database.sqlite import connect, now_iso
+from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.models.community import Community
 
 
@@ -35,6 +35,8 @@ def _row_to_community(row: sqlite3.Row) -> Community:
         city=row["city"],
         active=bool(row["active"]),
         eic_code=row["eic_code"],
+        vnb_registered_at=str_to_date(row["vnb_registered_at"]),
+        vnb_confirmed_start=str_to_date(row["vnb_confirmed_start"]),
     )
 
 
@@ -56,13 +58,14 @@ def save_community(db_path: Path, community: Community) -> Community:
                     """
                     UPDATE communities
                     SET community_id=?, name=?, address_line=?, postal_code=?, city=?,
-                        active=?, eic_code=?, updated_at=?
+                        active=?, eic_code=?, vnb_registered_at=?, vnb_confirmed_start=?, updated_at=?
                     WHERE id=?
                     """,
                     (
                         community.community_id, community.name, community.address_line,
                         community.postal_code, community.city, int(community.active),
-                        community.eic_code, now, existing["id"],
+                        community.eic_code, date_to_str(community.vnb_registered_at),
+                        date_to_str(community.vnb_confirmed_start), now, existing["id"],
                     ),
                 )
             else:
@@ -70,13 +73,14 @@ def save_community(db_path: Path, community: Community) -> Community:
                     """
                     INSERT INTO communities
                         (community_id, name, address_line, postal_code, city, active, eic_code,
-                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         vnb_registered_at, vnb_confirmed_start, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         community.community_id, community.name, community.address_line,
                         community.postal_code, community.city, int(community.active),
-                        community.eic_code, now, now,
+                        community.eic_code, date_to_str(community.vnb_registered_at),
+                        date_to_str(community.vnb_confirmed_start), now, now,
                     ),
                 )
     result = get_community(db_path)

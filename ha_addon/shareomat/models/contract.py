@@ -44,6 +44,11 @@ class ContractSettings:
     distribution_method: str = "proportional zum Verbrauch"  # LEG-Mustervertrag §1
 
 
+BILLING_CYCLE_MONTHLY = "monthly"
+BILLING_CYCLE_QUARTERLY = "quarterly"
+BILLING_CYCLES = {BILLING_CYCLE_MONTHLY: "monatlich", BILLING_CYCLE_QUARTERLY: "quartalsweise"}
+
+
 @dataclass
 class ContractVersion:
     """One versioned snapshot of the LEG contract's terms and rendered text.
@@ -95,6 +100,13 @@ class ContractVersion:
     # LEG-Mustervertrag §3 (price changes) and §8 (contract amendments).
     price_notice_period_months: int = 4
     contract_notice_period_months: int = 6
+    # §5 ordinary termination ("viermonatige Kündigungsfrist" in the
+    # Mustervertrag) — its own parameter, never the price notice period.
+    termination_notice_period_months: int = 4
+    # §3.4 billing rhythm and payment term (§5 refers to "der definierten
+    # Zahlungsfrist", which the Mustervertrag never defines).
+    payment_term_days: int = 30
+    billing_cycle: str = "monthly"  # BILLING_CYCLE_* below
 
     valid_from: date | None = None
     valid_until: date | None = None
@@ -103,6 +115,16 @@ class ContractVersion:
     # lets withdraw_version() undo exactly what publishing did.
     tariff_id: int | None = None
     supersedes_version_id: int | None = None
+
+    # Provenance of contract_text_snapshot: template_sha256 identifies the
+    # template revision the text was rendered from (a different template =
+    # different contract wording, which needs the contract notice period);
+    # text_sha256/published_at are fixed at publish time and printed on the
+    # Beitrittserklärung so a signature refers to exactly this text.
+    template_sha256: str = ""
+    text_sha256: str = ""
+    published_at: datetime | None = None
+    consent_based: bool = False
 
     created_at: datetime | None = None
     updated_at: datetime | None = None

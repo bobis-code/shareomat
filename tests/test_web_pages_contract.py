@@ -62,6 +62,11 @@ _PRICE_FORM = {
     "local_rate_chf_kwh": "11.0",
     "admin_fee_chf_kwh": "0.5",
     "grid_operator": "EBL",
+    "representative_name": "Jane Doe",
+    "representative_address_line": "Musterweg 1",
+    "representative_postal_code": "4443",
+    "representative_city": "Wittinsburg",
+    "representative_email": "jane@example.ch",
     "price_notice_period_months": "4",
     "contract_notice_period_months": "6",
 }
@@ -337,6 +342,7 @@ def test_founding_contract_for_next_month_allows_joining_and_declaration_today(d
     """26.10.2026: publish the Gründungsvertrag for 01.11.2026, assign members and print declarations right away."""
     save_community(db_path, Community(community_id="LEG-ONE", name="LEG-ONE"))
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     today = _fixed_today(date(2026, 10, 26))
     monkeypatch.setattr(contract_versions_module, "date", today)
     monkeypatch.setattr(contract, "date", today)
@@ -369,6 +375,7 @@ def test_participants_add_rejects_non_month_start(db_path, monkeypatch) -> None:
 def test_participants_add_creates_pending_assignment(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
 
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
@@ -381,35 +388,76 @@ def test_participants_add_creates_pending_assignment(db_path, monkeypatch) -> No
 def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
 
-    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {"accepted_at": "2027-02-01"}))
+    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {
+        "signed_at": "2026-10-20", "signed_by": "Haus 1", "acceptance_method": "paper",
+    }))
 
     updated = list_assignments_for_version(db_path, current_version.id)[0]
-    assert updated.accepted_at == date(2027, 2, 1)
-    assert updated.notified_at == date(2027, 2, 1)
+    assert updated.accepted_at == date(2026, 10, 20)
+    assert updated.notified_at == date(2026, 10, 20)
+    assert updated.signed_by == "Haus 1"
+    assert updated.recorded_by == ""  or updated.recorded_by  # recorded_by falls back to "LEG-Vertreter"
+    with pytest.raises(FormError, match="nicht überschrieben"):  # second confirm never overwrites
+        contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {
+            "signed_at": "2026-10-21", "signed_by": "Haus 1", "acceptance_method": "paper",
+        }))
+
+
+def test_participants_confirm_requires_signature_details(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    assignment = list_assignments_for_version(db_path, get_contract_version_for_date(db_path, date(2021, 1, 1)).id)[0]
+    with pytest.raises(FormError):
+        contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {"signed_at": "2026-10-20"}))
+
+
+def test_participants_add_requires_a_meter(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p2", "Ohne Messpunkt"))
+    with pytest.raises(FormError, match="Messpunkt"):
+        contract.handle_post(_post(["participants", "add"], {"participant_id": "p2", "valid_from": "2027-03-01"}))
+
+
+def test_grid_operator_must_not_be_the_community(db_path) -> None:
+    save_community(db_path, Community(community_id="LEG-ONE", name="LEG-ONE"))
+    with pytest.raises(FormError, match="Name dieser Gemeinschaft"):
+        contract.handle_post(_post(["settings"], {"grid_operator": "LEG-ONE"}))
+    with pytest.raises(FormError, match="Name dieser Gemeinschaft"):
+        contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, grid_operator="leg-one")))
 
 
 def test_participants_notify_only_sets_notified(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
-    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {"accepted_at": "2027-02-01"}))
+    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {
+        "signed_at": "2026-10-20", "signed_by": "Haus 1", "acceptance_method": "paper",
+    }))
 
-    contract.handle_post(_post(["participants", str(assignment.id), "notify"], {"notified_at": "2028-01-01"}))
-
+    # Already notified together with the signature -> a second notice is refused, nothing changes.
+    with pytest.raises(FormError, match="bereits"):
+        contract.handle_post(_post(["participants", str(assignment.id), "notify"], {
+            "notified_at": "2028-01-01", "notice_evidence": "E-Mail",
+        }))
     updated = list_assignments_for_version(db_path, current_version.id)[0]
-    assert updated.accepted_at == date(2027, 2, 1)  # untouched
-    assert updated.notified_at == date(2028, 1, 1)
+    assert updated.accepted_at == date(2026, 10, 20)  # untouched
+    assert updated.notified_at == date(2026, 10, 20)
 
 
 def test_participants_depart_rejects_non_month_end(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
@@ -421,19 +469,24 @@ def test_participants_depart_rejects_non_month_end(db_path, monkeypatch) -> None
 def test_participants_depart_sets_left_at(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
 
-    contract.handle_post(_post(["participants", str(assignment.id), "depart"], {"end_date": "2027-05-31"}))
+    contract.handle_post(_post(["participants", str(assignment.id), "depart"], {
+        "end_date": "2027-05-31", "exit_reason": "Wegzug",
+    }))
 
     updated = list_assignments_for_version(db_path, current_version.id)[0]
     assert updated.left_at == date(2027, 5, 31)
+    assert updated.exit_reason == "Wegzug"
 
 
 def test_declaration_view_shows_participant_and_version(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
@@ -441,6 +494,13 @@ def test_declaration_view_shows_participant_and_version(db_path, monkeypatch) ->
     html = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration"]))
     assert "Haus 1" in html
     assert f"Version {current_version.version}" in html
+    assert "digitale Bestätigung durch den LEG-Vertreter" not in html  # only the participant signs
+    assert current_version.text_sha256 in html                       # signature refers to exactly this text
+
+    printable = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration", "print"]))
+    assert "<nav" not in printable and "Haus 1" in printable
+    contract_print = contract.handle_get(_ctx(segments=["versions", str(current_version.id), "print"]))
+    assert current_version.text_sha256 in contract_print
 
 
 def test_declaration_ticks_role_and_lists_meters_from_participant_meters(db_path, monkeypatch) -> None:
