@@ -8,7 +8,10 @@
    shareomat/web/pages/contract.py for how this template is invoked.
    Deliberate, minimal deviations from the Mustervertrag (review 26.10.2026):
    §1 allocation among several producers + Herkunftsnachweise (what the
-   settlement actually does), §3.1/3.2 "inklusive Mehrwertsteuer" made
+   settlement actually does), §3.4 prosumer netting, §5 exclusion vs. grid-
+   operator deregistration and temporary production outage, §7 "mit
+   Viertelstundenauflösung periodisch" instead of "viertelstündlich"
+   (3rd review), §3.1/3.2 "inklusive Mehrwertsteuer" made
    conditional ("einschliesslich einer allfällig geschuldeten
    Mehrwertsteuer" — a gross price, not an obligation to charge VAT; a
    non-registered seller must not show VAT, Art. 27 MWSTG), §3.3 wording
@@ -61,8 +64,9 @@ vom VNB ermittelten Werte.</p>
 <p>Die innerhalb der LEG abgesetzte Elektrizität wird einschliesslich der
 zugehörigen Herkunftsnachweise abgesetzt. Die Herkunftsnachweise für die
 innerhalb der LEG abgesetzte Elektrizität dürfen nicht zusätzlich anderweitig
-veräussert werden. Herkunftsnachweise für ausserhalb der LEG abgesetzte
-Überschussmengen verbleiben bei den jeweiligen Produzenten.</p>
+veräussert werden. Für ausserhalb der LEG abgesetzte Überschussmengen richtet
+sich die Verfügbarkeit der Herkunftsnachweise nach den anwendbaren
+HKN-Regeln und Vereinbarungen.</p>
 <p>Die Gesellschaft «LEG» verfügt über kein Gesellschaftsvermögen. Die
 Gesellschaft «LEG» erwirtschaftet weder Gewinn noch Verlust. Ebenso haben
 die Gesellschafter keine Beiträge an die Gesellschaft «LEG» zu leisten.</p>
@@ -158,7 +162,11 @@ Preisänderung gemäss Ziffer 3.1 und 3.2.</p>
 <h4>3.4 Abrechnung und Zahlung</h4>
 <p>Der LEG-Vertreter rechnet den LEG-Strom {{ billing_cycle_label }} ab,
 sobald die Messdaten des VNB für die Abrechnungsperiode vorliegen. Die
-LEG-Bezüger erhalten eine Rechnung, die LEG-Produzenten eine Gutschrift.</p>
+LEG-Bezüger erhalten eine Rechnung, die LEG-Produzenten eine Gutschrift.
+Bezieht und liefert ein Gesellschafter LEG-Strom (Prosumer), werden Bezug
+und Lieferung mit Mengen und Beträgen getrennt ausgewiesen und anschliessend
+miteinander verrechnet; der Saldo wird in Rechnung gestellt bzw.
+gutgeschrieben.</p>
 <p>Rechnungen sind innerhalb von {{ payment_term_days }} Tagen ab
 Rechnungsdatum zu bezahlen. Gutschriften werden innerhalb derselben Frist ab
 Abrechnungsdatum ausbezahlt.</p>
@@ -220,6 +228,10 @@ den LEG-Bezüger per sofort aus der Gesellschaft «LEG» auszuschliessen.</p>
 einmalig erfolgter schriftlicher Mahnung nicht wieder aufnimmt. In diesem
 Fall hat die Gesellschaft «LEG» und/oder der LEG-Vertreter das Recht, den
 LEG-Lieferanten per sofort aus der Gesellschaft «LEG» auszuschliessen.</p>
+<p>Die Abmeldung beim VNB erfolgt unter Einhaltung der für Mutationen geltenden
+Meldefristen; bis zu deren Wirksamkeit wird der LEG-Strom gemäss den
+Zuordnungsdaten des VNB abgerechnet. Ein vorübergehender Produktionsausfall
+(z. B. Wartung, Defekt, Witterung) gilt nicht als Einstellung der Lieferung.</p>
 <p>Kündigungen durch Gesellschafter sind an den LEG-Vertreter zu senden.
 Dieser meldet dem VNB die Kündigung. Der Austritt eines einzelnen
 Gesellschafters führt nicht zur Auflösung der Gesellschaft «LEG». Sie ist
@@ -240,9 +252,9 @@ LEG-Strom.</p>
 <h3>7. Datenaustausch und Datenschutz</h3>
 <p>Die Gesellschafter ermächtigen mit Zustimmung zum vorliegenden
 Gesellschaftsvertrag den VNB, die betreffenden Daten (insbesondere Kunden-
-und Messdaten) viertelstündlich digital an den LEG-Vertreter bzw. den
-Abrechnungsdienstleister zu übertragen, so dass die Fakturierung des
-LEG-Stroms ermöglicht wird.</p>
+und Messdaten mit Viertelstundenauflösung) periodisch elektronisch an den
+LEG-Vertreter bzw. den Abrechnungsdienstleister zu übermitteln, so dass die
+Fakturierung des LEG-Stroms ermöglicht wird.</p>
 <p>Die Gesellschafter verpflichten sich zur Einhaltung der anwendbaren
 Datenschutzvorschriften und schützen Personendaten durch geeignete
 technische und organisatorische Massnahmen, behandeln diese vertraulich

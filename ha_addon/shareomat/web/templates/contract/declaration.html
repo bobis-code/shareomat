@@ -16,7 +16,8 @@
       <tbody>
         <tr><td>Vertragsversion</td><td>v{{ version.version }}, gilt ab {{ version.valid_from.strftime('%d.%m.%Y') if version.valid_from else '—' }}</td></tr>
         <tr><td>Beitritt per (beantragt)</td><td>{{ assignment.joined_at.strftime('%d.%m.%Y') if assignment.joined_at else '—' }}</td></tr>
-        <tr><td>Erklärung ausgestellt</td><td>{{ assignment.declaration_issued_at.strftime('%d.%m.%Y') if assignment.declaration_issued_at else '—' }}</td></tr>
+        <tr><td>Erklärung ausgestellt</td><td>{{ assignment.declaration_issued_at.strftime('%d.%m.%Y') if assignment.declaration_issued_at else '—' }}
+          {% if assignment.declaration_sha256 %}<div class="ts">eingefrorene Fassung, SHA-256 <span style="font-family:monospace;word-break:break-all">{{ assignment.declaration_sha256 }}</span></div>{% endif %}</td></tr>
         <tr><td>Unterschrift</td><td>
           {% if assignment.accepted_at %}
           {{ assignment.accepted_at.strftime('%d.%m.%Y') }}, Version v{{ assignment.accepted_version or version.version }}
@@ -26,7 +27,8 @@
           {% if assignment.signed_document_sha256 %}
           <div class="ts"><a href="{{ url_for('contract', suffix=base ~ '/document') }}">unterschriebenes Dokument öffnen</a>
             · SHA-256 <span style="font-family:monospace;word-break:break-all">{{ assignment.signed_document_sha256 }}</span></div>
-          {% else %}<div class="ts" style="color:#b45309">Kein unterschriebenes Dokument hinterlegt.</div>{% endif %}
+          {% elif assignment.paper_original_location %}<div class="ts">Papieroriginal: {{ assignment.paper_original_location }}</div>
+          {% else %}<div class="ts" style="color:#b45309">Kein Nachweis hinterlegt.</div>{% endif %}
           {% else %}—{% endif %}
         </td></tr>
         {% if assignment.accepted_version and assignment.accepted_version != version.version %}
@@ -63,6 +65,8 @@
         {% for value, label in acceptance_methods.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
       </select>
     </div>
+    <div class="field"><label>Ablageort Papieroriginal (falls kein Scan)</label>
+      <input type="text" name="paper_original_location" placeholder="z. B. Ordner LEG-ONE, Register Beitritte"></div>
     <div class="field">
       <label>Unterschriebenes Dokument (PDF/JPG/PNG)</label>
       <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png">

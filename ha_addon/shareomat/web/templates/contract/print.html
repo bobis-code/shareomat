@@ -35,6 +35,10 @@
     {% if sha256 %}<br>SHA-256 Vertragstext: <span style="font-family:monospace;word-break:break-all">{{ sha256 }}</span>
     <br>Die Prüfsumme bezieht sich auf den in Shareomat gespeicherten Vertragstext (HTML, UTF-8), abrufbar als
     „Vertragstext (Original)“ auf der Vertragsseite.
+    {% if declaration_sha256 %}<br>SHA-256 Beitrittserklärung (eingefrorene Fassung):
+    <span style="font-family:monospace;word-break:break-all">{{ declaration_sha256 }}</span>{% endif %}
+    {% if package_sha256 %}<br>SHA-256 Vertragspaket (Erklärung + Vertrag):
+    <span style="font-family:monospace;word-break:break-all">{{ package_sha256 }}</span>{% endif %}
     {% else %}<br>Entwurf — noch nicht veröffentlicht, keine Prüfsumme.{% endif %}
   </div>
 </body>

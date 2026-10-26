@@ -10,9 +10,14 @@ Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
-    The thread wakes every 60 seconds, checks if the cron expression matches
-    the current minute, and if so calls on_run() in a separate thread to
-    avoid blocking the scheduler loop.
+    The cron expression is evaluated in LOCAL time (SHAREOMAT_TZ, default
+    Europe/Zurich) — "0 6 * * *" means 06:00 in Switzerland, summer and
+    winter. The thread computes the next due time with croniter.get_next()
+    and sleeps until then (in short steps, so stop() stays responsive).
+
+    The previous implementation compared croniter.get_prev(now) with now;
+    get_prev() returns the PREVIOUS occurrence even at the exact minute, so
+    that comparison never matched and the schedule never fired.
 
     croniter is a soft dependency — if not installed the scheduler is
     unavailable and a clear error is logged at startup.
@@ -21,12 +26,23 @@ Notes:
 from __future__ import annotations
 
 import logging
+import os
 import threading
-import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Callable
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
+
+_TZ = ZoneInfo(os.environ.get("SHAREOMAT_TZ", "Europe/Zurich"))
+_MAX_SLEEP_SECONDS = 30.0
+
+
+def next_run_after(cron_expression: str, after: datetime) -> datetime:
+    """Next local due time strictly after `after` (aware datetime in _TZ)."""
+    from croniter import croniter
+
+    return croniter(cron_expression, after.astimezone(_TZ)).get_next(datetime)
 
 
 class SchedulerThread(threading.Thread):
@@ -43,9 +59,9 @@ class SchedulerThread(threading.Thread):
         self._stop_event.set()
 
     def run(self) -> None:
-        """Thread main loop: check the cron expression every 60 s and fire on match."""
+        """Thread main loop: sleep until the next cron occurrence, fire, repeat."""
         try:
-            from croniter import croniter
+            import croniter  # noqa: F401
         except ImportError:
             logger.error(
                 "croniter is not installed — cron scheduler disabled. "
@@ -53,27 +69,20 @@ class SchedulerThread(threading.Thread):
             )
             return
 
-        logger.info("Cron scheduler started: %s", self._cron)
-        last_fired: datetime | None = None
+        try:
+            due = next_run_after(self._cron, datetime.now(_TZ))
+        except Exception as exc:
+            logger.error("Cron scheduler disabled — invalid expression %r: %s", self._cron, exc)
+            return
+        logger.info("Cron scheduler started: %s (local time %s), next run %s", self._cron, _TZ.key, due.isoformat())
 
         while not self._stop_event.is_set():
-            now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-            try:
-                it = croniter(self._cron, now)
-                prev = it.get_prev(datetime)
-                # Fire if the previous scheduled time is within the current minute
-                # and we haven't fired for this slot yet
-                if prev == now and last_fired != now:
-                    last_fired = now
-                    logger.info("Cron trigger at %s — starting settlement run", now.isoformat())
-                    threading.Thread(
-                        target=self._on_run,
-                        name="shareomat-cron-run",
-                        daemon=True,
-                    ).start()
-            except Exception as exc:
-                logger.error("Cron scheduler error: %s", exc)
-
-            self._stop_event.wait(timeout=60)
+            remaining = (due - datetime.now(_TZ)).total_seconds()
+            if remaining > 0:
+                self._stop_event.wait(timeout=min(remaining, _MAX_SLEEP_SECONDS))
+                continue
+            logger.info("Cron trigger at %s — starting settlement run", due.isoformat())
+            threading.Thread(target=self._on_run, name="shareomat-cron-run", daemon=True).start()
+            due = next_run_after(self._cron, due)
 
         logger.info("Cron scheduler stopped")

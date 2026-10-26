@@ -385,6 +385,41 @@ def test_participants_add_creates_pending_assignment(db_path, monkeypatch) -> No
     assert assignments[0].joined_at == date(2027, 3, 1)
 
 
+def _complete_p1(db_path) -> None:
+    from shareomat.database.participants import update_participant
+    update_participant(db_path, "p1", Participant("p1", "Haus 1", address_line="Weg 1", postal_code="4443",
+                                                  city="Wittinsburg", email="h1@example.ch"))
+
+
+def test_confirm_requires_evidence_and_freezes_the_declaration(db_path, monkeypatch) -> None:
+    _publish_v1(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
+    assignment = list_assignments_for_version(db_path, get_contract_version_for_date(db_path, date(2021, 1, 1)).id)[0]
+    base = {"signed_at": "2026-10-20", "signed_by": "Haus 1", "acceptance_method": "paper"}
+
+    with pytest.raises(FormError, match="Nachweis fehlt"):
+        contract.handle_post(_post(["participants", str(assignment.id), "confirm"], base))
+    with pytest.raises(FormError, match="nicht unterschriftsreif"):   # address/e-mail still missing
+        contract.handle_post(_post(["participants", str(assignment.id), "confirm"],
+                                   dict(base, paper_original_location="Ordner")))
+
+    _complete_p1(db_path)
+    contract.handle_post(_post(["participants", str(assignment.id), "confirm"], dict(base, paper_original_location="Ordner")))
+    signed = list_assignments_for_version(db_path, assignment.contract_version_id)[0]
+    assert signed.paper_original_location == "Ordner"
+    assert signed.declaration_sha256 and "Weg 1" in signed.declaration_snapshot
+
+    # Later master-data changes do not change the signed declaration.
+    from shareomat.database.participants import update_participant
+    update_participant(db_path, "p1", Participant("p1", "Haus 1 NEU", address_line="Anderer Weg 9", postal_code="4443",
+                                                  city="Wittinsburg", email="h1@example.ch"))
+    reprint = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "package", "print"]))
+    assert "Weg 1" in reprint and "Anderer Weg 9" not in reprint
+    assert signed.declaration_sha256 in reprint
+
+
 def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))
@@ -393,8 +428,10 @@ def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
 
+    _complete_p1(db_path)
     contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {
         "signed_at": "2026-10-20", "signed_by": "Haus 1", "acceptance_method": "paper",
+        "paper_original_location": "Ordner LEG-ONE",
     }))
 
     updated = list_assignments_for_version(db_path, current_version.id)[0]
@@ -405,6 +442,7 @@ def test_participants_confirm_sets_accepted_and_notified(db_path, monkeypatch) -
     with pytest.raises(FormError, match="nicht überschrieben"):  # second confirm never overwrites
         contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {
             "signed_at": "2026-10-21", "signed_by": "Haus 1", "acceptance_method": "paper",
+            "paper_original_location": "Ordner LEG-ONE",
         }))
 
 
@@ -440,8 +478,10 @@ def test_participants_notify_only_sets_notified(db_path, monkeypatch) -> None:
     contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-03-01"}))
     current_version = get_contract_version_for_date(db_path, date(2021, 1, 1))
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
+    _complete_p1(db_path)
     contract.handle_post(_post(["participants", str(assignment.id), "confirm"], {
         "signed_at": "2026-10-20", "signed_by": "Haus 1", "acceptance_method": "paper",
+        "paper_original_location": "Ordner LEG-ONE",
     }))
 
     # Already notified together with the signature -> a second notice is refused, nothing changes.

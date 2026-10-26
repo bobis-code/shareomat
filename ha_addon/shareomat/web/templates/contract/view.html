@@ -162,7 +162,8 @@
     </div>
     <div class="field">
       <label for="distribution_method">Verteilschlüssel (Beschreibung)</label>
-      <input type="text" id="distribution_method" name="distribution_method" value="{{ settings.distribution_method }}">
+      <input type="text" id="distribution_method" name="distribution_method" readonly value="proportional zum Verbrauch">
+      <div class="field-hint">Gesetzlicher Verteilschlüssel (Viertelstunde, gleicher Anteil für alle); andere Schlüssel werden derzeit nicht unterstützt.</div>
     </div>
     <div class="actions-row">
       <button type="submit">Vorschlagswerte speichern</button>
@@ -266,7 +267,7 @@
     </div>
     <div class="field">
       <label for="distribution_method">Verteilschlüssel (Beschreibung)</label>
-      <input type="text" id="distribution_method" name="distribution_method" value="{{ form_version.distribution_method }}">
+      <input type="text" id="distribution_method" name="distribution_method" readonly value="proportional zum Verbrauch">
     </div>
     <div class="field">
       <label for="billing_cycle">Abrechnungsrhythmus (§3.4)</label>

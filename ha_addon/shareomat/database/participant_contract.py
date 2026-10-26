@@ -41,6 +41,7 @@ Notes:
 
 from __future__ import annotations
 
+import hashlib
 import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -82,6 +83,18 @@ class ParticipantContractAssignment:
     effective_start_at: date | None = None
     effective_end_at: date | None = None
     exit_reason: str = ""
+    declaration_snapshot: str = ""
+    declaration_sha256: str = ""
+    paper_original_location: str = ""
+
+    @property
+    def signature_evidence(self) -> str:
+        """How the signature is evidenced: stored document, paper original location, or nothing."""
+        if self.signed_document_sha256:
+            return "document"
+        if self.paper_original_location:
+            return "paper"
+        return ""
 
     @property
     def status_label(self) -> str:
@@ -125,6 +138,9 @@ def _row_to_assignment(row: sqlite3.Row, participant_id: str) -> ParticipantCont
         effective_start_at=str_to_date(row["effective_start_at"]),
         effective_end_at=str_to_date(row["effective_end_at"]),
         exit_reason=row["exit_reason"],
+        declaration_snapshot=row["declaration_snapshot"],
+        declaration_sha256=row["declaration_sha256"],
+        paper_original_location=row["paper_original_location"],
     )
 
 
@@ -243,8 +259,22 @@ ACCEPTANCE_METHODS = {
 }
 
 
-def mark_declaration_issued(db_path: Path, assignment_id: int, issued_at: date) -> ParticipantContractAssignment:
-    """Record that the Beitrittserklärung was handed to the participant for signature (write-once)."""
+def _freeze_declaration(conn, row, snapshot: str) -> str:
+    """Store the rendered personal declaration once; returns its SHA-256 ('' if nothing to store)."""
+    if row["declaration_snapshot"] or not snapshot:
+        return row["declaration_sha256"]
+    digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
+    conn.execute(
+        "UPDATE participant_contract SET declaration_snapshot = ?, declaration_sha256 = ? WHERE id = ?",
+        (snapshot, digest, row["id"]),
+    )
+    return digest
+
+
+def mark_declaration_issued(
+    db_path: Path, assignment_id: int, issued_at: date, *, snapshot: str = "",
+) -> ParticipantContractAssignment:
+    """Record that the Beitrittserklärung was handed out (write-once) and freeze the handed-out text."""
     with connect(db_path) as conn:
         with conn:
             row = _load_for_update(conn, assignment_id)
@@ -254,15 +284,17 @@ def mark_declaration_issued(db_path: Path, assignment_id: int, issued_at: date) 
                 "UPDATE participant_contract SET declaration_issued_at = ? WHERE id = ?",
                 (date_to_str(issued_at), assignment_id),
             )
+            digest = _freeze_declaration(conn, row, snapshot)
             record_event(conn, "participant", row["participant_business_id"], "declaration_issued",
-                         f"v{row['version_number']} am {date_to_str(issued_at)}")
+                         f"v{row['version_number']} am {date_to_str(issued_at)}"
+                         + (f", Erklärung-SHA-256 {digest}" if digest else ""))
     return _reload(db_path, assignment_id)
 
 
 def mark_accepted(
     db_path: Path, assignment_id: int, accepted_at: date, *,
     method: str = "", signed_by: str = "", recorded_by: str = "",
-    document_location: str = "", document_sha256: str = "",
+    document_location: str = "", document_sha256: str = "", paper_location: str = "", snapshot: str = "",
 ) -> ParticipantContractAssignment:
     """Record the participant's signed Beitrittserklärung — sets accepted_at AND notified_at (write-once).
 
@@ -288,15 +320,16 @@ def mark_accepted(
                 UPDATE participant_contract
                 SET accepted_at = ?, notified_at = ?, accepted_version = ?, signed_at = ?,
                     acceptance_method = ?, signed_by = ?, recorded_by = ?, recorded_at = ?,
-                    signed_document_location = ?, signed_document_sha256 = ?
+                    signed_document_location = ?, signed_document_sha256 = ?, paper_original_location = ?
                 WHERE id = ?
                 """,
                 (
                     date_to_str(accepted_at), date_to_str(accepted_at), row["version_number"],
                     date_to_str(accepted_at), method, signed_by, recorded_by, now_iso(),
-                    document_location, document_sha256, assignment_id,
+                    document_location, document_sha256, paper_location, assignment_id,
                 ),
             )
+            declaration_digest = _freeze_declaration(conn, row, snapshot)
             detail = f"v{row['version_number']}, unterschrieben am {date_to_str(accepted_at)}"
             if method:
                 detail += f", {ACCEPTANCE_METHODS[method]}"
@@ -304,6 +337,10 @@ def mark_accepted(
                 detail += f", durch {signed_by}"
             if document_sha256:
                 detail += f", Dokument-SHA-256 {document_sha256}"
+            if paper_location:
+                detail += f", Papieroriginal: {paper_location}"
+            if declaration_digest:
+                detail += f", Erklärung-SHA-256 {declaration_digest}"
             record_event(conn, "participant", row["participant_business_id"], "accepted", detail)
     return _reload(db_path, assignment_id)
 
