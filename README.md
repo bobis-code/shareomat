@@ -135,61 +135,34 @@ are ignored.
 
 ## Matching algorithm
 
-For each 15-minute slot, local energy is shared proportionally across meters — but **a meter can never supply itself**.
+For each 15-minute slot, local energy is shared **pro rata with the same key for every
+participant** — the rule of Art. 19g Abs. 3 StromVV and VSE BD LEG-CH 2025 Kap. 6.1, i.e. exactly
+what the grid operator delivers as SDAT E66 `LEGE`/`LEGR`.
 
-### Core rule
-
-```
-exporter.meter_id ≠ importer.meter_id  for every flow
-```
-
-A prosumer meter can have both export and import in the same slot. Its export goes into the community pool for *other* meters. Its import is covered from *other* exporters. The same electricity cannot leave and re-enter the same meter.
-
-### Algorithm
-
-**Step 1 — Eligible importers per exporter**
-
-For each exporter E, the eligible importers are **all meters that have import, except E itself**.
-Their combined import is called `eligible_import_E`:
+### Formula
 
 ```
-eligible_import_E = Σ import_J   for all J ≠ E
+P = Σ export_i            (all exports in the slot)
+C = Σ import_j            (all imports in the slot)
+L = min(P, C)             (energy shared inside the LEG)
+
+local_received_j = import_j × L / C      grid_import_j = import_j − local_received_j
+local_supplied_i = export_i × L / P      grid_export_i = export_i − local_supplied_i
 ```
 
-This per-exporter denominator is what makes the self-exclusion rule work: if E has both export
-and import in the same slot, E's own import is not counted in the denominator and E receives
-nothing from its own export.
+There is **no self-exclusion**: a prosumer meter may import and export in the same slot (import
+and export are not netted within a quarter hour, VSE Kap. 5 (1)) and receives the same share of
+its import as everyone else. Excluding its own export would diverge from the grid operator's
+allocation — and therefore from the grid operator's invoice, which bills energy only on `LEGR`.
 
-**Step 2 — Proportional cross-meter flows**
-
-Exporter E distributes its full export proportionally among the eligible importers:
-
-```
-flow[E → I] = export_E × (import_I / eligible_import_E)   for all I ≠ E
-```
-
-Every eligible importer gets a share proportional to how much it needs relative to all other
-eligible importers. Exporters with no eligible importers (single-meter community) contribute 0
-to local_shared.
-
-**Step 3 — Scale if demand is the limiting factor**
-
-If total eligible demand exceeds total supply, all flows are scaled down uniformly:
+For the energy ledger report, a clearing matrix shows who "sold" to whom on paper:
 
 ```
-total_raw    = Σ flow[E → I]   (all cross-meter flows)
-scale        = min(1.0,  total_import / total_raw)
-local_shared = total_raw × scale
+flow[i → j] = local_supplied_i × import_j / C
 ```
 
-When supply ≤ demand (typical solar community), scale = 1.0 and all export is shared locally.
-
-**Step 4 — Residuals go to grid**
-
-```
-grid_export_E = export_E  − local_supplied_E
-grid_import_I = import_I  − local_received_I
-```
+Rows sum to `local_supplied_i`, columns to `local_received_j`. For a prosumer the matrix can
+contain `flow[i → i]`; that is an accounting split, not a physical flow.
 
 ### Worked example
 
@@ -200,45 +173,20 @@ Meter 1:  export 5 kWh,  import 5 kWh   (prosumer)
 Meter 2:  export 3 kWh,  import 1 kWh   (prosumer)
 Meter 3:  export 0 kWh,  import 20 kWh  (consumer)
 
-total_export =  8 kWh
-total_import = 26 kWh
+P = 8 kWh, C = 26 kWh, L = 8 kWh
 ```
 
-**Meter 1 distributes 5 kWh**
-
-Eligible importers: Meter 2 (1 kWh) + Meter 3 (20 kWh)  — Meter 1 excluded from its own denominator
-eligible_import_1 = 1 + 20 = 21 kWh
-
 ```
-Meter 1 → Meter 2:  5 × ( 1 / 21) = 0.238 kWh
-Meter 1 → Meter 3:  5 × (20 / 21) = 4.762 kWh
-```
+Meter 1:  local_received = 5  × 8/26 = 1.538 kWh,  grid_import =  3.462 kWh
+Meter 2:  local_received = 1  × 8/26 = 0.308 kWh,  grid_import =  0.692 kWh
+Meter 3:  local_received = 20 × 8/26 = 6.154 kWh,  grid_import = 13.846 kWh
 
-**Meter 2 distributes 3 kWh**
-
-Eligible importers: Meter 1 (5 kWh) + Meter 3 (20 kWh)  — Meter 2 excluded from its own denominator
-eligible_import_2 = 5 + 20 = 25 kWh
-
-```
-Meter 2 → Meter 1:  3 × ( 5 / 25) = 0.600 kWh
-Meter 2 → Meter 3:  3 × (20 / 25) = 2.400 kWh
+Meter 1:  local_supplied = 5 × 8/8 = 5 kWh,  grid_export = 0
+Meter 2:  local_supplied = 3 × 8/8 = 3 kWh,  grid_export = 0
 ```
 
-**Totals**
-
-```
-total_raw = 0.238 + 4.762 + 0.600 + 2.400 = 8.000 kWh
-scale     = min(1.0, 26 / 8) = 1.0   → no scaling needed, all export goes local
-
-local_shared = 8.000 kWh
-
-Meter 1:  local_received = 0.600 kWh,  grid_import =  4.400 kWh
-Meter 2:  local_received = 0.238 kWh,  grid_import =  0.762 kWh
-Meter 3:  local_received = 7.162 kWh,  grid_import = 12.838 kWh
-```
-
-With **one meter only**, eligible_import = 0 for that meter → local_shared = 0.
-There must be at least two meters for any local sharing to occur.
+When the grid operator's E66 time series are available they are authoritative for invoices;
+this algorithm reproduces them and is used for simulation and validation.
 
 ## Running tests
 

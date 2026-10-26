@@ -345,7 +345,10 @@ def write_ledger_csv(
                 targets = r.flows[exp_id]
                 exp_kwh = slot_exports.get(exp_id, 0.0)
                 grid_export = _round_kwh(r.meter_grid_export_kwh.get(exp_id, 0.0))
-                eligible = sum(v for k, v in slot_imports.items() if k != exp_id)
+                # Same key for every importer (Art. 19g Abs. 3 StromVV): the
+                # exporter's sold share is split by import share over ALL
+                # importers of the slot, its own import included.
+                eligible = r.total_import_kwh
 
                 for imp_id in sorted(targets):
                     flow_kwh = targets[imp_id]
@@ -429,14 +432,17 @@ def write_ledger_csv(
 
         n_slots = len(results)
         n_entries = sum(len(targets) for r in results for targets in r.flows.values())
-        self_supply = sum(
+        # A prosumer meter that imports and exports in the same slot gets its
+        # pro-rata share like everyone else — reported for transparency, not
+        # an error (the grid operator's E66 allocation does the same).
+        own_share_entries = sum(
             1 for r in results
             for exp_id, targets in r.flows.items()
             for imp_id in targets
             if imp_id == exp_id
         )
         balance_err = abs(sum_row["local_supplied"] - sum_row["local_received"])
-        ok = self_supply == 0 and balance_err < 1e-6
+        ok = balance_err < 1e-6
 
         writer.writerow(["Anzahl Time Slots", n_slots])
         writer.writerow(["Anzahl Ledger-Einträge", n_entries])
@@ -446,7 +452,7 @@ def write_ledger_csv(
         writer.writerow(["Total Import [kWh]", _round_kwh(sum_imp)])
         writer.writerow(["Total lokal erhalten [kWh]", _round_kwh(sum_row["local_received"])])
         writer.writerow(["Total Netzbezug [kWh]", _round_kwh(sum_row["grid_import"])])
-        writer.writerow(["Selbstbelieferungen erkannt", self_supply])
+        writer.writerow(["Eigenanteile Prosumer (gleiche Viertelstunde)", own_share_entries])
         writer.writerow(["Bilanzfehler", 0 if ok else _round_kwh(balance_err)])
         writer.writerow(["Berechnung erfolgreich", "JA" if ok else "NEIN"])
 
