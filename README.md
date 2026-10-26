@@ -136,7 +136,7 @@ are ignored.
 ## Matching algorithm
 
 For each 15-minute slot, local energy is shared **pro rata with the same key for every
-participant** — the rule of Art. 19g Abs. 3 StromVV and VSE BD LEG-CH 2025 Kap. 6.1, i.e. exactly
+participant** — the rule of Art. 19g StromVV as described in VSE BD LEG-CH 2025 Kap. 2 (11) and 6.1, i.e. exactly
 what the grid operator delivers as SDAT E66 `LEGE`/`LEGR`.
 
 ### Formula

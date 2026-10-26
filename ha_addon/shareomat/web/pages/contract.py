@@ -18,6 +18,8 @@ Notes:
         GET  /?copy_from=<id>              form prefilled from any version, for a NEW draft
         GET  /participants/<id>/declaration  one participant's Beitrittserklärung
         GET  /participants/<id>/declaration/print  same, standalone printable page
+        GET  /participants/<id>/package/print      declaration + full contract text in one document
+        GET  /versions/<id>/snapshot        the stored contract text exactly as hashed (text_sha256)
         GET  /versions/<id>/print           full contract text of one version, printable
         (GET /participants/<id>/document is served by the web server itself —
          see shareomat.web.server — because it returns a file, not HTML)
@@ -334,6 +336,15 @@ def _reference_choices(db_path, form_version: ContractVersion, settings: Contrac
 
 _LEGAL_TEXT_TEMPLATE = "contract/legal_text.html"
 
+_MONTH_WORDS = {1: "ein", 2: "zwei", 3: "drei", 4: "vier", 5: "fünf", 6: "sechs", 7: "sieben", 8: "acht",
+                9: "neun", 10: "zehn", 11: "elf", 12: "zwölf"}
+
+
+def _months_adjective(months: int) -> str:
+    """4 -> "viermonatigen", as in the Mustervertrag's "einer viermonatigen Kündigungsfrist"."""
+    word = _MONTH_WORDS.get(months)
+    return f"{word}monatigen" if word else f"{months}-monatigen"
+
 
 def legal_text_template_sha256() -> str:
     """Hash of the current contract template source — identifies the wording revision a draft is rendered from."""
@@ -351,6 +362,7 @@ def render_contract_text(version: ContractVersion, community_name: str) -> str:
         price_notice_period_months=version.price_notice_period_months,
         contract_notice_period_months=version.contract_notice_period_months,
         termination_notice_period_months=version.termination_notice_period_months,
+        termination_notice_word=_months_adjective(version.termination_notice_period_months),
         payment_term_days=version.payment_term_days,
         billing_cycle_label=BILLING_CYCLES.get(version.billing_cycle, version.billing_cycle),
         representative_name=version.representative_name,
@@ -419,7 +431,23 @@ def _declaration_context(ctx: RequestContext):
     community = get_community(ctx.db_path)
     roles = participant_roles(m for m in list_meters(ctx.db_path) if m.participant_id == participant.participant_id)
     text = render_declaration(assignment, participant, version, community.name if community else "", roles)
-    return assignment, participant, version, text
+    return assignment, participant, version, text, _declaration_issues(participant, version, roles)
+
+
+def _declaration_issues(participant: Participant, version: ContractVersion, roles: ParticipantRoles) -> list[str]:
+    """Why a declaration is not ready to be signed yet — shown prominently (also on the printout)."""
+    issues = []
+    if version.status != "published" or not version.text_sha256:
+        issues.append(f"Vertragsversion {version.version} ist nicht veröffentlicht — der Text kann sich noch ändern.")
+    missing = [label for label, value in (
+        ("Adresse", participant.address_line), ("PLZ", participant.postal_code), ("Ort", participant.city),
+        ("E-Mail", participant.email),
+    ) if not (value or "").strip()]
+    if missing:
+        issues.append("Teilnehmerangaben fehlen: " + ", ".join(missing) + ".")
+    if not roles.meter_ids:
+        issues.append("Kein aktiver Messpunkt zugewiesen — Messpunktnummer und Rolle fehlen.")
+    return issues
 
 
 def handle_get(ctx: RequestContext) -> str:
@@ -437,14 +465,27 @@ def handle_get(ctx: RequestContext) -> str:
             version=version, sha256=version.text_sha256,
         )
 
-    if len(ctx.segments) == 4 and ctx.segments[0] == "participants" and ctx.segments[2:] == ["declaration", "print"]:
+    if len(ctx.segments) == 3 and ctx.segments[0] == "versions" and ctx.segments[2] == "snapshot":
+        try:
+            version = get_contract_version(ctx.db_path, int(ctx.segments[1]))
+        except ValueError:
+            version = None
+        # Byte-identical to what text_sha256 was computed from (UTF-8), so the
+        # checksum on the printout can be re-computed from this download.
+        return version.contract_text_snapshot if version is not None else ""
+
+    if len(ctx.segments) == 4 and ctx.segments[0] == "participants" and ctx.segments[3] == "print" \
+            and ctx.segments[2] in ("declaration", "package"):
         found = _declaration_context(ctx)
         if found is None:
             return render_page("placeholders/coming_soon.html", ctx, "contract",
                                 title="Beitrittserklärung nicht gefunden", description="")
-        assignment, participant, version, text = found
+        assignment, participant, version, text, issues = found
+        package = ctx.segments[2] == "package"
         return jinja_env.get_template("contract/print.html").render(
-            title=f"Beitrittserklärung {participant.label}", body=text, version=version, sha256=version.text_sha256,
+            title=("Vertragspaket " if package else "Beitrittserklärung ") + participant.label,
+            body=text, appendix=version.contract_text_snapshot if package else "",
+            version=version, sha256=version.text_sha256, issues=issues,
         )
 
     if len(ctx.segments) == 3 and ctx.segments[0] == "participants" and ctx.segments[2] == "declaration":
@@ -452,10 +493,11 @@ def handle_get(ctx: RequestContext) -> str:
         if found is None:
             return render_page("placeholders/coming_soon.html", ctx, "contract",
                                 title="Beitrittserklärung nicht gefunden", description="")
-        assignment, participant, version, declaration_text = found
+        assignment, participant, version, declaration_text, issues = found
         return render_page(
             "contract/declaration.html", ctx, "contract",
             declaration_text=declaration_text, participant=participant, version=version, assignment=assignment,
+            issues=issues,
             acceptance_methods=ACCEPTANCE_METHODS,
             events=list_events(ctx.db_path, entity="participant", entity_id=participant.participant_id),
         )

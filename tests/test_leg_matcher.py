@@ -156,7 +156,7 @@ class TestMatchSlot:
         assert sum(result.meter_local_supplied_kwh.values()) == pytest.approx(result.local_shared_kwh)
 
     def test_prosumer_with_import_and_export_gets_same_key_as_everyone(self):
-        """No self-exclusion: same pro-rata key for every importer (Art. 19g Abs. 3 StromVV, EBL E66 LEGE)."""
+        """No self-exclusion: same pro-rata key for every importer (Art. 19g StromVV, EBL E66 LEGE)."""
         slot = EnergySlot(
             slot_start=TS,
             producer_export={"M1": 5.0, "M2": 3.0},

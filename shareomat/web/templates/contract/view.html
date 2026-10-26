@@ -414,6 +414,10 @@
             </details>
             <a class="btn-small btn-muted" target="_blank" rel="noopener"
                href="{{ url_for('contract', suffix='/versions/' + v.id|string + '/print') }}">Druckansicht</a>
+            {% if v.text_sha256 %}
+            <a class="btn-small btn-muted" target="_blank" rel="noopener"
+               href="{{ url_for('contract', suffix='/versions/' + v.id|string + '/snapshot') }}">Vertragstext (Original)</a>
+            {% endif %}
             {% if is_draft %}
             <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?edit={{ v.id }}">Bearbeiten</a>
             <details style="display:inline-block">
