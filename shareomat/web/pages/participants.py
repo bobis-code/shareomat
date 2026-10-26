@@ -21,6 +21,8 @@ Notes:
 
 from __future__ import annotations
 
+from shareomat.core.participant_roles import participant_roles, roles_by_participant
+from shareomat.database.meters import list_meters
 from shareomat.database.participants import (
     create_participant,
     get_participant,
@@ -28,52 +30,25 @@ from shareomat.database.participants import (
     set_participant_active,
     update_participant,
 )
-from shareomat.leg_const import (
-    PARTICIPANT_TYPE_CONSUMER,
-    PARTICIPANT_TYPE_PRODUCER,
-    PARTICIPANT_TYPE_PRODUCER_CONSUMER,
-    PARTICIPANT_TYPE_STORAGE,
-)
 from shareomat.models.participant import Participant
+from shareomat.web.pages.meters import METER_ROLES
 from shareomat.web.rendering import (
     FormError,
     RequestContext,
     form_bool,
-    form_date,
     form_required,
     render_page,
 )
 from shareomat.web.state import get_state
 
-PARTICIPANT_TYPES = [
-    (PARTICIPANT_TYPE_PRODUCER, "Erzeuger"),
-    (PARTICIPANT_TYPE_CONSUMER, "Verbraucher"),
-    (PARTICIPANT_TYPE_PRODUCER_CONSUMER, "Erzeuger & Verbraucher"),
-    (PARTICIPANT_TYPE_STORAGE, "Speicherbetreiber"),
-]
-
-# Shown as a form hint next to the type dropdown — legal obligation for
-# storage operators specifically, from the LEG-Mustervertrag footnote
-# (Art. 19h Abs. 4 StromVV).
-PARTICIPANT_TYPE_STORAGE_HINT = (
-    "Speicherbetreiber sind dafür verantwortlich, dass sie pro "
-    "Abrechnungsperiode in der Summe nicht mehr Elektrizität innerhalb der "
-    "Gemeinschaft absetzen, als sie von der Gemeinschaft beziehen "
-    "(Art. 19h Abs. 4 StromVV)."
-)
-
-
 def _participant_from_form(ctx: RequestContext, *, participant_id: str) -> Participant:
     return Participant(
         participant_id=participant_id,
-        label=form_required(ctx, "label", label="Bezeichnung"),
-        participant_type=form_required(ctx, "participant_type", label="Typ"),
+        label=form_required(ctx, "label", label="Name"),
         email=(ctx.form.get("email") or "").strip(),
         address_line=(ctx.form.get("address_line") or "").strip(),
         postal_code=(ctx.form.get("postal_code") or "").strip(),
         city=(ctx.form.get("city") or "").strip(),
-        valid_from=form_date(ctx, "valid_from"),
-        valid_until=form_date(ctx, "valid_until"),
         active=form_bool(ctx, "active"),
     )
 
@@ -84,13 +59,13 @@ def handle_get(ctx: RequestContext) -> str:
         participants = list_participants(ctx.db_path)
         return render_page(
             "participants/list.html", ctx, "participants", participants=participants,
+            participant_roles=roles_by_participant(list_meters(ctx.db_path)),
         )
 
     if ctx.segments == ["new"]:
         return render_page(
             "participants/form.html", ctx, "participants",
-            participant=None, participant_types=PARTICIPANT_TYPES,
-            participant_type_storage_hint=PARTICIPANT_TYPE_STORAGE_HINT,
+            participant=None, meters=[], meter_role_labels=dict(METER_ROLES),
         )
 
     if len(ctx.segments) == 2 and ctx.segments[1] == "edit":
@@ -99,10 +74,11 @@ def handle_get(ctx: RequestContext) -> str:
             return render_page("placeholders/coming_soon.html", ctx, "participants",
                                 title="Teilnehmer nicht gefunden",
                                 description="Die Teilnehmer-ID wurde möglicherweise geändert. Bitte öffnen Sie den Teilnehmer erneut über die Teilnehmerliste.")
+        meters = [m for m in list_meters(ctx.db_path) if m.participant_id == participant.participant_id]
         return render_page(
             "participants/form.html", ctx, "participants",
-            participant=participant, participant_types=PARTICIPANT_TYPES,
-            participant_type_storage_hint=PARTICIPANT_TYPE_STORAGE_HINT,
+            participant=participant, meters=meters, roles=participant_roles(meters),
+            meter_role_labels=dict(METER_ROLES),
         )
 
     return render_page("placeholders/coming_soon.html", ctx, "participants",

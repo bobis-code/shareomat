@@ -24,7 +24,7 @@ def test_participant_links_and_actions_round_trip(tmp_path, participant_id, ingr
     init_db(db_path)
     get_state().register_db(db_path)
     create_participant(db_path, Participant(
-        participant_id=participant_id, label="Test participant", participant_type="consumer",
+        participant_id=participant_id, label="Test participant",
     ))
     encoded_id = quote(participant_id, safe="")
     ctx = RequestContext(method="GET", ingress_path=ingress_path)
@@ -44,7 +44,6 @@ def test_participant_links_and_actions_round_trip(tmp_path, participant_id, ingr
             "csrf_token": get_state().csrf_token,
             "participant_id": participant_id,
             "label": "Updated participant",
-            "participant_type": "consumer",
             "active": "on",
         },
     )
@@ -79,7 +78,7 @@ def test_meter_links_and_actions_round_trip(tmp_path, meter_id, ingress_path):
     init_db(db_path)
     get_state().register_db(db_path)
     create_participant(db_path, Participant(
-        participant_id="test-participant", label="Test participant", participant_type="consumer",
+        participant_id="test-participant", label="Test participant",
     ))
     create_meter(db_path, Meter(
         meter_id=meter_id, participant_id="test-participant", label="Test meter", role="consumer",

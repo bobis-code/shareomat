@@ -78,6 +78,7 @@ def _row_to_version(row: sqlite3.Row, community_id: str) -> ContractVersion:
         representative_city=row["representative_city"],
         representative_email=row["representative_email"],
         grid_operator=row["grid_operator"],
+        reference_product=row["reference_product"],
         distribution_method=row["distribution_method"],
         price_notice_period_months=row["price_notice_period_months"],
         contract_notice_period_months=row["contract_notice_period_months"],
@@ -164,7 +165,7 @@ _EDITABLE_COLUMNS = (
     "admin_fee_chf_kwh", "rate_mode",
     "representative_name", "representative_address_line", "representative_postal_code",
     "representative_city", "representative_email", "grid_operator", "distribution_method",
-    "price_notice_period_months", "contract_notice_period_months",
+    "price_notice_period_months", "contract_notice_period_months", "reference_product",
 )
 
 
@@ -189,6 +190,7 @@ def _editable_values(version: ContractVersion) -> tuple:
         version.distribution_method,
         version.price_notice_period_months,
         version.contract_notice_period_months,
+        version.reference_product,
     )
 
 

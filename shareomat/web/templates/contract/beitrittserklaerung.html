@@ -17,14 +17,14 @@ Gesellschaftsvertrag «{{ community_name }}», Version {{ version.version }}
   Adresse: {{ participant.address_line or "—" }}<br>
   PLZ/Ort: {{ participant.postal_code }} {{ participant.city }}<br>
   E-Mail: {{ participant.email or "—" }}<br>
-  Messpunktnummer: {{ assignment.participant_id }}
+  Messpunktnummer: {{ roles.meter_ids | join(", ") if roles.meter_ids else "—" }}
 </p>
 
 <p>
-  {{ "☑" if participant.participant_type == "consumer" else "☐" }} LEG Strom beziehen (Endverbraucher)<br>
-  {{ "☑" if participant.participant_type == "producer" else "☐" }} LEG Strom liefern (Produzent)<br>
-  {{ "☑" if participant.participant_type == "producer_consumer" else "☐" }} LEG Strom beziehen und liefern (Prosumer)<br>
-  {{ "☑" if participant.participant_type == "storage" else "☐" }} LEG Speicherbetreiber*
+  {{ "☑" if roles.consumes and not roles.produces else "☐" }} LEG Strom beziehen (Endverbraucher)<br>
+  {{ "☑" if roles.produces and not roles.consumes else "☐" }} LEG Strom liefern (Produzent)<br>
+  {{ "☑" if roles.produces and roles.consumes and not roles.storage else "☐" }} LEG Strom beziehen und liefern (Prosumer)<br>
+  {{ "☑" if roles.storage else "☐" }} LEG Speicherbetreiber*
 </p>
 <p><em>*{{ storage_hint }}</em></p>
 

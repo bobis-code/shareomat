@@ -24,7 +24,7 @@ from shareomat.database.meters import create_meter
 from shareomat.database.participants import create_participant
 from shareomat.database.sqlite import init_db
 from shareomat.database.tariffs import create_tariff, get_tariff_for_date
-from shareomat.leg_const import METER_ROLE_CONSUMER, METER_ROLE_PRODUCER, PARTICIPANT_TYPE_CONSUMER, PARTICIPANT_TYPE_PRODUCER
+from shareomat.leg_const import METER_ROLE_CONSUMER, METER_ROLE_PRODUCER
 from shareomat.models.community import Community
 from shareomat.models.contract import ContractVersion
 from shareomat.models.meter import Meter
@@ -37,8 +37,8 @@ def db_path(tmp_path):
     path = tmp_path / "shareomat.db"
     init_db(path)
     save_community(path, Community(community_id="ZEV-001", name="Test LEG"))
-    create_participant(path, Participant("solar", "Solar PV", PARTICIPANT_TYPE_PRODUCER))
-    create_participant(path, Participant("cons_a", "Consumer A", PARTICIPANT_TYPE_CONSUMER))
+    create_participant(path, Participant("solar", "Solar PV"))
+    create_participant(path, Participant("cons_a", "Consumer A"))
     create_meter(path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
     create_meter(path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
     # The "existing tariff" publish_version() needs for grid_rate_chf_kwh inheritance —

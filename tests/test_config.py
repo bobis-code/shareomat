@@ -80,8 +80,8 @@ def _leg_config(**overrides) -> LegConfig:
     defaults = dict(
         community=Community(community_id="ZEV-001", name="Test"),
         participants=[
-            Participant("P1", "Solar", "producer_consumer"),
-            Participant("P2", "Flat 1", "consumer"),
+            Participant("P1", "Solar"),
+            Participant("P2", "Flat 1"),
         ],
         meters=[
             Meter("M1", "P1", "Solar", "producer_consumer"),
@@ -142,24 +142,17 @@ def test_invalid_meter_role_raises():
         validate_leg_config(config)
 
 
-def test_storage_participant_type_is_valid():
-    """Speicherbetreiber (PARTICIPANT_TYPE_STORAGE) must be accepted, not just producer/consumer/producer_consumer."""
-    config = _leg_config(participants=[
-        Participant("P1", "Solar", "producer_consumer"),
-        Participant("P2", "Flat 1", "consumer"),
-        Participant("P3", "Batterie", "storage"),
-    ])
+def test_storage_meter_role_is_valid():
+    """Speicher (METER_ROLE_STORAGE) must be accepted as a meter role — the role lives on the meter, not the participant."""
+    config = _leg_config(
+        participants=[Participant("P1", "Solar"), Participant("P2", "Flat 1"), Participant("P3", "Batterie")],
+        meters=[
+            Meter("M1", "P1", "Solar", "producer_consumer"),
+            Meter("M2", "P2", "Flat 1", "consumer"),
+            Meter("M3", "P3", "Batterie", "storage"),
+        ],
+    )
     validate_leg_config(config)  # must not raise
-
-
-def test_invalid_participant_type_still_raises():
-    config = _leg_config(participants=[
-        Participant("P1", "Solar", "producer_consumer"),
-        Participant("P2", "Flat 1", "consumer"),
-        Participant("P3", "?", "not_a_real_type"),
-    ])
-    with pytest.raises(ValueError, match="participant"):
-        validate_leg_config(config)
 
 
 def test_negative_tariff_raises():
@@ -173,9 +166,9 @@ def test_negative_tariff_raises():
 
 def test_duplicate_participant_id_raises():
     config = _leg_config(participants=[
-        Participant("P1", "Solar", "producer_consumer"),
-        Participant("P2", "Flat 1", "consumer"),
-        Participant("P1", "Dup", "consumer"),
+        Participant("P1", "Solar"),
+        Participant("P2", "Flat 1"),
+        Participant("P1", "Dup"),
     ])
     with pytest.raises(ValueError, match="[Dd]uplicate"):
         validate_leg_config(config)

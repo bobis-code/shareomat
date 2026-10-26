@@ -430,7 +430,7 @@ def test_master_data_change_requires_contract_notice_period(db_path, monkeypatch
 
 
 def test_assign_contract_to_known_participant(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
     assignment = assign_contract(db_path, "p1", v.id)
     assert assignment.participant_id == "p1"
@@ -444,8 +444,8 @@ def test_assign_contract_to_unknown_participant_raises(db_path):
 
 
 def test_list_assignments_for_version(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
-    create_participant(db_path, Participant("p2", "Haus 2", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    create_participant(db_path, Participant("p2", "Haus 2"))
     v = save_draft_version(db_path, _draft())
     assign_contract(db_path, "p1", v.id)
     assign_contract(db_path, "p2", v.id)
@@ -455,7 +455,7 @@ def test_list_assignments_for_version(db_path):
 
 
 def test_reassigning_same_participant_and_version_updates_not_duplicates(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
     assign_contract(db_path, "p1", v.id, accepted_at=None)
     assign_contract(db_path, "p1", v.id, accepted_at=date(2024, 1, 1))
@@ -466,7 +466,7 @@ def test_reassigning_same_participant_and_version_updates_not_duplicates(db_path
 
 
 def test_mark_accepted_sets_accepted_and_notified_together(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
     assignment = assign_contract(db_path, "p1", v.id)
 
@@ -481,7 +481,7 @@ def test_mark_accepted_unknown_assignment_raises(db_path):
 
 
 def test_mark_notified_leaves_accepted_at_untouched(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
     assignment = assign_contract(db_path, "p1", v.id)
     mark_accepted(db_path, assignment.id, date(2026, 1, 1))
@@ -497,7 +497,7 @@ def test_mark_notified_unknown_assignment_raises(db_path):
 
 
 def test_record_departure_sets_left_at(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
     assignment = assign_contract(db_path, "p1", v.id)
 
@@ -512,7 +512,7 @@ def test_record_departure_unknown_assignment_raises(db_path):
 
 def test_has_any_assignment_reflects_state(db_path):
     assert has_any_assignment(db_path) is False
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     v = save_draft_version(db_path, _draft())
     assign_contract(db_path, "p1", v.id)
     assert has_any_assignment(db_path) is True
@@ -532,8 +532,8 @@ def test_publish_carries_forward_active_participants_resetting_notified_at(db_pa
         local_rate_chf_kwh=Decimal("0.05"), grid_rate_chf_kwh=Decimal("0.28"),
         feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
     ))
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
-    create_participant(db_path, Participant("p2", "Haus 2", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    create_participant(db_path, Participant("p2", "Haus 2"))
 
     monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2025, 1, 1)))
     v1 = save_draft_version(db_path, _draft(valid_from=date(2026, 1, 1)))
@@ -565,7 +565,7 @@ def test_withdraw_deletes_carried_forward_participant_assignments(db_path, monke
         local_rate_chf_kwh=Decimal("0.05"), grid_rate_chf_kwh=Decimal("0.28"),
         feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
     ))
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
 
     monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2025, 1, 1)))
     v1 = save_draft_version(db_path, _draft(valid_from=date(2026, 1, 1)))

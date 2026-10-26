@@ -12,9 +12,12 @@
             "ok" if current_version else "warn") }}
     {% if current_version %}
     {{ tile("Aktuelle Version", "v" + current_version.version|string) }}
-    {{ tile("Produzentenvergütung", "%.2f"|format(current_version.feed_in_rate_chf_kwh * 100) + " Rp./kWh") }}
-    {{ tile("Verwaltungsgebühr", "%.2f"|format(current_version.admin_fee_chf_kwh * 100) + " Rp./kWh") }}
     {{ tile("LEG-Bezugspreis", "%.2f"|format(current_version.local_rate_chf_kwh * 100) + " Rp./kWh") }}
+    {{ tile("Verwaltungsgebühr", "%.2f"|format(current_version.admin_fee_chf_kwh * 100) + " Rp./kWh") }}
+    {{ tile("Produzentenvergütung", "%.2f"|format(current_version.feed_in_rate_chf_kwh * 100) + " Rp./kWh") }}
+    {% if current_version.reference_product %}
+    {{ tile("Referenz (Vergleich)", current_version.reference_product + ": " + "%.2f"|format(current_version.vnb_reference_price_chf_kwh * 100) + " Rp./kWh") }}
+    {% endif %}
     {% endif %}
   </div>
   {% if not current_version %}
@@ -36,7 +39,7 @@
         {% set p = participant_lookup.get(a.participant_id) %}
         <tr>
           <td>{{ p.label if p else a.participant_id }}</td>
-          <td>{{ participant_type_labels.get(p.participant_type, p.participant_type) if p else "—" }}</td>
+          <td>{{ participant_roles[a.participant_id].label if a.participant_id in participant_roles else "kein Messpunkt" }}</td>
           <td class="ts">{{ a.joined_at.strftime('%d.%m.%Y') if a.joined_at else "—" }}</td>
           <td>
             {% if a.accepted_at is none %}
@@ -94,7 +97,7 @@
       <label for="participant_id">Teilnehmer</label>
       <select id="participant_id" name="participant_id" required>
         {% for p in unassigned_participants %}
-        <option value="{{ p.participant_id }}">{{ p.label }} ({{ participant_type_labels.get(p.participant_type, p.participant_type) }})</option>
+        <option value="{{ p.participant_id }}">{{ p.label }} ({{ participant_roles[p.participant_id].label if p.participant_id in participant_roles else "kein Messpunkt" }})</option>
         {% endfor %}
       </select>
     </div>
@@ -119,8 +122,11 @@
   <form class="form-card" method="post" action="{{ url_for('contract', suffix='/settings') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="field">
-      <label for="grid_operator">Netzbetreiber (VNB)</label>
-      <input type="text" id="grid_operator" name="grid_operator" required value="{{ settings.grid_operator }}">
+      <label for="settings_grid_operator">Netzbetreiber (VNB)</label>
+      <input type="text" id="settings_grid_operator" name="grid_operator" required list="grid_operator_list"
+             value="{{ settings.grid_operator }}">
+      <div class="field-hint">Auswahl aus den unter <a href="{{ url_for('tariffs') }}">Tarife</a> erfassten
+        Netzbetreibern, z. B. „EBL“ — nicht der Name der Gemeinschaft.</div>
     </div>
     <div class="field">
       <label for="representative_name">LEG-Vertreter: Name</label>
@@ -161,52 +167,67 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     {% if form_mode == 'update' %}<input type="hidden" name="version_id" value="{{ form_version.id }}">{% endif %}
     <div class="field">
-      <label for="rate_mode">Tarifmodell</label>
-      <select id="rate_mode" name="rate_mode">
-        <option value="flat" {{ 'selected' if form_version.rate_mode == 'flat' }}>Einheitstarif</option>
-        <option value="ht_nt" {{ 'selected' if form_version.rate_mode == 'ht_nt' }}>Hoch-/Niedertarif (HT/NT)</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="vnb_reference_price_chf_kwh">VNB-Referenzenergiepreis (Rp./kWh)</label>
-      <div class="file-row">
-        <input type="text" id="vnb_reference_price_chf_kwh" name="vnb_reference_price_chf_kwh" required
-               style="flex:1" value="{{ '%.2f'|format(form_version.vnb_reference_price_chf_kwh * 100) }}">
-        <button type="button" class="btn-small btn-muted" disabled
-                title="Automatische Ermittlung (z. B. aus ElCom/externen Daten) folgt später">
-          Referenzpreis automatisch ermitteln
-        </button>
-      </div>
-    </div>
-    <div class="field">
-      <label for="price_reduction_chf_kwh">Preisreduktion gegenüber VNB (Rp./kWh)</label>
-      <input type="text" id="price_reduction_chf_kwh" name="price_reduction_chf_kwh" required
-             value="{{ '%.2f'|format(form_version.price_reduction_chf_kwh * 100) }}">
-      <div class="field-hint">
-        Produzentenvergütung = VNB-Referenzenergiepreis − Preisreduktion
-        = {{ "%.2f"|format(form_version.feed_in_rate_chf_kwh * 100) }} Rp./kWh
-      </div>
-    </div>
-    <div class="field">
-      <label for="vnb_reference_price_nt_chf_kwh">VNB-Referenzenergiepreis Niedertarif (Rp./kWh)</label>
-      <input type="text" id="vnb_reference_price_nt_chf_kwh" name="vnb_reference_price_nt_chf_kwh"
-             {{ 'disabled' if form_version.rate_mode != 'ht_nt' }}
-             value="{{ '%.2f'|format(form_version.vnb_reference_price_nt_chf_kwh * 100) if form_version.vnb_reference_price_nt_chf_kwh is not none else '' }}">
-      <div class="field-hint">Nur bei Hoch-/Niedertarif — gesperrt bei Einheitstarif.</div>
-    </div>
-    <div class="field">
-      <label for="price_reduction_nt_chf_kwh">Preisreduktion gegenüber VNB Niedertarif (Rp./kWh)</label>
-      <input type="text" id="price_reduction_nt_chf_kwh" name="price_reduction_nt_chf_kwh"
-             {{ 'disabled' if form_version.rate_mode != 'ht_nt' }}
-             value="{{ '%.2f'|format(form_version.price_reduction_nt_chf_kwh * 100) if form_version.price_reduction_nt_chf_kwh is not none else '' }}">
+      <label for="local_rate_chf_kwh">LEG-Bezugspreis (Rp./kWh)</label>
+      <input type="text" id="local_rate_chf_kwh" name="local_rate_chf_kwh" required inputmode="decimal"
+             value="{{ '%.2f'|format(form_version.local_rate_chf_kwh * 100) }}">
+      <div class="field-hint">Preis, den die Bezüger pro kWh LEG-Strom bezahlen (nur Energie; Netz, Abgaben und
+        Messung verrechnet der Netzbetreiber separat). Einheitstarif 7/24 Stunden.</div>
     </div>
     <div class="field">
       <label for="admin_fee_chf_kwh">Verwaltungsgebühr (Rp./kWh bezogener Solarstrom)</label>
-      <input type="text" id="admin_fee_chf_kwh" name="admin_fee_chf_kwh" required
+      <input type="text" id="admin_fee_chf_kwh" name="admin_fee_chf_kwh" required inputmode="decimal"
              value="{{ '%.2f'|format(form_version.admin_fee_chf_kwh * 100) }}">
+      <div class="field-hint">Darf 0 sein. Ist im LEG-Bezugspreis enthalten und wird nicht zusätzlich verrechnet.</div>
+    </div>
+    <div class="field">
+      <label>Produzentenvergütung (berechnet)</label>
+      <p style="margin:4px 0">
+        <strong id="feed_in_preview">{{ '%.2f'|format(form_version.feed_in_rate_chf_kwh * 100) }}</strong> Rp./kWh
+        <span class="ts">= LEG-Bezugspreis − Verwaltungsgebühr</span>
+      </p>
+      <div class="field-hint">Bei mehreren Produzenten erhält jeder diesen Preis auf seine eigene LEG-Menge; die
+        Aufteilung passiert in der Abrechnung pro Viertelstunde.</div>
+    </div>
+
+    <div class="field">
+      <label for="grid_operator">Netzbetreiber (VNB)</label>
+      <input type="text" id="grid_operator" name="grid_operator" required list="grid_operator_list"
+             value="{{ form_version.grid_operator }}">
+    </div>
+    <div class="field">
+      <label for="reference_tariff_id">Referenzprodukt des Netzbetreibers (nur zum Vergleich)</label>
+      <select id="reference_tariff_id" name="reference_tariff_id">
+        <option value="">— kein Vergleich —</option>
+        {% if keep_current_reference %}
+        <option value="current" selected>{{ form_version.reference_product }} (bisheriger Wert)</option>
+        {% endif %}
+        {% for r in reference_products %}
+        <option value="{{ r.id }}" data-operator="{{ r.operator }}"
+                data-ht="{{ '%.2f'|format(r.ht * 100) if r.ht is not none else '' }}"
+                data-nt="{{ '%.2f'|format(r.nt * 100) if r.nt is not none else '' }}"
+                {{ 'selected' if r.id == selected_reference_id }}>
+          {{ r.label }} ({{ r.valid_from.strftime('%Y') }})
+        </option>
+        {% endfor %}
+      </select>
+      {% if keep_current_reference %}
+      <input type="hidden" name="current_reference_product" value="{{ form_version.reference_product }}">
+      <input type="hidden" name="current_reference_price" value="{{ form_version.vnb_reference_price_chf_kwh }}">
+      <input type="hidden" name="current_reference_price_nt"
+             value="{{ form_version.vnb_reference_price_nt_chf_kwh if form_version.vnb_reference_price_nt_chf_kwh is not none else '' }}">
+      {% endif %}
+      <p style="margin:4px 0" id="reference_preview">
+        {% if form_version.reference_product %}
+        Referenz-Energiepreis: {{ '%.2f'|format(form_version.vnb_reference_price_chf_kwh * 100) }} Rp./kWh
+        {% if form_version.vnb_reference_price_nt_chf_kwh is not none %}
+        (NT {{ '%.2f'|format(form_version.vnb_reference_price_nt_chf_kwh * 100) }})
+        {% endif %}
+        {% endif %}
+      </p>
       <div class="field-hint">
-        LEG-Bezugspreis = Produzentenvergütung + Verwaltungsgebühr
-        = {{ "%.2f"|format(form_version.local_rate_chf_kwh * 100) }} Rp./kWh
+        Produkte werden unter <a href="{{ url_for('tariffs') }}">Tarife</a> erfasst oder importiert. Der Referenzpreis
+        dient nur zum Vergleich und hat keinen Einfluss auf den LEG-Preis oder den Vertragstext.
+        {% if not reference_products %}Noch keine Netzbetreiber-Tarife erfasst.{% endif %}
       </div>
     </div>
     <div class="field">
@@ -230,10 +251,6 @@
     <div class="field">
       <label for="representative_email">E-Mail</label>
       <input type="email" id="representative_email" name="representative_email" value="{{ form_version.representative_email }}">
-    </div>
-    <div class="field">
-      <label for="grid_operator">Netzbetreiber (VNB)</label>
-      <input type="text" id="grid_operator" name="grid_operator" required value="{{ form_version.grid_operator }}">
     </div>
     <div class="field">
       <label for="distribution_method">Verteilschlüssel (Beschreibung)</label>
@@ -269,20 +286,50 @@
       {% if form_mode == 'update' %}<a class="btn btn-muted" href="{{ url_for('contract') }}">Abbrechen</a>{% endif %}
     </div>
   </form>
+  <datalist id="grid_operator_list">
+    {% for o in grid_operators %}<option value="{{ o }}">{% endfor %}
+  </datalist>
   <script>
-    // Niedertarif-Felder sind nur bei Hoch-/Niedertarif editierbar — deaktivierte
-    // Felder werden beim Absenden vom Browser gar nicht mitgeschickt, was hier
-    // gewollt ist (Wechsel auf Einheitstarif löscht die NT-Werte).
+    // Live-Vorschau: Produzentenvergütung = LEG-Bezugspreis − Verwaltungsgebühr,
+    // und das Referenzprodukt-Menü zeigt nur Produkte des gewählten Netzbetreibers.
     (function () {
-      var rateMode = document.getElementById('rate_mode');
-      var ntFields = [
-        document.getElementById('vnb_reference_price_nt_chf_kwh'),
-        document.getElementById('price_reduction_nt_chf_kwh'),
-      ];
-      rateMode.addEventListener('change', function () {
-        var enabled = rateMode.value === 'ht_nt';
-        ntFields.forEach(function (field) { field.disabled = !enabled; });
+      function rappen(id) {
+        var v = parseFloat((document.getElementById(id).value || '').replace(',', '.'));
+        return isNaN(v) ? null : v;
+      }
+      function updateFeedIn() {
+        var local = rappen('local_rate_chf_kwh'), fee = rappen('admin_fee_chf_kwh');
+        var out = document.getElementById('feed_in_preview');
+        if (local === null || fee === null) { out.textContent = '—'; return; }
+        var feedIn = local - fee;
+        out.textContent = feedIn < 0 ? 'Verwaltung grösser als Bezugspreis!' : feedIn.toFixed(2);
+      }
+      var operator = document.getElementById('grid_operator');
+      var reference = document.getElementById('reference_tariff_id');
+      var preview = document.getElementById('reference_preview');
+      function filterReferences() {
+        var op = operator.value.trim();
+        Array.prototype.forEach.call(reference.options, function (opt) {
+          var owner = opt.getAttribute('data-operator');
+          var visible = !owner || !op || owner === op;
+          opt.hidden = !visible;
+          if (!visible && opt.selected) { reference.value = ''; }
+        });
+      }
+      function showReference() {
+        var opt = reference.options[reference.selectedIndex];
+        var ht = opt && opt.getAttribute('data-ht');
+        if (!opt || opt.value === '') { preview.textContent = ''; return; }
+        if (ht === null) { return; }  // "bisheriger Wert": server-rendered text stays
+        var nt = opt.getAttribute('data-nt');
+        preview.textContent = 'Referenz-Energiepreis: ' + ht + ' Rp./kWh' + (nt ? ' (NT ' + nt + ')' : '');
+      }
+      ['local_rate_chf_kwh', 'admin_fee_chf_kwh'].forEach(function (id) {
+        document.getElementById(id).addEventListener('input', updateFeedIn);
       });
+      operator.addEventListener('input', filterReferences);
+      reference.addEventListener('change', showReference);
+      filterReferences();
     })();
   </script>
 </div>

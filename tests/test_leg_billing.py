@@ -61,8 +61,8 @@ def _slot(meter_id, local_kwh, grid_kwh, ts=None):
 def simple_config():
     return _config(
         participants=[
-            Participant("P1", "Solar", "producer_consumer"),
-            Participant("P2", "Flat 1", "consumer"),
+            Participant("P1", "Solar"),
+            Participant("P2", "Flat 1"),
         ],
         meters=[
             Meter("M1", "P1", "Solar Meter", "producer_consumer"),
@@ -229,7 +229,7 @@ def _ht_nt_config(participants, meters):
 @pytest.fixture
 def ht_nt_config():
     return _ht_nt_config(
-        participants=[Participant("P2", "Flat 1", "consumer")],
+        participants=[Participant("P2", "Flat 1")],
         meters=[Meter("M2", "P2", "Flat 1 Meter", "consumer")],
     )
 
@@ -265,7 +265,7 @@ def test_ht_nt_producer_payout_split(ht_nt_config):
         _supply_slot("M1", local_supplied_kwh=1.0, grid_export_kwh=0.0, ts=off_peak_ts),
     ]
     config = _ht_nt_config(
-        participants=[Participant("P1", "Solar", "producer")],
+        participants=[Participant("P1", "Solar")],
         meters=[Meter("M1", "P1", "Solar Meter", "producer")],
     )
     records = compute_billing(results, config, peak_ts, off_peak_ts + timedelta(minutes=15))
@@ -277,7 +277,7 @@ def test_ht_nt_missing_nt_rate_falls_back_to_ht_rate():
     """An ht_nt tariff that only set the HT rate must not silently bill NT energy at 0."""
     off_peak_ts = datetime(2024, 1, 1, 22, 0, tzinfo=timezone.utc)  # 23:00 Europe/Zurich
     config = _ht_nt_config(
-        participants=[Participant("P2", "Flat 1", "consumer")],
+        participants=[Participant("P2", "Flat 1")],
         meters=[Meter("M2", "P2", "Flat 1 Meter", "consumer")],
     )
     config.tariff.local_rate_nt_chf_kwh = None

@@ -28,6 +28,7 @@ from shareomat.database.participants import (
     get_participant,
     list_participants,
     set_participant_active,
+    update_participant,
 )
 from shareomat.database.settings import get_operation_settings, save_operation_settings
 from shareomat.database.sqlite import connect, init_db
@@ -109,13 +110,13 @@ def test_community_save_updates_single_row(db_path):
 
 
 def test_participant_id_unique_per_community(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "producer_consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     with pytest.raises(ValueError):
-        create_participant(db_path, Participant("p1", "Duplicate", "consumer"))
+        create_participant(db_path, Participant("p1", "Duplicate"))
 
 
 def test_participant_toggle_active(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     set_participant_active(db_path, "p1", False)
     assert get_participant(db_path, "p1").active is False
     set_participant_active(db_path, "p1", True)
@@ -123,29 +124,45 @@ def test_participant_toggle_active(db_path):
 
 
 def test_list_participants_excludes_inactive_when_requested(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "consumer", active=True))
-    create_participant(db_path, Participant("p2", "Haus 2", "consumer", active=False))
+    create_participant(db_path, Participant("p1", "Haus 1", active=True))
+    create_participant(db_path, Participant("p2", "Haus 2", active=False))
     assert {p.participant_id for p in list_participants(db_path)} == {"p1", "p2"}
     assert {p.participant_id for p in list_participants(db_path, include_inactive=False)} == {"p1"}
 
 
-def test_storage_participant_type_persists(db_path):
-    create_participant(db_path, Participant("p1", "Batterie", "storage"))
-    assert get_participant(db_path, "p1").participant_type == "storage"
+def test_storage_meter_role_persists(db_path):
+    create_participant(db_path, Participant("p1", "Batterie"))
+    create_meter(db_path, Meter("m1", "p1", "Speicher", "storage"))
+    assert get_meter(db_path, "m1").role == "storage"
+
+
+def test_participant_update_keeps_legacy_columns(db_path):
+    """Old databases still carry participant_type/valid_from/valid_until — updating must not touch them."""
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    with connect(db_path) as conn:
+        with conn:
+            conn.execute(
+                "UPDATE participants SET participant_type='consumer', valid_from='2026-01-01' WHERE participant_id='p1'"
+            )
+    update_participant(db_path, "p1", Participant("p1", "Haus 1 neu", email="a@b.ch"))
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT * FROM participants WHERE participant_id='p1'").fetchone()
+    assert (row["label"], row["participant_type"], row["valid_from"]) == ("Haus 1 neu", "consumer", "2026-01-01")
+    assert get_participant(db_path, "p1").email == "a@b.ch"
 
 
 # ── Meters ──────────────────────────────────────────────────────────────────
 
 
 def test_meter_can_be_assigned_to_participant(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "producer_consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     create_meter(db_path, Meter("m1", "p1", "Hauptzähler", "producer_consumer"))
     meter = get_meter(db_path, "m1")
     assert meter.participant_id == "p1"
 
 
 def test_meter_id_unique_per_community(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "producer_consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     create_meter(db_path, Meter("m1", "p1", "Zähler", "producer_consumer"))
     with pytest.raises(ValueError):
         create_meter(db_path, Meter("m1", "p1", "Duplicate", "consumer"))
@@ -157,15 +174,15 @@ def test_meter_requires_existing_participant(db_path):
 
 
 def test_meter_reassignment_via_update(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "producer_consumer"))
-    create_participant(db_path, Participant("p2", "Haus 2", "consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    create_participant(db_path, Participant("p2", "Haus 2"))
     create_meter(db_path, Meter("m1", "p1", "Zähler", "consumer"))
     update_meter(db_path, "m1", Meter("m1", "p2", "Zähler", "consumer"))
     assert get_meter(db_path, "m1").participant_id == "p2"
 
 
 def test_meter_toggle_active(db_path):
-    create_participant(db_path, Participant("p1", "Haus 1", "producer_consumer"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
     create_meter(db_path, Meter("m1", "p1", "Zähler", "consumer", active=True))
     set_meter_active(db_path, "m1", False)
     assert get_meter(db_path, "m1").active is False
@@ -327,8 +344,8 @@ def test_empty_database_starts_in_setup_mode(db_path, runtime):
 
 def test_complete_database_builds_valid_leg_config(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("p1", "Solar", "producer"))
-    create_participant(db_path, Participant("p2", "Flat", "consumer"))
+    create_participant(db_path, Participant("p1", "Solar"))
+    create_participant(db_path, Participant("p2", "Flat"))
     create_meter(db_path, Meter("m1", "p1", "PV", "producer"))
     create_meter(db_path, Meter("m2", "p2", "Flat meter", "consumer"))
     create_tariff(db_path, Tariff(
@@ -347,8 +364,8 @@ def test_config_builder_excludes_meters_outside_validity_window(db_path, runtime
     from shareomat.config import validate_leg_config
 
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
-    create_participant(db_path, Participant("p1", "Solar", "producer"))
-    create_participant(db_path, Participant("p2", "Flat", "consumer"))
+    create_participant(db_path, Participant("p1", "Solar"))
+    create_participant(db_path, Participant("p2", "Flat"))
     create_meter(db_path, Meter("m1", "p1", "PV", "producer"))
     # This meter's validity window has already ended — must not appear in the built config.
     create_meter(db_path, Meter("m2", "p2", "Flat meter", "consumer", valid_until=date(2000, 1, 1)))

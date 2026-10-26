@@ -43,8 +43,9 @@ from __future__ import annotations
 import calendar
 from dataclasses import replace
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
+from shareomat.core.participant_roles import ParticipantRoles, participant_roles, roles_by_participant
 from shareomat.database.community import get_community
 from shareomat.database.contract_settings import get_contract_settings, save_contract_settings
 from shareomat.database.contract_versions import (
@@ -71,12 +72,15 @@ from shareomat.database.participant_contract import (
     mark_notified,
     record_departure,
 )
-from shareomat.database.participants import get_participant, list_participants, update_participant
+from shareomat.database.meters import list_meters
+from shareomat.database.participants import get_participant, list_participants
+from shareomat.database.supplier_tariffs import get_supplier_tariff, list_supplier_tariffs
 from shareomat.leg_const import CONTRACT_STATUS_DRAFT
 from shareomat.models.contract import ContractSettings, ContractVersion
 from shareomat.models.participant import Participant
-from shareomat.models.tariff import RATE_MODE_FLAT, RATE_MODE_HT_NT
-from shareomat.web.pages.participants import PARTICIPANT_TYPE_STORAGE_HINT, PARTICIPANT_TYPES
+from shareomat.models.external_data import SupplierTariff
+from shareomat.models.tariff import RATE_MODE_FLAT
+from shareomat.web.pages.meters import METER_ROLE_STORAGE_HINT
 from shareomat.web.rendering import FormError, RequestContext, form_date, form_decimal, form_required, render_page
 from shareomat.web.rendering import _env as jinja_env
 from shareomat.web.state import get_state
@@ -96,17 +100,6 @@ def _form_int(ctx: RequestContext, field_name: str, *, default: int) -> int:
     return value
 
 
-def _form_decimal_optional(ctx: RequestContext, field_name: str) -> Decimal | None:
-    """Parse an optional decimal form field (used for the NT rates), '' -> None."""
-    raw = (ctx.form.get(field_name) or "").strip().replace(",", ".")
-    if not raw:
-        return None
-    try:
-        return Decimal(raw)
-    except InvalidOperation:
-        raise FormError(f"Ungültiger Wert bei '{field_name}': '{raw}'")
-
-
 _RAPPEN_PER_CHF = Decimal("100")
 
 
@@ -120,12 +113,6 @@ def _form_rappen(ctx: RequestContext, field_name: str, *, label: str) -> Decimal
     division by 100 is exact (no float rounding), so no precision is lost.
     """
     return form_decimal(ctx, field_name, label=label) / _RAPPEN_PER_CHF
-
-
-def _form_rappen_optional(ctx: RequestContext, field_name: str) -> Decimal | None:
-    """Parse an optional Rappen price field (used for the NT rates) and convert it to CHF/kWh, '' -> None."""
-    rappen = _form_decimal_optional(ctx, field_name)
-    return rappen / _RAPPEN_PER_CHF if rappen is not None else None
 
 
 def _require_month_start(value: date, *, label: str) -> None:
@@ -172,60 +159,68 @@ def _settings_from_form(ctx: RequestContext) -> ContractSettings:
     )
 
 
-def _compute_rates(
-    *, rate_mode: str, vnb_reference_price: Decimal, price_reduction: Decimal,
-    vnb_reference_price_nt: Decimal | None, price_reduction_nt: Decimal | None, admin_fee: Decimal,
-) -> tuple[Decimal, Decimal | None, Decimal, Decimal | None]:
-    """Derive (feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt) from the VNB reference price.
+def _compute_rates(*, local_rate: Decimal, admin_fee: Decimal) -> Decimal:
+    """Derive the Produzentenvergütung from the LEG-Bezugspreis and the Verwaltungsgebühr.
 
-    feed_in_rate (Produzentenvergütung, LEG-Mustervertrag §3.1) = vnb_reference_price
-    - price_reduction; local_rate (LEG-Bezugspreis) = feed_in_rate + admin_fee (§3.3).
-    A reduction larger than the reference price would mean a negative producer
-    rate, which is never valid — rejected rather than silently clamped.
+    The LEG sets its own price (LEG-Mustervertrag §3; LEG_ONE_Mehrparteien
+    §12 Variante 3): consumers pay local_rate per LEG-kWh, the administration
+    keeps admin_fee of it, producers receive the rest. The grid operator's
+    reference price plays no part here. A fee larger than the price would
+    mean a negative producer rate — rejected rather than silently clamped.
     """
-    feed_in_rate = vnb_reference_price - price_reduction
+    if local_rate < 0 or admin_fee < 0:
+        raise FormError("LEG-Bezugspreis und Verwaltungsgebühr dürfen nicht negativ sein.")
+    feed_in_rate = local_rate - admin_fee
     if feed_in_rate < 0:
         raise FormError(
-            f"Die Preisreduktion ({price_reduction} CHF/kWh) übersteigt den "
-            f"VNB-Referenzenergiepreis ({vnb_reference_price} CHF/kWh)."
+            f"Die Verwaltungsgebühr ({admin_fee * _RAPPEN_PER_CHF} Rp./kWh) übersteigt den "
+            f"LEG-Bezugspreis ({local_rate * _RAPPEN_PER_CHF} Rp./kWh)."
         )
-    local_rate = feed_in_rate + admin_fee
+    return feed_in_rate
 
-    feed_in_rate_nt = None
-    local_rate_nt = None
-    if rate_mode == RATE_MODE_HT_NT and vnb_reference_price_nt is not None and price_reduction_nt is not None:
-        feed_in_rate_nt = vnb_reference_price_nt - price_reduction_nt
-        if feed_in_rate_nt < 0:
-            raise FormError(
-                f"Die Preisreduktion Niedertarif ({price_reduction_nt} CHF/kWh) übersteigt den "
-                f"VNB-Referenzenergiepreis Niedertarif ({vnb_reference_price_nt} CHF/kWh)."
-            )
-        local_rate_nt = feed_in_rate_nt + admin_fee
 
-    return feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt
+def _reference_label(tariff: SupplierTariff) -> str:
+    return f"{tariff.source} – {tariff.product}" if tariff.product else tariff.source
+
+
+def _reference_from_form(ctx: RequestContext) -> tuple[str, Decimal, Decimal | None]:
+    """Resolve the picked grid-operator product to an informational snapshot (label, HT/ET, NT).
+
+    "current" keeps the snapshot the draft already had (its product may since
+    have been deleted from the Tarife tab); "" means no reference.
+    """
+    choice = (ctx.form.get("reference_tariff_id") or "").strip()
+    if not choice:
+        return "", Decimal("0"), None
+    if choice == "current":
+        nt_raw = ctx.form.get("current_reference_price_nt") or ""
+        return (
+            (ctx.form.get("current_reference_product") or "").strip(),
+            Decimal(ctx.form.get("current_reference_price") or "0"),
+            Decimal(nt_raw) if nt_raw else None,
+        )
+    try:
+        tariff = get_supplier_tariff(ctx.db_path, int(choice))
+    except ValueError:
+        tariff = None
+    if tariff is None:
+        raise FormError("Das gewählte Referenzprodukt wurde nicht gefunden.")
+    return _reference_label(tariff), tariff.energy_rate_ht_chf_kwh or Decimal("0"), tariff.energy_rate_nt_chf_kwh
 
 
 def _version_from_form(ctx: RequestContext) -> ContractVersion:
     """Build a not-yet-persisted ContractVersion from the create/edit form's fields."""
-    rate_mode = ctx.form.get("rate_mode") or RATE_MODE_FLAT
-    vnb_reference_price = _form_rappen(ctx, "vnb_reference_price_chf_kwh", label="VNB-Referenzenergiepreis")
-    price_reduction = _form_rappen(ctx, "price_reduction_chf_kwh", label="Preisreduktion gegenüber VNB")
-    vnb_reference_price_nt = _form_rappen_optional(ctx, "vnb_reference_price_nt_chf_kwh")
-    price_reduction_nt = _form_rappen_optional(ctx, "price_reduction_nt_chf_kwh")
+    local_rate = _form_rappen(ctx, "local_rate_chf_kwh", label="LEG-Bezugspreis")
     admin_fee = _form_rappen(ctx, "admin_fee_chf_kwh", label="Verwaltungsgebühr")
-
-    feed_in_rate, feed_in_rate_nt, local_rate, local_rate_nt = _compute_rates(
-        rate_mode=rate_mode, vnb_reference_price=vnb_reference_price, price_reduction=price_reduction,
-        vnb_reference_price_nt=vnb_reference_price_nt, price_reduction_nt=price_reduction_nt, admin_fee=admin_fee,
-    )
+    feed_in_rate = _compute_rates(local_rate=local_rate, admin_fee=admin_fee)
+    reference_product, reference_price, reference_price_nt = _reference_from_form(ctx)
 
     return ContractVersion(
         community_id="", version=0, status=CONTRACT_STATUS_DRAFT, contract_text_snapshot="",
-        vnb_reference_price_chf_kwh=vnb_reference_price, price_reduction_chf_kwh=price_reduction,
-        vnb_reference_price_nt_chf_kwh=vnb_reference_price_nt, price_reduction_nt_chf_kwh=price_reduction_nt,
-        local_rate_chf_kwh=local_rate, local_rate_nt_chf_kwh=local_rate_nt,
-        feed_in_rate_chf_kwh=feed_in_rate, feed_in_rate_nt_chf_kwh=feed_in_rate_nt,
-        admin_fee_chf_kwh=admin_fee, rate_mode=rate_mode,
+        vnb_reference_price_chf_kwh=reference_price, vnb_reference_price_nt_chf_kwh=reference_price_nt,
+        reference_product=reference_product,
+        local_rate_chf_kwh=local_rate, feed_in_rate_chf_kwh=feed_in_rate,
+        admin_fee_chf_kwh=admin_fee, rate_mode=RATE_MODE_FLAT,
         representative_name=(ctx.form.get("representative_name") or "").strip(),
         representative_address_line=(ctx.form.get("representative_address_line") or "").strip(),
         representative_postal_code=(ctx.form.get("representative_postal_code") or "").strip(),
@@ -246,15 +241,12 @@ def _blank_form_version(db_path, settings: ContractSettings) -> ContractVersion:
     return ContractVersion(
         community_id="", version=0, status=CONTRACT_STATUS_DRAFT, contract_text_snapshot="",
         vnb_reference_price_chf_kwh=latest.vnb_reference_price_chf_kwh if latest else Decimal("0"),
-        price_reduction_chf_kwh=latest.price_reduction_chf_kwh if latest else Decimal("0"),
         vnb_reference_price_nt_chf_kwh=latest.vnb_reference_price_nt_chf_kwh if latest else None,
-        price_reduction_nt_chf_kwh=latest.price_reduction_nt_chf_kwh if latest else None,
+        reference_product=latest.reference_product if latest else "",
         local_rate_chf_kwh=latest.local_rate_chf_kwh if latest else Decimal("0"),
-        local_rate_nt_chf_kwh=latest.local_rate_nt_chf_kwh if latest else None,
         feed_in_rate_chf_kwh=latest.feed_in_rate_chf_kwh if latest else Decimal("0"),
-        feed_in_rate_nt_chf_kwh=latest.feed_in_rate_nt_chf_kwh if latest else None,
         admin_fee_chf_kwh=latest.admin_fee_chf_kwh if latest else Decimal("0"),
-        rate_mode=latest.rate_mode if latest else RATE_MODE_FLAT,
+        rate_mode=RATE_MODE_FLAT,
         representative_name=settings.representative_name,
         representative_address_line=settings.representative_address_line,
         representative_postal_code=settings.representative_postal_code,
@@ -263,6 +255,35 @@ def _blank_form_version(db_path, settings: ContractSettings) -> ContractVersion:
         grid_operator=settings.grid_operator,
         distribution_method=settings.distribution_method,
     )
+
+
+def _reference_choices(db_path, form_version: ContractVersion, settings: ContractSettings) -> dict:
+    """Template data for picking the grid operator and its reference product (both from the Tarife tab)."""
+    products = list_supplier_tariffs(db_path, include_inactive=False)
+    operators = sorted(
+        {t.source for t in products}
+        | {o for o in (form_version.grid_operator, settings.grid_operator) if o}
+    )
+    selected = next(
+        (t.id for t in products
+         if form_version.reference_product and _reference_label(t) == form_version.reference_product),
+        None,
+    )
+    return {
+        "grid_operators": operators,
+        "reference_products": [
+            {
+                "id": t.id, "operator": t.source, "label": _reference_label(t),
+                "valid_from": t.valid_from, "valid_until": t.valid_until,
+                "ht": t.energy_rate_ht_chf_kwh, "nt": t.energy_rate_nt_chf_kwh,
+            }
+            for t in products
+        ],
+        "selected_reference_id": selected,
+        # The draft's reference snapshot no longer matches any offered product
+        # (deleted/deactivated in the Tarife tab) -> offer to keep it as is.
+        "keep_current_reference": bool(form_version.reference_product) and selected is None,
+    }
 
 
 def render_contract_text(version: ContractVersion, community_name: str) -> str:
@@ -286,13 +307,18 @@ def render_contract_text(version: ContractVersion, community_name: str) -> str:
 
 def render_declaration(
     assignment: ParticipantContractAssignment, participant: Participant, version: ContractVersion,
-    community_name: str,
+    community_name: str, roles: ParticipantRoles,
 ) -> str:
-    """Render one participant's Beitrittserklärung for the contract version they are assigned to."""
+    """Render one participant's Beitrittserklärung for the contract version they are assigned to.
+
+    The ticked role (beziehen/liefern/Prosumer/Speicher) and the listed
+    Messpunktnummern come from the participant's active meters — a
+    participant has no type of its own.
+    """
     template = jinja_env.get_template("contract/beitrittserklaerung.html")
     return template.render(
         community_name=community_name, version=version, participant=participant, assignment=assignment,
-        storage_hint=PARTICIPANT_TYPE_STORAGE_HINT,
+        roles=roles, storage_hint=METER_ROLE_STORAGE_HINT,
     )
 
 
@@ -310,7 +336,10 @@ def handle_get(ctx: RequestContext) -> str:
             return render_page("placeholders/coming_soon.html", ctx, "contract",
                                 title="Beitrittserklärung nicht gefunden", description="")
         community = get_community(ctx.db_path)
-        declaration_text = render_declaration(assignment, participant, version, community.name if community else "")
+        roles = participant_roles(m for m in list_meters(ctx.db_path) if m.participant_id == participant.participant_id)
+        declaration_text = render_declaration(
+            assignment, participant, version, community.name if community else "", roles,
+        )
         return render_page(
             "contract/declaration.html", ctx, "contract",
             declaration_text=declaration_text, participant=participant, version=version,
@@ -361,8 +390,10 @@ def handle_get(ctx: RequestContext) -> str:
         "contract/view.html", ctx, "contract",
         settings=settings, community=community, current_version=current_version,
         versions=versions, form_version=form_version, form_mode=form_mode, today=date.today(),
+        **_reference_choices(ctx.db_path, form_version, settings),
         assignments=assignments, participant_lookup=participant_lookup,
-        unassigned_participants=unassigned_participants, participant_type_labels=dict(PARTICIPANT_TYPES),
+        unassigned_participants=unassigned_participants,
+        participant_roles=roles_by_participant(list_meters(ctx.db_path)),
     )
 
 
@@ -478,7 +509,6 @@ def handle_post(ctx: RequestContext) -> str | None:
             raise FormError(f"Teilnehmer '{participant_id}' wurde nicht gefunden.")
 
         warning = _vnb_notice_warning(ctx.db_path, valid_from)
-        update_participant(ctx.db_path, participant_id, replace(participant, valid_from=valid_from))
         assign_contract(
             ctx.db_path, participant_id, current_version.id, current_version.tariff_id,
             joined_at=valid_from, accepted_at=None,
@@ -522,11 +552,6 @@ def handle_post(ctx: RequestContext) -> str | None:
             assignment = get_assignment(ctx.db_path, assignment_id)
             if assignment is None:
                 raise FormError(f"Zuordnung {assignment_id} wurde nicht gefunden.")
-            participant = get_participant(ctx.db_path, assignment.participant_id)
-            if participant is not None:
-                update_participant(
-                    ctx.db_path, assignment.participant_id, replace(participant, valid_until=end_date),
-                )
             record_departure(ctx.db_path, assignment_id, end_date)
             get_state().set_flash(
                 "Austritt erfasst. Meldung an den Netzbetreiber: üblicherweise mindestens 1 Monat im "

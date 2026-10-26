@@ -3,46 +3,90 @@
 {% block heading %}Tarife{% endblock %}
 {% block content %}
 <div class="card">
-  <div class="actions-row" style="margin-top:0;margin-bottom:16px">
-    <a class="btn" href="{{ url_for('tariffs_new') }}">+ Tarif anlegen</a>
-  </div>
-  {% if current %}
-    <p class="ts">Aktuell gültig ({{ today }}): <strong>{{ current.name }}</strong> —
-      {{ current.local_rate_chf_kwh }} / {{ current.grid_rate_chf_kwh }} / {{ current.feed_in_rate_chf_kwh }} CHF/kWh
-      (lokal / Netz / Einspeisung)</p>
-  {% else %}
-    <div class="error-box" style="margin-top:0">Kein für {{ today }} gültiger Tarif vorhanden — die Abrechnung kann nicht laufen.</div>
-  {% endif %}
-  {% if tariffs %}
+  <h2>Netzbetreiber-Tarife (Referenzprodukte)</h2>
+  <p class="field-hint" style="margin-bottom:10px">
+    Energiepreise der Netzbetreiber, z. B. EBL Blau oder EBL Grau. Sie werden im Vertrag nur als
+    <strong>Vergleich</strong> ausgewählt und bestimmen den LEG-Preis nicht. Nur der Energieanteil — Netznutzung,
+    Abgaben und Messung bezahlen die Teilnehmenden weiterhin direkt an den Netzbetreiber.
+  </p>
+
+  <form class="form-card" method="post" action="{{ url_for('tariffs', suffix='/vnb/import') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="url">Tarifdatei (JSON) des Netzbetreibers importieren</label>
+      <div class="file-row">
+        <input type="url" id="url" name="url" required style="flex:1" value="{{ default_import_url }}">
+        <button type="submit" class="btn-small">Importieren</button>
+      </div>
+      <div class="field-hint">Maschinenlesbare Tarifdatei, die der Netzbetreiber neben den Preisblättern publiziert
+        (EBL: „EBL &lt;Jahr&gt;.json“). Ein erneuter Import ersetzt die Produkte desselben Jahres.</div>
+    </div>
+  </form>
+
+  <details style="margin-top:12px">
+    <summary class="btn-small btn-muted" style="display:inline-block;cursor:pointer">Produkt von Hand erfassen</summary>
+    <form class="form-card" method="post" action="{{ url_for('tariffs', suffix='/vnb/new') }}" style="margin-top:8px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="field">
+        <label for="source">Netzbetreiber</label>
+        <input type="text" id="source" name="source" required placeholder="EBL">
+      </div>
+      <div class="field">
+        <label for="product">Produkt</label>
+        <input type="text" id="product" name="product" required placeholder="EBL Grau 2027">
+      </div>
+      <div class="field">
+        <label for="energy_rate_ht">Energiepreis (Rp./kWh) — Einheits- oder Hochtarif</label>
+        <input type="text" id="energy_rate_ht" name="energy_rate_ht" required inputmode="decimal">
+      </div>
+      <div class="field">
+        <label for="energy_rate_nt">Energiepreis Niedertarif (Rp./kWh)</label>
+        <input type="text" id="energy_rate_nt" name="energy_rate_nt" inputmode="decimal">
+        <div class="field-hint">Leer lassen bei Einheitstarif.</div>
+      </div>
+      <div class="field">
+        <label for="vnb_valid_from">Gültig ab</label>
+        <input type="date" id="vnb_valid_from" name="valid_from" required>
+      </div>
+      <div class="field">
+        <label for="vnb_valid_until">Gültig bis</label>
+        <input type="date" id="vnb_valid_until" name="valid_until">
+      </div>
+      <button type="submit">Produkt speichern</button>
+    </form>
+  </details>
+
+  {% if vnb_tariffs %}
   <div class="table-wrap" style="margin-top:16px">
     <table>
       <thead>
         <tr>
-          <th>Bezeichnung</th><th>Lokal CHF/kWh</th><th>Netz CHF/kWh</th><th>Einspeisung CHF/kWh</th>
-          <th>Gültig ab</th><th>Gültig bis</th><th>Status</th><th></th>
+          <th>Netzbetreiber</th><th>Produkt</th><th>Energie HT/ET Rp./kWh</th><th>Energie NT Rp./kWh</th>
+          <th>Gültig</th><th>Status</th><th></th>
         </tr>
       </thead>
       <tbody>
-        {% for t in tariffs %}
+        {% for t in vnb_tariffs %}
         <tr>
-          <td>{{ t.name }}</td>
-          <td>{{ t.local_rate_chf_kwh }}</td>
-          <td>{{ t.grid_rate_chf_kwh }}</td>
-          <td>{{ t.feed_in_rate_chf_kwh }}</td>
-          <td>{{ t.valid_from }}</td>
-          <td>{{ t.valid_until or '–' }}</td>
+          <td>{{ t.source }}</td>
+          <td>{{ t.product or '—' }}</td>
+          <td>{{ '%.2f'|format(t.energy_rate_ht_chf_kwh * 100) if t.energy_rate_ht_chf_kwh is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(t.energy_rate_nt_chf_kwh * 100) if t.energy_rate_nt_chf_kwh is not none else '—' }}</td>
+          <td class="ts">{{ t.valid_from.strftime('%d.%m.%Y') }} – {{ t.valid_until.strftime('%d.%m.%Y') if t.valid_until else 'offen' }}</td>
           <td>
             <span class="status-pill {{ 'status-pill-active' if t.active else 'status-pill-inactive' }}">
               {{ 'aktiv' if t.active else 'inaktiv' }}
             </span>
           </td>
           <td>
-            <a class="btn btn-muted btn-small" href="{{ url_for('tariffs', suffix='/' + t.id|string + '/edit') }}">Bearbeiten</a>
-            <form method="post" style="display:inline" action="{{ url_for('tariffs', suffix='/' + t.id|string + '/toggle') }}">
+            <form method="post" style="display:inline" action="{{ url_for('tariffs', suffix='/vnb/' + t.id|string + '/toggle') }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="btn-small {{ 'btn-danger' if t.active else 'btn-secondary' }}">
-                {{ 'Deaktivieren' if t.active else 'Aktivieren' }}
-              </button>
+              <button type="submit" class="btn-small btn-secondary">{{ 'Deaktivieren' if t.active else 'Aktivieren' }}</button>
+            </form>
+            <form method="post" style="display:inline" action="{{ url_for('tariffs', suffix='/vnb/' + t.id|string + '/delete') }}"
+                  onsubmit="return confirm('Tarif wirklich löschen?')">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn-small btn-danger">Löschen</button>
             </form>
           </td>
         </tr>
@@ -51,7 +95,54 @@
     </table>
   </div>
   {% else %}
-  <p class="ts">Noch keine Tarife angelegt.</p>
+  <p class="ts" style="margin-top:12px">Noch keine Netzbetreiber-Tarife erfasst.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>LEG-Preise (aus dem Vertrag)</h2>
+  <p class="field-hint" style="margin-bottom:10px">
+    Diese Preise entstehen beim Veröffentlichen einer Vertragsversion und werden für die Abrechnung verwendet.
+    Ändern über <a href="{{ url_for('contract') }}">Vertrag</a> — so wird kein Preis doppelt erfasst.
+  </p>
+  {% if current %}
+    <p class="ts">Aktuell gültig ({{ today }}): <strong>{{ current.name }}</strong> —
+      LEG-Bezugspreis {{ '%.2f'|format(current.local_rate_chf_kwh * 100) }} Rp./kWh,
+      Produzentenvergütung {{ '%.2f'|format(current.feed_in_rate_chf_kwh * 100) }} Rp./kWh</p>
+  {% else %}
+    <div class="error-box" style="margin-top:0">Kein für {{ today }} gültiger LEG-Preis vorhanden — zuerst einen
+      Vertrag veröffentlichen, sonst kann die Abrechnung nicht laufen.</div>
+  {% endif %}
+  {% if tariffs %}
+  <div class="table-wrap" style="margin-top:16px">
+    <table>
+      <thead>
+        <tr>
+          <th>Bezeichnung</th><th>LEG-Bezugspreis Rp./kWh</th><th>Verwaltung Rp./kWh</th>
+          <th>Produzentenvergütung Rp./kWh</th><th>Gültig ab</th><th>Gültig bis</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tariffs %}
+        <tr>
+          <td>{{ t.name }}</td>
+          <td>{{ '%.2f'|format(t.local_rate_chf_kwh * 100) }}</td>
+          <td>{{ '%.2f'|format(t.admin_fee_chf_kwh * 100) }}</td>
+          <td>{{ '%.2f'|format(t.feed_in_rate_chf_kwh * 100) }}</td>
+          <td>{{ t.valid_from }}</td>
+          <td>{{ t.valid_until or '–' }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-active' if t.active else 'status-pill-inactive' }}">
+              {{ 'aktiv' if t.active else 'inaktiv' }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine LEG-Preise — sie entstehen beim Veröffentlichen eines Vertrags.</p>
   {% endif %}
 </div>
 {% endblock %}

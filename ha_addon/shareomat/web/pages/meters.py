@@ -25,6 +25,7 @@ from shareomat.leg_const import (
     METER_ROLE_GRID,
     METER_ROLE_PRODUCER,
     METER_ROLE_PRODUCER_CONSUMER,
+    METER_ROLE_STORAGE,
 )
 from shareomat.models.meter import Meter
 from shareomat.web.rendering import (
@@ -41,8 +42,19 @@ METER_ROLES = [
     (METER_ROLE_PRODUCER, "Erzeuger"),
     (METER_ROLE_CONSUMER, "Verbraucher"),
     (METER_ROLE_PRODUCER_CONSUMER, "Erzeuger & Verbraucher"),
+    (METER_ROLE_STORAGE, "Speicher"),
     (METER_ROLE_GRID, "Netz"),
 ]
+
+# Shown as a form hint next to the role dropdown — legal obligation for
+# storage operators specifically, from the LEG-Mustervertrag footnote
+# (Art. 19h Abs. 4 StromVV).
+METER_ROLE_STORAGE_HINT = (
+    "Speicherbetreiber sind dafür verantwortlich, dass sie pro "
+    "Abrechnungsperiode in der Summe nicht mehr Elektrizität innerhalb der "
+    "Gemeinschaft absetzen, als sie von der Gemeinschaft beziehen "
+    "(Art. 19h Abs. 4 StromVV)."
+)
 
 
 def _meter_from_form(ctx: RequestContext, *, meter_id: str) -> Meter:
@@ -61,7 +73,8 @@ def handle_get(ctx: RequestContext) -> str:
     """Route to the meter list, new-meter form, or edit form."""
     if not ctx.segments:
         meters = list_meters(ctx.db_path)
-        return render_page("meters/list.html", ctx, "meters", meters=meters)
+        return render_page("meters/list.html", ctx, "meters", meters=meters,
+                           meter_role_labels=dict(METER_ROLES))
 
     participants = list_participants(ctx.db_path, include_inactive=False)
 
@@ -75,7 +88,7 @@ def handle_get(ctx: RequestContext) -> str:
             )
         return render_page(
             "meters/form.html", ctx, "meters",
-            meter=None, participants=participants, meter_roles=METER_ROLES,
+            meter=None, participants=participants, meter_roles=METER_ROLES, storage_hint=METER_ROLE_STORAGE_HINT,
         )
 
     if len(ctx.segments) == 2 and ctx.segments[1] == "edit":
@@ -85,7 +98,7 @@ def handle_get(ctx: RequestContext) -> str:
                                 title="Messpunkt nicht gefunden", description="")
         return render_page(
             "meters/form.html", ctx, "meters",
-            meter=meter, participants=participants, meter_roles=METER_ROLES,
+            meter=meter, participants=participants, meter_roles=METER_ROLES, storage_hint=METER_ROLE_STORAGE_HINT,
         )
 
     return render_page("placeholders/coming_soon.html", ctx, "meters",

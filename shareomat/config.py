@@ -38,10 +38,7 @@ from shareomat.leg_const import (
     METER_ROLE_GRID,
     METER_ROLE_PRODUCER,
     METER_ROLE_PRODUCER_CONSUMER,
-    PARTICIPANT_TYPE_CONSUMER,
-    PARTICIPANT_TYPE_PRODUCER,
-    PARTICIPANT_TYPE_PRODUCER_CONSUMER,
-    PARTICIPANT_TYPE_STORAGE,
+    METER_ROLE_STORAGE,
     SLOT_MINUTES,
     UNKNOWN_METER_POLICY_FAIL,
     UNKNOWN_METER_POLICY_SKIP,
@@ -57,14 +54,8 @@ _VALID_METER_ROLES = {
     METER_ROLE_PRODUCER,
     METER_ROLE_CONSUMER,
     METER_ROLE_PRODUCER_CONSUMER,
+    METER_ROLE_STORAGE,
     METER_ROLE_GRID,
-}
-
-_VALID_PARTICIPANT_TYPES = {
-    PARTICIPANT_TYPE_PRODUCER,
-    PARTICIPANT_TYPE_CONSUMER,
-    PARTICIPANT_TYPE_PRODUCER_CONSUMER,
-    PARTICIPANT_TYPE_STORAGE,
 }
 
 _VALID_METER_POLICIES = {UNKNOWN_METER_POLICY_FAIL, UNKNOWN_METER_POLICY_SKIP}
@@ -383,12 +374,6 @@ def validate_leg_config(config: LegConfig) -> None:
             )
         if m.role not in _VALID_METER_ROLES:
             errors.append(f"invalid role '{m.role}' for meter '{m.meter_id}'")
-
-    for p in config.participants:
-        if p.participant_type not in _VALID_PARTICIPANT_TYPES:
-            errors.append(
-                f"invalid participant_type '{p.participant_type}' for participant '{p.participant_id}'"
-            )
 
     active_roles = {m.role for m in config.meters if m.active}
     producer_roles = {METER_ROLE_PRODUCER, METER_ROLE_PRODUCER_CONSUMER}

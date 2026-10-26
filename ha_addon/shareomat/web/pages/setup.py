@@ -22,10 +22,7 @@ from shareomat.database.config_builder import get_setup_status
 from shareomat.database.meters import create_meter, list_meters
 from shareomat.database.participants import create_participant, list_participants
 from shareomat.database.tariffs import create_tariff
-from shareomat.leg_const import (
-    METER_ROLE_PRODUCER_CONSUMER,
-    PARTICIPANT_TYPE_PRODUCER_CONSUMER,
-)
+from shareomat.leg_const import METER_ROLE_PRODUCER_CONSUMER
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
@@ -60,10 +57,7 @@ def handle_post(ctx: RequestContext) -> str | None:
         participant_id = form_required(ctx, "participant_id", label="Teilnehmer-ID")
         label = form_required(ctx, "label", label="Bezeichnung")
         try:
-            create_participant(ctx.db_path, Participant(
-                participant_id=participant_id, label=label,
-                participant_type=PARTICIPANT_TYPE_PRODUCER_CONSUMER,
-            ))
+            create_participant(ctx.db_path, Participant(participant_id=participant_id, label=label))
         except ValueError as exc:
             raise FormError(str(exc))
         get_state().set_flash("Teilnehmer angelegt.", ok=True)

@@ -28,8 +28,9 @@ from decimal import Decimal
 class SupplierTariff:
     """Grid operator (e.g. EBL) tariff components, valid for a date range."""
 
-    source: str  # e.g. "EBL"
+    source: str  # grid operator, e.g. "EBL"
     valid_from: date
+    product: str = ""  # product within the operator's tariff sheet, e.g. "EBL Grau 2027"
     energy_rate_ht_chf_kwh: Decimal | None = None
     energy_rate_nt_chf_kwh: Decimal | None = None
     grid_rate_ht_chf_kwh: Decimal | None = None

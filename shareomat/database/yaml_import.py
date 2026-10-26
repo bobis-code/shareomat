@@ -80,7 +80,6 @@ def import_legacy_yaml_if_empty(db_path: Path, yaml_path: Path) -> bool:
         create_participant(db_path, Participant(
             participant_id=str(p["participant_id"]),
             label=str(p["label"]),
-            participant_type=str(p["participant_type"]),
             active=bool(p.get("active", True)),
         ))
 

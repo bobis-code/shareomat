@@ -21,7 +21,7 @@ import sqlite3
 from pathlib import Path
 
 from shareomat.database.community import ensure_community_row_id
-from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
+from shareomat.database.sqlite import connect, now_iso
 from shareomat.models.participant import Participant
 
 
@@ -29,13 +29,10 @@ def _row_to_participant(row: sqlite3.Row) -> Participant:
     return Participant(
         participant_id=row["participant_id"],
         label=row["label"],
-        participant_type=row["participant_type"],
         email=row["email"],
         address_line=row["address_line"],
         postal_code=row["postal_code"],
         city=row["city"],
-        valid_from=str_to_date(row["valid_from"]),
-        valid_until=str_to_date(row["valid_until"]),
         active=bool(row["active"]),
     )
 
@@ -72,19 +69,21 @@ def create_participant(db_path: Path, participant: Participant) -> Participant:
             ).fetchone()
             if existing:
                 raise ValueError(f"Teilnehmer '{participant.participant_id}' existiert bereits.")
+            # participant_type/valid_from/valid_until are legacy columns (role and
+            # validity now live on the meter, membership on the contract
+            # assignment) — kept in the schema so old databases still open, but
+            # no longer written beyond the NOT NULL placeholder.
             conn.execute(
                 """
                 INSERT INTO participants
                     (community_id, participant_id, label, participant_type, email,
-                     address_line, postal_code, city, valid_from, valid_until, active,
-                     created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     address_line, postal_code, city, active, created_at, updated_at)
+                VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     community_row_id, participant.participant_id, participant.label,
-                    participant.participant_type, participant.email, participant.address_line,
+                    participant.email, participant.address_line,
                     participant.postal_code, participant.city,
-                    date_to_str(participant.valid_from), date_to_str(participant.valid_until),
                     int(participant.active), now, now,
                 ),
             )
@@ -106,15 +105,14 @@ def update_participant(db_path: Path, participant_id: str, participant: Particip
             conn.execute(
                 """
                 UPDATE participants
-                SET participant_id=?, label=?, participant_type=?, email=?, address_line=?,
-                    postal_code=?, city=?, valid_from=?, valid_until=?, active=?, updated_at=?
+                SET participant_id=?, label=?, email=?, address_line=?,
+                    postal_code=?, city=?, active=?, updated_at=?
                 WHERE id=?
                 """,
                 (
-                    participant.participant_id, participant.label, participant.participant_type,
+                    participant.participant_id, participant.label,
                     participant.email, participant.address_line, participant.postal_code,
-                    participant.city, date_to_str(participant.valid_from),
-                    date_to_str(participant.valid_until), int(participant.active), now,
+                    participant.city, int(participant.active), now,
                     existing["id"],
                 ),
             )
