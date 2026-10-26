@@ -15,7 +15,7 @@ Notes:
     throughout the matching pipeline. Rounding to display precision
     is the responsibility of leg_report exclusively.
 
-    Allocation rule (Art. 19g Abs. 3 StromVV, VSE BD LEG-CH 2025 Kap. 6.1,
+    Allocation rule (Art. 19g StromVV, VSE BD LEG-CH 2025 Kap. 2 (11) and 6.1,
     identical to what the grid operator delivers as E66 LEGE/LEGR):
         P = sum of all exports, C = sum of all imports in the slot
         L = min(P, C)                       — energy shared inside the LEG

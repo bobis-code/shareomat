@@ -521,3 +521,68 @@ def test_declaration_ticks_role_and_lists_meters_from_participant_meters(db_path
 def test_declaration_view_unknown_assignment_shows_placeholder(db_path) -> None:
     html = contract.handle_get(_ctx(segments=["participants", "99999", "declaration"]))
     assert "nicht gefunden" in html
+
+
+# ── Contract text vs. Mustervertrag (review 26.10.2026) ─────────────────────
+
+
+def _published_text(db_path, monkeypatch, **form):
+    save_community(db_path, Community(community_id="LEG-ONE", name="LEG-ONE"))
+    today = _fixed_today(date(2026, 10, 26))
+    monkeypatch.setattr(contract_versions_module, "date", today)
+    monkeypatch.setattr(contract, "date", today)
+    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, valid_from="2026-11-01", **form)))
+    draft = list_contract_versions(db_path)[0]
+    contract.handle_post(_post(["publish"], {"version_id": str(draft.id)}))
+    return list_contract_versions(db_path)[0]
+
+
+def test_contract_text_follows_the_mustervertrag(db_path, monkeypatch) -> None:
+    version = _published_text(db_path, monkeypatch, admin_fee_chf_kwh="0")
+    text = " ".join(version.contract_text_snapshot.split())
+
+    # Both unit prices carry the Mustervertrag's VAT clause — as a gross price, not an obligation to charge VAT.
+    assert text.count("einschliesslich einer allfällig geschuldeten Mehrwertsteuer (Einheitstarif 7/24 Stunden)") == 2
+    # Original wording where nothing needed to change.
+    assert "anteilig auf alle teilnehmenden LEG-Bezüger im Verhältnis zu deren jeweiligem Verbrauch aufgeteilt" in text
+    assert "mit Einhaltung einer viermonatigen Kündigungsfrist" in text
+    assert "EBL, nachfolgend «VNB»" in text
+    # No unresolved template variants or placeholders, no disputed paragraph citation.
+    for leftover in ("ODER", " xx ", "□", "Kommentar:", "Art. 19g Abs. 3", "—"):
+        assert leftover not in text, leftover
+    # §3.3 without a fee, §3.4 without the wrong cross-reference and with the reserved legal claims.
+    assert "keine Gebühr erhoben" in text
+    assert "(Zahlungsfrist gemäss Ziffer 5)" not in text
+    assert "Gesetzliche Ansprüche bleiben vorbehalten." in text
+    assert "dürfen nicht zusätzlich anderweitig veräussert werden" in text
+
+
+def test_declaration_package_and_snapshot_refer_to_the_same_published_text(db_path, monkeypatch) -> None:
+    import hashlib
+    version = _published_text(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1", address_line="Weg 1", postal_code="4443",
+                                            city="Wittinsburg", email="h1@example.ch"))
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2026-11-01"}))
+    [assignment] = list_assignments_for_version(db_path, version.id)
+
+    snapshot = contract.handle_get(_ctx(segments=["versions", str(version.id), "snapshot"]))
+    assert hashlib.sha256(snapshot.encode("utf-8")).hexdigest() == version.text_sha256
+
+    package = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "package", "print"]))
+    assert version.text_sha256 in package
+    assert version.contract_text_snapshot in package       # the full contract really is enclosed
+    assert "Nicht unterschriftsreif" not in package         # complete data -> ready to sign
+    declaration = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration", "print"]))
+    assert version.text_sha256 in declaration
+
+
+def test_declaration_flags_missing_participant_data(db_path, monkeypatch) -> None:
+    version = _published_text(db_path, monkeypatch)
+    create_participant(db_path, Participant("p1", "Haus 1"))  # no address/e-mail
+    create_meter(db_path, Meter("CH-BEZUG-P1", "p1", "Bezug", "consumer"))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2026-11-01"}))
+    [assignment] = list_assignments_for_version(db_path, version.id)
+    printout = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "package", "print"]))
+    assert "Nicht unterschriftsreif" in printout
+    assert "Adresse, PLZ, Ort, E-Mail" in printout

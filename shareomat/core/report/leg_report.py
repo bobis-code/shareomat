@@ -345,7 +345,7 @@ def write_ledger_csv(
                 targets = r.flows[exp_id]
                 exp_kwh = slot_exports.get(exp_id, 0.0)
                 grid_export = _round_kwh(r.meter_grid_export_kwh.get(exp_id, 0.0))
-                # Same key for every importer (Art. 19g Abs. 3 StromVV): the
+                # Same key for every importer (Art. 19g StromVV, VSE BD LEG-CH 2025): the
                 # exporter's sold share is split by import share over ALL
                 # importers of the slot, its own import included.
                 eligible = r.total_import_kwh

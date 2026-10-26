@@ -17,11 +17,24 @@
 </head>
 <body>
   <div class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></div>
+  {% if issues %}
+  <div style="border:2px solid #b91c1c;color:#b91c1c;padding:.6rem;margin-bottom:1rem">
+    <strong>Nicht unterschriftsreif:</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in issues %}<li>{{ i }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
   {{ body | safe }}
+  {% if appendix %}
+  <div style="page-break-before:always;break-before:page"></div>
+  <p class="ts">Beilage zur Beitrittserklärung: vollständiger Gesellschaftsvertrag (Version {{ version.version }}).</p>
+  {{ appendix | safe }}
+  {% endif %}
   <div class="meta">
     Gesellschaftsvertrag Version {{ version.version }}
     {% if version.valid_from %} · gültig ab {{ version.valid_from.strftime('%d.%m.%Y') }}{% endif %}
     {% if sha256 %}<br>SHA-256 Vertragstext: <span style="font-family:monospace;word-break:break-all">{{ sha256 }}</span>
+    <br>Die Prüfsumme bezieht sich auf den in Shareomat gespeicherten Vertragstext (HTML, UTF-8), abrufbar als
+    „Vertragstext (Original)“ auf der Vertragsseite.
     {% else %}<br>Entwurf — noch nicht veröffentlicht, keine Prüfsumme.{% endif %}
   </div>
 </body>

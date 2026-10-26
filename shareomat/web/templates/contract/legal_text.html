@@ -8,10 +8,15 @@
    shareomat/web/pages/contract.py for how this template is invoked.
    Deliberate, minimal deviations from the Mustervertrag (review 26.10.2026):
    §1 allocation among several producers + Herkunftsnachweise (what the
-   settlement actually does), §3.3 wording when no fee is charged, new §3.4
-   billing rhythm/payment term (§5 refers to "der definierten Zahlungsfrist",
-   which the Mustervertrag never defines), §5 notice period as its own
-   parameter. Everything else is the Mustervertrag's wording on purpose.
+   settlement actually does), §3.1/3.2 "inklusive Mehrwertsteuer" made
+   conditional ("einschliesslich einer allfällig geschuldeten
+   Mehrwertsteuer" — a gross price, not an obligation to charge VAT; a
+   non-registered seller must not show VAT, Art. 27 MWSTG), §3.3 wording
+   when no fee is charged, new §3.4 billing rhythm/payment term (§5 refers
+   to "der definierten Zahlungsfrist", which the Mustervertrag never
+   defines), §5 notice period as its own parameter (rendered as the
+   Mustervertrag's "viermonatigen"). Everything else is the Mustervertrag's
+   wording on purpose.
    Any change here changes template_sha256 and therefore needs the contract
    notice period for the next version. #}
 <h2>Gesellschaftsvertrag «{{ community_name }}»</h2>
@@ -41,18 +46,23 @@ LEG-Produzenten wie auch in beiden Rollen agieren. Speicherbetreiber sind
 sowohl LEG-Bezüger wie auch LEG-Produzenten. Mit Zustimmung zum
 vorliegenden Gesellschaftsvertrag hat der Gesellschafter anzugeben, welche
 Rolle(n) er wahrnimmt.</p>
+{% if distribution_method == "proportional zum Verbrauch" %}
+<p>Der LEG-Strom wird anteilig auf alle teilnehmenden LEG-Bezüger im
+Verhältnis zu deren jeweiligem Verbrauch aufgeteilt. Innerhalb einer
+Viertelstunde haben alle{% else %}
 <p>Der LEG-Strom wird {{ distribution_method }} auf alle teilnehmenden
-LEG-Bezüger aufgeteilt. Innerhalb einer Viertelstunde haben alle
+LEG-Bezüger aufgeteilt. Innerhalb einer Viertelstunde haben alle{% endif %}
 teilnehmenden LEG-Bezüger den gleichen prozentualen Anteil an LEG-Strom im
 Verhältnis zum Verbrauch zugute.</p>
 <p>Speisen in einer Viertelstunde mehrere LEG-Produzenten ein, wird die
 innerhalb der LEG abgesetzte Elektrizität den LEG-Produzenten im Verhältnis
 ihrer Einspeisung in derselben Viertelstunde zugeordnet. Massgebend sind die
-vom VNB ermittelten Werte (Art. 19g Abs. 3 StromVV).</p>
+vom VNB ermittelten Werte.</p>
 <p>Die innerhalb der LEG abgesetzte Elektrizität wird einschliesslich der
-zugehörigen Herkunftsnachweise abgesetzt; diese werden nicht zusätzlich
-gehandelt. Herkunftsnachweise stehen den LEG-Produzenten nur für ihren
-Überschuss ausserhalb der LEG zu.</p>
+zugehörigen Herkunftsnachweise abgesetzt. Die Herkunftsnachweise für die
+innerhalb der LEG abgesetzte Elektrizität dürfen nicht zusätzlich anderweitig
+veräussert werden. Herkunftsnachweise für ausserhalb der LEG abgesetzte
+Überschussmengen verbleiben bei den jeweiligen Produzenten.</p>
 <p>Die Gesellschaft «LEG» verfügt über kein Gesellschaftsvermögen. Die
 Gesellschaft «LEG» erwirtschaftet weder Gewinn noch Verlust. Ebenso haben
 die Gesellschafter keine Beiträge an die Gesellschaft «LEG» zu leisten.</p>
@@ -82,13 +92,15 @@ Anteil «Energie» (exkl. Mess- und Netztarife sowie Abgaben).</p>
 beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh
 (Hochtarif) beziehungsweise
 {{ "%.2f"|format((tariff.feed_in_rate_nt_chf_kwh if tariff.feed_in_rate_nt_chf_kwh is not none else tariff.feed_in_rate_chf_kwh) * 100) }}
-Rp./kWh (Niedertarif). Massgebend für die
+Rp./kWh (Niedertarif), jeweils einschliesslich einer allfällig geschuldeten
+Mehrwertsteuer. Massgebend für die
 Zuordnung ist der Zeitpunkt der Lieferung gemäss der in den
 Grundeinstellungen der Gemeinschaft festgelegten Hoch-/Niedertarif-Zeiten.</p>
 {% else %}
 <p>Der Preis für die Lieferung von LEG-Strom an die Gesellschaft «LEG»
-beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh
-(Einheitstarif 7/24 Stunden).</p>
+beträgt {{ "%.2f"|format(tariff.feed_in_rate_chf_kwh * 100) }} Rp./kWh,
+einschliesslich einer allfällig geschuldeten Mehrwertsteuer (Einheitstarif
+7/24 Stunden).</p>
 {% endif %}
 <p>Die Preise können vom LEG-Vertreter mit einer Frist von
 {{ price_notice_period_months }} Monaten jeweils per Monatsende
@@ -109,13 +121,14 @@ hier nicht vereinbart.</p>
 {{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh (Hochtarif)
 beziehungsweise
 {{ "%.2f"|format((tariff.local_rate_nt_chf_kwh if tariff.local_rate_nt_chf_kwh is not none else tariff.local_rate_chf_kwh) * 100) }}
-Rp./kWh (Niedertarif). Massgebend für die
+Rp./kWh (Niedertarif), jeweils einschliesslich einer allfällig geschuldeten
+Mehrwertsteuer. Massgebend für die
 Zuordnung ist der Zeitpunkt des Bezugs gemäss der in den Grundeinstellungen
 der Gemeinschaft festgelegten Hoch-/Niedertarif-Zeiten.</p>
 {% else %}
 <p>Der Preis für den Bezug von LEG-Strom von der Gesellschaft «LEG» beträgt
-{{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh
-(Einheitstarif 7/24 Stunden).</p>
+{{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh, einschliesslich
+einer allfällig geschuldeten Mehrwertsteuer (Einheitstarif 7/24 Stunden).</p>
 {% endif %}
 <p>Die Preise können vom LEG-Vertreter mit einer Frist von
 {{ price_notice_period_months }} Monaten jeweils per Monatsende
@@ -147,11 +160,13 @@ Preisänderung gemäss Ziffer 3.1 und 3.2.</p>
 sobald die Messdaten des VNB für die Abrechnungsperiode vorliegen. Die
 LEG-Bezüger erhalten eine Rechnung, die LEG-Produzenten eine Gutschrift.</p>
 <p>Rechnungen sind innerhalb von {{ payment_term_days }} Tagen ab
-Rechnungsdatum zu bezahlen (Zahlungsfrist gemäss Ziffer 5). Gutschriften
-werden innerhalb derselben Frist ab Abrechnungsdatum ausbezahlt.</p>
+Rechnungsdatum zu bezahlen. Gutschriften werden innerhalb derselben Frist ab
+Abrechnungsdatum ausbezahlt.</p>
 <p>Korrigiert der VNB Messdaten nachträglich, wird die Abrechnung mit einer
 Korrekturabrechnung berichtigt. Beanstandungen einer Abrechnung sind
-innerhalb der Zahlungsfrist schriftlich an den LEG-Vertreter zu richten.</p>
+möglichst innerhalb von {{ payment_term_days }} Tagen ab Rechnungsdatum
+schriftlich an den LEG-Vertreter zu richten. Gesetzliche Ansprüche bleiben
+vorbehalten.</p>
 
 <h3>4. Vertretung</h3>
 <p>Die Gesellschafter sind einzeln nicht ermächtigt, Verpflichtungen oder
@@ -187,9 +202,9 @@ Willensäusserung mindestens eines LEG-Produzenten und eines LEG-Bezügers
 unter Berücksichtigung der anwendbaren gesetzlichen Bestimmungen zur
 Bildung der Gesellschaft «LEG» in Kraft und wird auf unbestimmte Zeit
 abgeschlossen.</p>
-<p>Jeder Gesellschafter kann mit einer Kündigungsfrist von
-{{ termination_notice_period_months }} Monaten den vorliegenden Gesellschaftsvertrag
-jeweils auf ein Monatsende schriftlich kündigen.</p>
+<p>Jeder Gesellschafter kann mit Einhaltung einer {{ termination_notice_word }}
+Kündigungsfrist den vorliegenden Gesellschaftsvertrag jeweils auf ein
+Monatsende schriftlich kündigen.</p>
 <p>Die Teilnahme eines LEG-Teilnehmers an der Gesellschaft «LEG» endet
 automatisch, sobald die anwendbaren gesetzlichen Voraussetzungen für den
 Bezug von LEG-Strom nicht mehr erfüllt sind (z. B. durch Wegzug oder
