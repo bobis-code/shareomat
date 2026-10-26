@@ -333,6 +333,32 @@ def test_participants_add_requires_active_contract(db_path) -> None:
         contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2027-01-01"}))
 
 
+def test_founding_contract_for_next_month_allows_joining_and_declaration_today(db_path, monkeypatch) -> None:
+    """26.10.2026: publish the Gründungsvertrag for 01.11.2026, assign members and print declarations right away."""
+    save_community(db_path, Community(community_id="LEG-ONE", name="LEG-ONE"))
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    today = _fixed_today(date(2026, 10, 26))
+    monkeypatch.setattr(contract_versions_module, "date", today)
+    monkeypatch.setattr(contract, "date", today)
+
+    contract.handle_post(_post(["draft", "create"], dict(_PRICE_FORM, valid_from="2026-11-01")))
+    draft = list_contract_versions(db_path)[0]
+    contract.handle_post(_post(["publish"], {"version_id": str(draft.id)}))  # no base tariff, no notice period
+    assert list_contract_versions(db_path)[0].status == "published"
+
+    html = " ".join(contract.handle_get(_ctx()).split())
+    assert "tritt am 01.11.2026 in Kraft" in html
+    assert "Zuerst einen Vertrag veröffentlichen" not in html
+
+    with pytest.raises(FormError):  # joining before the contract starts makes no sense
+        contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2026-10-01"}))
+    contract.handle_post(_post(["participants", "add"], {"participant_id": "p1", "valid_from": "2026-11-01"}))
+    [assignment] = list_assignments_for_version(db_path, draft.id)
+    html = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration"]))
+    assert "Haus 1" in html
+    assert "01.11.2026" in html
+
+
 def test_participants_add_rejects_non_month_start(db_path, monkeypatch) -> None:
     _publish_v1(db_path, monkeypatch)
     create_participant(db_path, Participant("p1", "Haus 1"))

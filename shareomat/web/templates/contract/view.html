@@ -20,16 +20,24 @@
     {% endif %}
     {% endif %}
   </div>
-  {% if not current_version %}
+  {% if not current_version and participant_version %}
+  <p class="ts" style="margin-top:12px">Vertrag v{{ participant_version.version }} ist veröffentlicht und tritt am
+    {{ participant_version.valid_from.strftime('%d.%m.%Y') }} in Kraft.</p>
+  {% elif not current_version %}
   <p class="ts" style="margin-top:12px">Noch kein Vertrag in Kraft — unten einen Entwurf erstellen und veröffentlichen.</p>
   {% endif %}
 </div>
 
 <div class="card">
   <h2>Teilnehmer</h2>
-  {% if not current_version %}
+  {% if not participant_version %}
   <p class="ts">Zuerst einen Vertrag veröffentlichen, um Teilnehmer zuzuordnen.</p>
   {% else %}
+  {% if not current_version %}
+  <p class="field-hint" style="margin-bottom:10px">Gründung: Der Vertrag v{{ participant_version.version }} tritt am
+    {{ participant_version.valid_from.strftime('%d.%m.%Y') }} in Kraft. Teilnehmer können bereits jetzt zugeordnet
+    und ihre Beitrittserklärungen erstellt werden.</p>
+  {% endif %}
   {% if assignments %}
   <div class="table-wrap">
     <table>

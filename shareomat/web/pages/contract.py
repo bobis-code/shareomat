@@ -55,6 +55,7 @@ from shareomat.database.contract_versions import (
     get_contract_version,
     get_contract_version_for_date,
     get_latest_relevant_version,
+    get_participant_version,
     list_contract_versions,
     publish_version,
     save_draft_version,
@@ -348,14 +349,15 @@ def handle_get(ctx: RequestContext) -> str:
     settings = get_contract_settings(ctx.db_path)
     community = get_community(ctx.db_path)
     current_version = get_contract_version_for_date(ctx.db_path)
+    participant_version = get_participant_version(ctx.db_path)
     versions = list_contract_versions(ctx.db_path)
 
     all_participants = list_participants(ctx.db_path)
     participant_lookup = {p.participant_id: p for p in all_participants}
     assignments: list[ParticipantContractAssignment] = []
     unassigned_participants = all_participants
-    if current_version is not None:
-        assignments = list_assignments_for_version(ctx.db_path, current_version.id)
+    if participant_version is not None:
+        assignments = list_assignments_for_version(ctx.db_path, participant_version.id)
         assigned_ids = {a.participant_id for a in assignments}
         unassigned_participants = [p for p in all_participants if p.participant_id not in assigned_ids]
 
@@ -389,6 +391,7 @@ def handle_get(ctx: RequestContext) -> str:
     return render_page(
         "contract/view.html", ctx, "contract",
         settings=settings, community=community, current_version=current_version,
+        participant_version=participant_version,
         versions=versions, form_version=form_version, form_mode=form_mode, today=date.today(),
         **_reference_choices(ctx.db_path, form_version, settings),
         assignments=assignments, participant_lookup=participant_lookup,
@@ -456,11 +459,18 @@ def handle_post(ctx: RequestContext) -> str | None:
             version_id = int(ctx.form.get("version_id", ""))
         except ValueError:
             raise FormError("Ungültige Vertragsversion.")
+        is_founding = get_latest_relevant_version(ctx.db_path) is None
         try:
             version = publish_version(ctx.db_path, version_id)
         except ContractWorkflowError as exc:
             raise FormError(str(exc))
-        get_state().set_flash(f"Vertragsversion {version.version} veröffentlicht.", ok=True)
+        message = f"Vertragsversion {version.version} veröffentlicht."
+        if is_founding and version.valid_from and version.valid_from < date.today() + timedelta(days=90):
+            message += (
+                " Hinweis: Die Bildung der LEG ist dem Netzbetreiber üblicherweise 3 Monate im Voraus zu "
+                "melden (Art. 19g Abs. 1 StromVV) — Starttermin mit dem Netzbetreiber abstimmen."
+            )
+        get_state().set_flash(message, ok=True)
         return None
 
     if ctx.segments == ["withdraw"]:
@@ -495,14 +505,19 @@ def handle_post(ctx: RequestContext) -> str | None:
         return None
 
     if ctx.segments == ["participants", "add"]:
-        current_version = get_contract_version_for_date(ctx.db_path)
+        current_version = get_participant_version(ctx.db_path)
         if current_version is None:
-            raise FormError("Kein aktuell aktiver Vertrag — zuerst eine Vertragsversion veröffentlichen.")
+            raise FormError("Kein veröffentlichter Vertrag — zuerst eine Vertragsversion veröffentlichen.")
         participant_id = form_required(ctx, "participant_id", label="Teilnehmer")
         valid_from = form_date(ctx, "valid_from")
         if valid_from is None:
             raise FormError("'Beitritt per' ist erforderlich.")
         _require_month_start(valid_from, label="Beitritt per")
+        if current_version.valid_from and valid_from < current_version.valid_from:
+            raise FormError(
+                f"'Beitritt per' liegt vor dem Inkrafttreten des Vertrags "
+                f"({current_version.valid_from.strftime('%d.%m.%Y')})."
+            )
 
         participant = get_participant(ctx.db_path, participant_id)
         if participant is None:
