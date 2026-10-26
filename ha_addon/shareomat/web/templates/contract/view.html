@@ -224,10 +224,12 @@
         {% endif %}
         {% endif %}
       </p>
+      <div class="field-hint" id="reference_operator_hint" style="color:#b45309"></div>
       <div class="field-hint">
         Produkte werden unter <a href="{{ url_for('tariffs') }}">Tarife</a> erfasst oder importiert. Der Referenzpreis
         dient nur zum Vergleich und hat keinen Einfluss auf den LEG-Preis oder den Vertragstext.
-        {% if not reference_products %}Noch keine Netzbetreiber-Tarife erfasst.{% endif %}
+        {% if not reference_products %}<strong>Noch keine Netzbetreiber-Tarife erfasst — zuerst unter
+        <a href="{{ url_for('tariffs') }}">Tarife</a> importieren (z. B. EBL 2027).</strong>{% endif %}
       </div>
     </div>
     <div class="field">
@@ -307,17 +309,28 @@
       var operator = document.getElementById('grid_operator');
       var reference = document.getElementById('reference_tariff_id');
       var preview = document.getElementById('reference_preview');
+      var operatorHint = document.getElementById('reference_operator_hint');
       function filterReferences() {
+        // Only narrow the list when the typed operator actually has products —
+        // otherwise (e.g. the community name typed by mistake) show everything
+        // instead of an empty dropdown.
         var op = operator.value.trim();
+        var owners = Array.prototype.map.call(reference.options, function (o) { return o.getAttribute('data-operator'); });
+        var hasMatch = owners.indexOf(op) !== -1;
         Array.prototype.forEach.call(reference.options, function (opt) {
           var owner = opt.getAttribute('data-operator');
-          var visible = !owner || !op || owner === op;
+          var visible = !owner || !op || !hasMatch || owner === op;
           opt.hidden = !visible;
           if (!visible && opt.selected) { reference.value = ''; }
         });
+        operatorHint.textContent = (op && !hasMatch && owners.some(function (o) { return o; }))
+          ? 'Für „' + op + '“ sind keine Produkte erfasst — es werden alle angezeigt. Beim Auswählen wird der Netzbetreiber übernommen.'
+          : '';
       }
       function showReference() {
         var opt = reference.options[reference.selectedIndex];
+        var owner = opt && opt.getAttribute('data-operator');
+        if (owner && operator.value.trim() !== owner) { operator.value = owner; filterReferences(); }
         var ht = opt && opt.getAttribute('data-ht');
         if (!opt || opt.value === '') { preview.textContent = ''; return; }
         if (ht === null) { return; }  // "bisheriger Wert": server-rendered text stays
