@@ -554,6 +554,8 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "qr_iban_snapshot": "TEXT NOT NULL DEFAULT ''",
         "qr_account_holder_snapshot": "TEXT NOT NULL DEFAULT ''",
         "payment_profile_version": "TEXT NOT NULL DEFAULT ''",
+        # SHA-256 over the financial record incl. the QR fields (see models.invoicing.record_hash).
+        "record_sha256": "TEXT NOT NULL DEFAULT ''",
     },
     "document_deliveries": {
         "item": "TEXT NOT NULL DEFAULT 'document'",   # document | reminder | cancellation
@@ -563,6 +565,7 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "discarded_at": "TEXT",
         "qr_payload": "TEXT NOT NULL DEFAULT ''",
         "qr_reference": "TEXT NOT NULL DEFAULT ''",
+        "record_sha256": "TEXT NOT NULL DEFAULT ''",
     },
     "participant_contract": {
         # Separate from accepted_at: accepted_at is the participant's original,

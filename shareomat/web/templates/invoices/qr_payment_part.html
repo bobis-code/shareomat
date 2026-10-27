@@ -6,8 +6,9 @@
    never a QR code that isn't a valid payment. #}
 {% if qr %}
 {% set p = qr.payload %}
+{% macro corners(w, h) %}<svg width="{{ w }}mm" height="{{ h }}mm" viewBox="0 0 {{ w }} {{ h }}" style="display:block;margin-top:1mm"><path d="M0 3V0H3M{{ w - 3 }} 0H{{ w }}V3M{{ w }} {{ h - 3 }}V{{ h }}H{{ w - 3 }}M3 {{ h }}H0V{{ h - 3 }}" fill="none" stroke="#000" stroke-width="0.26"/></svg>{% endmacro %}
 {% macro addr(a) %}{{ a.name }}<br>{% if a.street %}{{ a.street }}{% if a.building %} {{ a.building }}{% endif %}<br>{% endif %}{{ a.postal_code }} {{ a.city }}{% endmacro %}
-<div class="qr-bill" style="width:210mm;height:105mm;box-sizing:border-box;display:flex;font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;border-top:0.2mm dashed #000;position:relative;page-break-inside:avoid;break-inside:avoid;line-height:1.15">
+<div class="qr-bill" style="width:210mm;height:105mm;box-sizing:border-box;display:flex;font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;border-top:0.2mm dashed #000;position:relative;page-break-inside:avoid;break-inside:avoid;line-height:1.15;overflow-wrap:anywhere;word-break:break-word;overflow:hidden">
   <span style="position:absolute;top:-2.6mm;left:3mm;font-size:9pt">&#9986;</span>
   <div style="width:62mm;height:105mm;box-sizing:border-box;padding:5mm;border-right:0.2mm dashed #000;position:relative">
     <span style="position:absolute;top:3mm;right:-2.1mm;font-size:9pt;transform:rotate(-90deg)">&#9986;</span>
@@ -17,12 +18,13 @@
       <div style="margin-bottom:3mm">{{ qr.iban_display }}<br>{{ addr(p.creditor) }}</div>
       {% if p.reference %}<div style="font-size:6pt;font-weight:bold">Referenz</div>
       <div style="margin-bottom:3mm">{{ qr.reference_display }}</div>{% endif %}
-      <div style="font-size:6pt;font-weight:bold">Zahlbar durch</div>
-      <div>{{ addr(p.debtor) if p.debtor }}</div>
+      {% if p.debtor %}<div style="font-size:6pt;font-weight:bold">Zahlbar durch</div>
+      <div>{{ addr(p.debtor) }}</div>
+      {% else %}<div style="font-size:6pt;font-weight:bold">Zahlbar durch (Name/Adresse)</div>{{ corners(52, 20) }}{% endif %}
     </div>
     <div style="height:14mm;display:flex;font-size:8pt">
       <div style="width:22mm"><div style="font-size:6pt;font-weight:bold">Währung</div>{{ p.currency }}</div>
-      <div><div style="font-size:6pt;font-weight:bold">Betrag</div>{{ '{:,.2f}'.format(p.amount).replace(',', ' ') if p.amount is not none }}</div>
+      <div><div style="font-size:6pt;font-weight:bold">Betrag</div>{% if p.amount is not none %}{{ '{:,.2f}'.format(p.amount).replace(',', ' ') }}{% else %}{{ corners(30, 10) }}{% endif %}</div>
     </div>
     <div style="height:18mm;text-align:right;font-size:6pt;font-weight:bold">Annahmestelle</div>
   </div>
@@ -32,7 +34,7 @@
       <div style="margin:5mm 0 5mm 0;width:46mm;height:46mm">{{ qr.svg | safe }}</div>
       <div style="display:flex;font-size:10pt">
         <div style="width:22mm"><div style="font-size:8pt;font-weight:bold">Währung</div>{{ p.currency }}</div>
-        <div><div style="font-size:8pt;font-weight:bold">Betrag</div>{{ '{:,.2f}'.format(p.amount).replace(',', ' ') if p.amount is not none }}</div>
+        <div><div style="font-size:8pt;font-weight:bold">Betrag</div>{% if p.amount is not none %}{{ '{:,.2f}'.format(p.amount).replace(',', ' ') }}{% else %}{{ corners(40, 15) }}{% endif %}</div>
       </div>
     </div>
     <div style="width:87mm;font-size:10pt">
@@ -42,8 +44,9 @@
       <div style="margin-bottom:3mm">{{ qr.reference_display }}</div>{% endif %}
       {% if p.message %}<div style="font-size:8pt;font-weight:bold">Zusätzliche Informationen</div>
       <div style="margin-bottom:3mm">{{ p.message }}</div>{% endif %}
-      <div style="font-size:8pt;font-weight:bold">Zahlbar durch</div>
-      <div>{{ addr(p.debtor) if p.debtor }}</div>
+      {% if p.debtor %}<div style="font-size:8pt;font-weight:bold">Zahlbar durch</div>
+      <div>{{ addr(p.debtor) }}</div>
+      {% else %}<div style="font-size:8pt;font-weight:bold">Zahlbar durch (Name/Adresse)</div>{{ corners(65, 25) }}{% endif %}
     </div>
   </div>
 </div>

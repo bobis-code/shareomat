@@ -10,20 +10,21 @@
     @page { size: A4; margin: 0; }
     body { font-family: Arial, Helvetica, sans-serif; margin: 0; line-height: 1.4; color: #111; font-size: 10.5pt; background: #ddd; }
     .page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; position: relative; box-sizing: border-box;
-            padding: 15mm 20mm 20mm 20mm; }
-    .page.with-qr { padding-bottom: 115mm; }
-    .page .qr-bill { position: absolute; left: 0; bottom: 0; }
-    h2 { font-size: 1.3rem; margin-top: 1.6rem; }
+            padding: 12mm 18mm 15mm 18mm; }
+    .page.with-qr { padding-bottom: 108mm; }   /* 105 mm payment part + 3 mm */
+    .page .qr-bill { position: absolute !important; left: 0; bottom: 0; }
+    h2 { font-size: 1.3rem; margin: 1rem 0 .5rem; }
     .doc-head { display: flex; justify-content: space-between; gap: 2rem; }
-    .doc-recipient { margin-top: 3.5rem; min-width: 16rem; }
-    .doc-date { margin-top: 2rem; }
+    .doc-recipient { margin-top: 2.2rem; min-width: 16rem; }
+    .doc-date { margin-top: 1.2rem; }
+    p { margin: .5rem 0; }
     table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
     .doc-lines th, .doc-lines td { border-bottom: 1px solid #ccc; padding: .3rem .4rem; text-align: left; }
     .doc-lines tfoot th { border-top: 2px solid #111; }
     .doc-pay { width: auto; } .doc-pay td { padding: .15rem 1.2rem .15rem 0; }
     .num { text-align: right !important; white-space: nowrap; }
     .ts { color: #444; font-size: .85rem; }
-    .meta { border-top: 1px solid #999; margin-top: 2rem; padding-top: .5rem; font-size: .75rem; color: #555; }
+    .meta { border-top: 1px solid #999; margin-top: 3mm; padding-top: 1mm; font-size: 6.5pt; color: #555; }
     .stamp { border: 2px solid #b91c1c; color: #b91c1c; padding: .4rem .6rem; margin-bottom: 1rem; font-weight: bold; }
     .noprint { margin-bottom: 1rem; }
     @media print { .noprint { display: none; } body { background: #fff; } .page { margin: 0; } }

@@ -109,6 +109,9 @@ from shareomat.models.invoicing import (
     DocumentReminder,
     PaymentProfile,
     PayoutStatus,
+    document_record,
+    payload_fields,
+    record_hash,
     ReminderProposal,
 )
 
@@ -313,7 +316,7 @@ def _load_logs(conn, doc: BillingDocument) -> None:
             open_amount_chf=Decimal(r["open_amount_chf"]), snapshot_html=r["snapshot_html"],
             snapshot_sha256=r["snapshot_sha256"], new_due_date=str_to_date(r["new_due_date"]),
             discarded_at=_ts(r["discarded_at"]), sent_at=first_sent("reminder", r["id"]),
-            qr_payload=r["qr_payload"], qr_reference=r["qr_reference"])
+            qr_payload=r["qr_payload"], qr_reference=r["qr_reference"], record_sha256=r["record_sha256"])
         for r in conn.execute("SELECT * FROM document_reminders WHERE document_id = ? ORDER BY id", (doc.id,))
     ]
 
@@ -334,6 +337,8 @@ def _row_to_document(row) -> BillingDocument:
         replaces_number=row["replaces_number"] or "", contract_versions=row["contract_versions"],
         qr_payload=row["qr_payload"], qr_reference=row["qr_reference"], qr_reference_type=row["qr_reference_type"],
         qr_iban_snapshot=row["qr_iban_snapshot"], qr_account_holder_snapshot=row["qr_account_holder_snapshot"],
+        qr_render_version=row["qr_render_version"], payment_profile_version=row["payment_profile_version"],
+        record_sha256=row["record_sha256"],
         period_start=str_to_date(row["bp_start"]), period_end=str_to_date(row["bp_end"]),
         local_kwh=Decimal(kwh or "0"),
     )
@@ -611,21 +616,30 @@ def issue_documents(db_path: Path, run_id: int, render: Renderer, *, today: date
             raise InvoicingError("Seit der Vorschau haben sich Belege geändert (Zahlungsangaben, Empfänger, Beträge "
                                  "oder Nummern) — bitte die Vorschau neu laden und erneut prüfen.")
         for p in planned:
+            record = document_record({
+                "billing_run_id": run_id, "participant_id": p["item"].participant_id, "doc_type": p["doc_type"],
+                "number": p["number"], "amount_chf": p["amount"], "issue_date": today, "due_date": p["due"],
+                "recipient_label": p["recipient"].get("label", ""), "recipient_email": p["recipient"].get("email", ""),
+                "recipient_address": p["address"], "snapshot_sha256": _sha(p["html"]), "qr_payload": p["qr_payload"],
+                "qr_reference": p["qr_reference"], "qr_reference_type": p["qr_reference_type"],
+                "qr_render_version": QR_RENDER_VERSION if p["qr_payload"] else "", "qr_iban_snapshot": p["qr_iban"],
+                "qr_account_holder_snapshot": p["qr_payee"], "payment_profile_version": p["profile_version"],
+            })
             cur = conn.execute(
                 """
                 INSERT INTO billing_documents (billing_run_id, participant_id, doc_type, number, status,
                     amount_chf, issue_date, due_date, recipient_label, recipient_email, recipient_address,
                     replaces_document_id, contract_versions, snapshot_html, snapshot_sha256,
                     qr_payload, qr_reference, qr_reference_type, qr_render_version, qr_iban_snapshot,
-                    qr_account_holder_snapshot, payment_profile_version, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    qr_account_holder_snapshot, payment_profile_version, record_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (run_id, p["item"].participant_id, p["doc_type"], p["number"], DOC_STATUS_ISSUED, str(p["amount"]),
                  date_to_str(today), date_to_str(p["due"]), p["recipient"].get("label", ""),
                  p["recipient"].get("email", ""), p["address"], p["replaces_id"], p["contract_versions"],
-                 p["html"], _sha(p["html"]), p["qr_payload"], p["qr_reference"], p["qr_reference_type"],
-                 QR_RENDER_VERSION if p["qr_payload"] else "", p["qr_iban"], p["qr_payee"], p["profile_version"],
-                 now_iso()),
+                 p["html"], record["snapshot_sha256"], p["qr_payload"], p["qr_reference"], p["qr_reference_type"],
+                 record["qr_render_version"], p["qr_iban"], p["qr_payee"], p["profile_version"],
+                 record_hash(record), now_iso()),
             )
             created.append(cur.lastrowid)
             record_event(conn, "billing_document", cur.lastrowid, "issued",
@@ -974,13 +988,16 @@ def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today:
             raise InvoicingError("Für diese Rechnung ist derzeit keine Mahnung fällig (bezahlt, gesperrt, nicht "
                                  "versendet, vorherige Mahnung nicht versendet oder deren Frist läuft noch).")
         # Same claim, same reference as the invoice; only the open amount is new.
-        if doc.qr_reference:
-            if doc.qr_reference_type != reference_type_for(profile.iban):
+        if doc.qr_payload:
+            # The reference comes from the frozen QR text of the invoice (integrity-checked above),
+            # never from a separately editable column.
+            frozen = payload_fields(doc.qr_payload)
+            ref_type, reference = frozen["reference_type"], frozen["reference"]
+            if ref_type != reference_type_for(profile.iban):
                 raise InvoicingError(
-                    f"Die Referenz der Rechnung ({doc.qr_reference_type}) passt nicht zum aktuellen Konto "
+                    f"Die Referenz der Rechnung ({ref_type}) passt nicht zum aktuellen Konto "
                     f"({reference_type_for(profile.iban)}) — Zahlungserinnerung manuell mit den Kontodaten der "
                     "Rechnung erstellen oder Rechnung stornieren und neu ausstellen.")
-            ref_type, reference = doc.qr_reference_type, doc.qr_reference
         else:
             ref_type, reference = reference_for(profile.iban, doc.number)
         try:
@@ -998,12 +1015,15 @@ def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today:
             "community_name": (get_community(db_path).name if get_community(db_path) else ""),
             "contact_email": profile.contact_email or creditor["email"], "qr": qr, "qr_missing": False,
         })
+        record = DocumentReminder(document_id=doc.id, level=proposal.level, issue_date=today,
+                                  open_amount_chf=doc.open_chf, snapshot_sha256=_sha(html), new_due_date=new_due,
+                                  qr_payload=qr.payload.text(), qr_reference=reference).record_values()
         cur = conn.execute(
             "INSERT INTO document_reminders (document_id, level, issue_date, open_amount_chf, snapshot_html, "
-            "snapshot_sha256, new_due_date, qr_payload, qr_reference, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "snapshot_sha256, new_due_date, qr_payload, qr_reference, record_sha256, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc.id, proposal.level, date_to_str(today), str(doc.open_chf), html, _sha(html),
-             date_to_str(new_due), qr.payload.text(), reference, now_iso()))
+             date_to_str(new_due), qr.payload.text(), reference, record_hash(record), now_iso()))
         reminder_id = cur.lastrowid
         record_event(conn, "billing_document", doc.id, "reminder_created",
                      f"{doc.number} {REMINDER_LABELS[proposal.level]} offen CHF {doc.open_chf}")

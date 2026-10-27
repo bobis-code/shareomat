@@ -31,6 +31,7 @@ Notes:
 from __future__ import annotations
 
 import re
+import textwrap
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -39,6 +40,9 @@ import segno
 QR_RENDER_VERSION = "spc-0200/six-ig-2.3/svg-1"
 CURRENCIES = ("CHF", "EUR")
 MAX_AMOUNT = Decimal("999999999.99")
+
+# ISO 3166-1 alpha-2 (officially assigned codes).
+ISO_COUNTRIES = frozenset("""AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW""".split())
 
 # Character set of the guidelines (Latin subset): printable ASCII, Latin-1
 # supplement and Latin Extended-A, plus Ș ș Ț ț and €.
@@ -163,8 +167,8 @@ class QrAddress:
 
     def validated(self, role: str) -> "QrAddress":
         country = (self.country or "").strip().upper()
-        if not re.fullmatch(r"[A-Z]{2}", country):
-            raise SwissQrError(f"{role}: Land als zweistelliger ISO-Code (z. B. CH).")
+        if country not in ISO_COUNTRIES:
+            raise SwissQrError(f"{role}: Land muss ein gültiger ISO-3166-Code sein (z. B. CH, LI).")
         return QrAddress(
             name=check_text(f"{role}: Name", self.name, 70, required=True),
             street=check_text(f"{role}: Strasse", self.street, 70),
@@ -199,6 +203,8 @@ class SwissQrPayload:
             raise SwissQrError("IBAN ungültig (CH/LI, 21 Zeichen, Prüfziffer).")
         if currency not in CURRENCIES:
             raise SwissQrError("Währung muss CHF oder EUR sein.")
+        if is_qr_iban(iban) and currency != "CHF":
+            raise SwissQrError("QR-IBAN und QR-Referenz sind nur in CHF zulässig.")
         if amount is not None:
             if amount != amount.quantize(Decimal("0.01")) or not Decimal("0.01") <= amount <= MAX_AMOUNT:
                 raise SwissQrError("Betrag muss zwischen 0.01 und 999 999 999.99 liegen (zwei Dezimalstellen).")
@@ -208,10 +214,14 @@ class SwissQrPayload:
             raise SwissQrError("Eine QR-Referenz (QRR) ist nur mit einer QR-IBAN erlaubt.")
         if not reference_is_valid(reference_type, reference):
             raise SwissQrError(f"Referenz {reference!r} ist für Typ {reference_type} ungültig.")
-        return cls(iban=iban, creditor=creditor.validated("Zahlungsempfänger"), amount=amount, currency=currency,
-                   debtor=debtor.validated("Zahlungspflichtiger") if debtor is not None else None,
-                   reference_type=reference_type, reference=reference,
-                   message=check_text("Mitteilung", message, 140))
+        payload = cls(iban=iban, creditor=creditor.validated("Zahlungsempfänger"), amount=amount, currency=currency,
+                      debtor=debtor.validated("Zahlungspflichtiger") if debtor is not None else None,
+                      reference_type=reference_type, reference=reference,
+                      message=check_text("Mitteilung", message, 140))
+        problems = layout_problems(payload)
+        if problems:
+            raise SwissQrError(" ".join(problems))
+        return payload
 
     def text(self) -> str:
         """The exact text encoded in the QR code."""
@@ -220,6 +230,49 @@ class SwissQrPayload:
                  + (self.debtor.lines() if self.debtor is not None else [""] * 7)
                  + [self.reference_type, self.reference, self.message, "EPD"])
         return "\r\n".join(lines)
+
+
+# Payment part geometry (SIX style guide) used for the fit check below. Character width is estimated
+# conservatively (0.62 em, Arial/Helvetica); anything that may not fit is refused, never cut off.
+_PT = 0.3528                    # mm per point
+_CHAR_EM = 0.62
+_RECEIPT = {"width": 52.0, "height": 56.0, "value_pt": 8, "line_pt": 9, "heading_pt": 6, "box": 20.0}
+_PAYMENT = {"width": 87.0, "height": 85.0, "value_pt": 10, "line_pt": 11, "heading_pt": 8, "box": 25.0}
+
+
+def _wrapped_lines(text: str, width_mm: float, value_pt: int) -> int:
+    per_line = max(1, int(width_mm / (value_pt * _PT * _CHAR_EM)))
+    return len(textwrap.wrap(text, per_line, break_long_words=True, break_on_hyphens=True)) or 1
+
+
+def _section_height(geo: dict, lines: list[str], *, box: bool = False) -> float:
+    height = geo["line_pt"] * _PT                                     # heading
+    if box:
+        return height + geo["box"]
+    return height + sum(_wrapped_lines(t, geo["width"], geo["value_pt"]) for t in lines) * geo["line_pt"] * _PT
+
+
+def _address_lines(a: QrAddress) -> list[str]:
+    street = " ".join(x for x in (a.street, a.building) if x)
+    return [a.name] + ([street] if street else []) + [f"{a.postal_code} {a.city}"]
+
+
+def layout_problems(p: "SwissQrPayload") -> list[str]:
+    """Why the payment part could not show all data legibly inside its fixed areas (empty = fits)."""
+    gap = 9 * _PT
+    account = [format_iban(p.iban)] + _address_lines(p.creditor)
+    reference = [format_reference(p.reference)] if p.reference else []
+    problems = []
+    for name, geo, parts in (
+        ("Empfangsschein", _RECEIPT, [account, reference]),
+        ("Zahlteil", _PAYMENT, [account, reference, [p.message] if p.message else []]),
+    ):
+        height = sum(_section_height(geo, part) + gap for part in parts if part)
+        height += _section_height(geo, _address_lines(p.debtor) if p.debtor else [], box=p.debtor is None)
+        if height > geo["height"]:
+            problems.append(f"{name}: Empfänger-, Referenz- oder Schuldnerangaben sind zu lang für die feste "
+                            f"Fläche ({height:.0f} mm statt höchstens {geo['height']:.0f} mm) — Namen/Adressen kürzen.")
+    return problems
 
 
 def qr_svg(payload_text: str) -> str:
