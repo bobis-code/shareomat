@@ -100,21 +100,70 @@
 {% endif %}
 
 {% if tab == 'settings' %}
+<div class="card">
+  <h2>Status QR-Rechnung:
+    <span class="status-pill {{ 'status-pill-active' if profile_status == 'ready' else 'status-pill-inactive' }}">{{ status_labels[profile_status] }}</span></h2>
+  <ol class="ts" style="margin:.3rem 0 0 1.1rem">
+    <li>Bankkontoinhaber, seine Adresse (wie bei der Bank geführt) und IBAN eintragen und speichern.</li>
+    <li>Den Musterzahlteil unten drucken bzw. am Bildschirm im <a href="https://validation.iso-payments.ch/qrrechnung/page/disclaimer" target="_blank" rel="noopener">SIX-Validierungsportal</a>
+      prüfen und mit einer Banking-App scannen (nicht bezahlen).</li>
+    <li>Bestätigen — erst dann erstellt Shareomat Rechnungen. Jede spätere Änderung verlangt eine neue Bestätigung.</li>
+  </ol>
+</div>
 <form class="form-card" method="post" action="{{ url_for('invoices', suffix='/settings') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <h2>Zahlungsangaben auf Rechnungen</h2>
+  <h2>Zahlungsangaben (QR-Zahlteil)</h2>
   <div class="field">
-    <label for="payee">Kontoinhaber (Zahlungsempfänger)</label>
-    <input type="text" id="payee" name="payee" value="{{ payee }}" required>
+    <label for="contact_email">Kontakt-E-Mail auf Rechnungen</label>
+    <input type="email" id="contact_email" name="contact_email" value="{{ profile.contact_email }}">
+    <div class="field-hint">Nur Korrespondenz — kein Zahlungsmittel, nicht im QR-Code.</div>
   </div>
   <div class="field">
-    <label for="iban">IBAN</label>
-    <input type="text" id="iban" name="iban" value="{{ iban }}" required>
-    <div class="field-hint">Konto des LEG-Vertreters für die Zahlungen der LEG-Bezüger. Gilt für neu erstellte
-      Belege; bereits erstellte bleiben unverändert. QR-Zahlteil folgt später.</div>
+    <label for="payee">Bankkontoinhaber / Zahlungsempfänger</label>
+    <input type="text" id="payee" name="payee" value="{{ profile.payee }}" maxlength="70" required>
+    <div class="field-hint">Exakt der Name, auf den das Konto lautet. Auf der Rechnung erscheint die LEG als
+      Rechnungsstellerin; im Zahlteil muss der Kontoinhaber stehen. Bei einem Privatkonto mit der Bank klären, ob
+      Zahlungen für die LEG darüber laufen dürfen.</div>
+  </div>
+  <div class="field"><label for="street">Strasse</label>
+    <input type="text" id="street" name="street" value="{{ profile.street }}" maxlength="70"></div>
+  <div class="field"><label for="building">Hausnummer</label>
+    <input type="text" id="building" name="building" value="{{ profile.building }}" maxlength="16"></div>
+  <div class="field"><label for="postal_code">PLZ</label>
+    <input type="text" id="postal_code" name="postal_code" value="{{ profile.postal_code }}" maxlength="16" required></div>
+  <div class="field"><label for="city">Ort</label>
+    <input type="text" id="city" name="city" value="{{ profile.city }}" maxlength="35" required></div>
+  <div class="field"><label for="country">Land</label>
+    <input type="text" id="country" name="country" value="{{ profile.country or 'CH' }}" maxlength="2" required></div>
+  <div class="field">
+    <label for="iban">IBAN oder QR-IBAN</label>
+    <input type="text" id="iban" name="iban" value="{{ iban }}" placeholder="CH.. .... .... .... .... ." required>
+    <div class="field-hint">Normale IBAN → Referenz SCOR (RF…); nur eine von der Bank erhaltene QR-IBAN →
+      QR-Referenz (QRR). Währung CHF. Gilt nur für neu erstellte Belege; bereits erstellte bleiben unverändert.</div>
   </div>
   <button type="submit">Speichern</button>
 </form>
+{% if sample %}
+<div class="card">
+  <h2>Musterzahlteil für den Scan-Test (CHF 1.00, nicht bezahlen)</h2>
+  <div style="overflow-x:auto;background:#fff;padding:4mm 0">{% set qr = sample %}{% include "invoices/qr_payment_part.html" %}</div>
+  {% if profile_status != 'ready' %}
+  <form method="post" action="{{ url_for('invoices', suffix='/settings/confirm') }}" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="version" value="{{ profile.version }}">
+    <label style="display:block"><input type="checkbox" name="bank_matched" required> Kontoinhaber, Adresse und IBAN
+      stimmen mit den Bankunterlagen überein.</label>
+    <label style="display:block"><input type="checkbox" name="scan_tested" required> Musterzahlteil im
+      SIX-Validierungsportal geprüft und mit einer Banking-App gescannt.</label>
+    <button type="submit" style="margin-top:6px">Zahlungsangaben bestätigen</button>
+  </form>
+  {% else %}
+  <p class="ts">Bestätigt (Version {{ profile.version }}).</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">{% set qr = none %}{% set qr_missing = true %}<div style="overflow-x:auto">{% include "invoices/qr_payment_part.html" %}</div></div>
+{% endif %}
 <div class="card">
   <h2>Regeln</h2>
   <ul>
@@ -127,6 +176,8 @@
       Restrappen nach vollständigem Eingang); nie automatisch.</li>
     <li>Zahlungen, Auszahlungen und Zustellungen werden manuell erfasst (kein Bankabgleich); eine bereits verwendete
       Referenz wird nur nach ausdrücklicher Bestätigung nochmals angenommen.</li>
+    <li>Rechnungen enthalten einen Swiss QR-Zahlteil (SCOR-Referenz aus der Rechnungsnummer); Mahnungen denselben
+      mit Restbetrag und gleicher Referenz; Gutschriften keinen.</li>
     <li>Versand: Papier/PDF (Drucken) oder E-Mail; jede Zustellung wird protokolliert, ein erneuter Versand erzeugt
       keine neue Forderung. Direkter E-Mail-Versand aus Shareomat folgt.</li>
   </ul>

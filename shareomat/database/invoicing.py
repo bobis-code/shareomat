@@ -68,7 +68,20 @@ from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from shareomat.database.audit import record_event
+from shareomat.core.payments.swiss_qr import (
+    QR_RENDER_VERSION,
+    PaymentPartView,
+    QrAddress,
+    SwissQrError,
+    SwissQrPayload,
+    format_iban,
+    iban_is_valid,
+    normalize_iban,
+    reference_for,
+    reference_type_for,
+    split_street,
+)
+from shareomat.database.audit import log_event, record_event
 from shareomat.database.billing import get_billing_run
 from shareomat.database.community import get_community
 from shareomat.database.contract_versions import get_contract_version_for_date, list_contract_versions
@@ -87,10 +100,14 @@ from shareomat.models.invoicing import (
     PAYMENT_KIND_REFUND,
     REMINDER_LABELS,
     REMINDER_OFFSETS_DAYS,
+    PROFILE_CHECK,
+    PROFILE_MISSING,
+    PROFILE_READY,
     BillingDocument,
     DocumentDelivery,
     DocumentPayment,
     DocumentReminder,
+    PaymentProfile,
     PayoutStatus,
     ReminderProposal,
 )
@@ -102,8 +119,8 @@ _CENT = Decimal("0.01")
 
 Renderer = Callable[[str, dict], str]
 
-SETTING_PAYEE = "invoice_payee"
-SETTING_IBAN = "invoice_iban"
+SETTING_PROFILE = "invoice_payment_profile"
+SETTING_PROFILE_CONFIRMED = "invoice_payment_profile_confirmed"   # profile version the user confirmed
 
 REMINDER_PAYMENT_DAYS = 10    # new payment deadline printed on a reminder
 REMINDER_GRACE_DAYS = 5       # after that deadline before the next level is proposed
@@ -143,40 +160,112 @@ def _require_integrity(doc: BillingDocument) -> None:
 # ── payment details (Zahlungsangaben) ───────────────────────────────────────
 
 
-def normalize_iban(raw: str) -> str:
-    return re.sub(r"\s+", "", raw or "").upper()
+def get_payment_profile(db_path: Path) -> PaymentProfile:
+    """The stored payment profile (empty when not set up)."""
+    raw = get_setting(db_path, SETTING_PROFILE)
+    return PaymentProfile(**json.loads(raw)) if raw else PaymentProfile()
 
 
-def iban_is_valid(iban: str) -> bool:
-    """ISO 13616 mod-97 check; CH/LI IBANs must have 21 characters."""
-    iban = normalize_iban(iban)
-    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{10,30}", iban):
-        return False
-    if iban[:2] in ("CH", "LI") and len(iban) != 21:
-        return False
-    digits = "".join(str(int(c, 36)) for c in iban[4:] + iban[:4])
-    return int(digits) % 97 == 1
+def _profile_creditor(profile: PaymentProfile) -> QrAddress:
+    return QrAddress(name=profile.payee, street=profile.street, building=profile.building,
+                     postal_code=profile.postal_code, city=profile.city, country=profile.country)
 
 
-def format_iban(iban: str) -> str:
-    iban = normalize_iban(iban)
-    return " ".join(iban[i:i + 4] for i in range(0, len(iban), 4))
-
-
-def get_payment_details(db_path: Path) -> tuple[str, str]:
-    """(payee, IBAN) printed on invoices; empty strings when not configured."""
-    return get_setting(db_path, SETTING_PAYEE) or "", get_setting(db_path, SETTING_IBAN) or ""
-
-
-def save_payment_details(db_path: Path, payee: str, iban: str) -> None:
-    payee = payee.strip()
-    iban = normalize_iban(iban)
-    if not payee:
-        raise InvoicingError("Bitte den Kontoinhaber (Zahlungsempfänger) angeben.")
+def validate_payment_profile(profile: PaymentProfile) -> PaymentProfile:
+    """Server-side validation; returns the normalized profile or raises InvoicingError naming the field."""
+    if not profile.payee.strip():
+        raise InvoicingError("Bankkontoinhaber fehlt — genau so, wie ihn die Bank für das Konto führt.")
+    iban = normalize_iban(profile.iban)
     if not iban_is_valid(iban):
-        raise InvoicingError("Die IBAN ist ungültig (Prüfziffer oder Länge stimmt nicht).")
-    set_setting(db_path, SETTING_PAYEE, payee)
-    set_setting(db_path, SETTING_IBAN, iban)
+        raise InvoicingError("IBAN ungültig: Schweizer oder Liechtensteiner IBAN / QR-IBAN, 21 Zeichen, Prüfziffer.")
+    try:
+        address = _profile_creditor(profile).validated("Zahlungsempfänger")
+    except SwissQrError as exc:
+        raise InvoicingError(str(exc))
+    email = profile.contact_email.strip()
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise InvoicingError("Kontakt-E-Mail ist ungültig.")
+    return PaymentProfile(payee=address.name, street=address.street, building=address.building,
+                          postal_code=address.postal_code, city=address.city, country=address.country,
+                          iban=iban, contact_email=email)
+
+
+def save_payment_profile(db_path: Path, profile: PaymentProfile) -> PaymentProfile:
+    """Store a validated profile. A changed account/payee/address needs a new confirmation (status "prüfen")."""
+    validated = validate_payment_profile(profile)
+    previous = get_payment_profile(db_path)
+    set_setting(db_path, SETTING_PROFILE, json.dumps(validated.as_dict(), ensure_ascii=False))
+    reset = previous.iban and previous.version != validated.version
+    log_event(db_path, "payment_profile", "invoice", "saved",
+              f"Kontoinhaber {validated.payee}, IBAN …{validated.iban[-4:]}, Version {validated.version}"
+              + (" — Bestätigung zurückgesetzt" if reset else ""))
+    return validated
+
+
+def payment_profile_status(db_path: Path) -> str:
+    """PROFILE_MISSING (nicht eingerichtet) / PROFILE_CHECK (prüfen) / PROFILE_READY (bereit)."""
+    profile = get_payment_profile(db_path)
+    if not profile.iban:
+        return PROFILE_MISSING
+    try:
+        validate_payment_profile(profile)
+    except InvoicingError:
+        return PROFILE_MISSING
+    return PROFILE_READY if get_setting(db_path, SETTING_PROFILE_CONFIRMED) == profile.version else PROFILE_CHECK
+
+
+def confirm_payment_profile(db_path: Path, *, version: str) -> None:
+    """The user confirms: account holder/address matched with the bank, sample payment part passed the SIX
+    validation portal and a banking-app scan. Bound to the profile version that was shown."""
+    profile = get_payment_profile(db_path)
+    if payment_profile_status(db_path) == PROFILE_MISSING:
+        raise InvoicingError("Zuerst gültige Zahlungsangaben speichern.")
+    if version != profile.version:
+        raise InvoicingError("Die Zahlungsangaben haben sich seit dem angezeigten Muster geändert — bitte neu prüfen.")
+    set_setting(db_path, SETTING_PROFILE_CONFIRMED, profile.version)
+    log_event(db_path, "payment_profile", "invoice", "confirmed",
+              f"Scan-Test und Bankabgleich bestätigt, Version {profile.version}")
+
+
+def payment_problems(db_path: Path) -> list[str]:
+    """Why invoices with a QR payment part can't be issued now (empty = profile ready)."""
+    status = payment_profile_status(db_path)
+    if status == PROFILE_MISSING:
+        return ["Bankdaten fehlen – nicht versandbereit: Kontoinhaber, Adresse und IBAN unter "
+                "Rechnungen › Zahlungsangaben erfassen."]
+    if status == PROFILE_CHECK:
+        return ["Zahlungsangaben noch nicht bestätigt: Musterzahlteil mit dem SIX-Validierungsportal und einer "
+                "Banking-App prüfen, dann unter Rechnungen › Zahlungsangaben bestätigen."]
+    return []
+
+
+def sample_payment_part(db_path: Path) -> PaymentPartView | None:
+    """Sample payment part for the one-time scan test (CHF 1.00, test reference). None without valid data."""
+    if payment_profile_status(db_path) == PROFILE_MISSING:
+        return None
+    profile = get_payment_profile(db_path)
+    ref_type, reference = reference_for(profile.iban, "TEST0001")
+    return PaymentPartView(SwissQrPayload.build(
+        iban=profile.iban, creditor=_profile_creditor(profile), amount=Decimal("1.00"), debtor=None,
+        reference_type=ref_type, reference=reference, message="Scan-Test Shareomat - bitte nicht bezahlen"))
+
+
+def _debtor(label: str, address_line: str, postal_code: str, city: str) -> QrAddress:
+    street, building = split_street(address_line)
+    return QrAddress(name=label, street=street, building=building, postal_code=postal_code, city=city, country="CH")
+
+
+def _debtor_from_document(doc: BillingDocument) -> QrAddress:
+    lines = doc.recipient_address.split("\n")
+    street = lines[0] if len(lines) > 1 else ""
+    postal_code, _, city = (lines[-1] if lines else "").partition(" ")
+    return _debtor(doc.recipient_label, street, postal_code, city)
+
+
+def _qr_message(number: str, period_start: date | None, period_end: date | None) -> str:
+    if period_start and period_end:
+        return f"Rechnung {number}, LEG-Strom {period_start:%d.%m.%Y}-{period_end:%d.%m.%Y}"
+    return f"Rechnung {number}"
 
 
 # ── reading ─────────────────────────────────────────────────────────────────
@@ -223,7 +312,8 @@ def _load_logs(conn, doc: BillingDocument) -> None:
             id=r["id"], document_id=r["document_id"], level=r["level"], issue_date=str_to_date(r["issue_date"]),
             open_amount_chf=Decimal(r["open_amount_chf"]), snapshot_html=r["snapshot_html"],
             snapshot_sha256=r["snapshot_sha256"], new_due_date=str_to_date(r["new_due_date"]),
-            discarded_at=_ts(r["discarded_at"]), sent_at=first_sent("reminder", r["id"]))
+            discarded_at=_ts(r["discarded_at"]), sent_at=first_sent("reminder", r["id"]),
+            qr_payload=r["qr_payload"], qr_reference=r["qr_reference"])
         for r in conn.execute("SELECT * FROM document_reminders WHERE document_id = ? ORDER BY id", (doc.id,))
     ]
 
@@ -242,6 +332,8 @@ def _row_to_document(row) -> BillingDocument:
         cancelled_at=_ts(row["cancelled_at"]), cancel_number=row["cancel_number"] or "",
         cancel_snapshot_html=row["cancel_snapshot_html"], cancel_sha256=row["cancel_sha256"],
         replaces_number=row["replaces_number"] or "", contract_versions=row["contract_versions"],
+        qr_payload=row["qr_payload"], qr_reference=row["qr_reference"], qr_reference_type=row["qr_reference_type"],
+        qr_iban_snapshot=row["qr_iban_snapshot"], qr_account_holder_snapshot=row["qr_account_holder_snapshot"],
         period_start=str_to_date(row["bp_start"]), period_end=str_to_date(row["bp_end"]),
         local_kwh=Decimal(kwh or "0"),
     )
@@ -336,8 +428,12 @@ def _creditor(db_path: Path, issue_date: date, period_start: date | None, period
             "email": "", "contract_versions": versions, "payment_term_days": 30}
 
 
-def issue_problems(db_path: Path, run_id: int, *, today: date | None = None) -> list[str]:
-    """Reasons the documents of a run can't be issued yet (empty = ready)."""
+def issue_problems(db_path: Path, run_id: int, *, today: date | None = None, include_payment: bool = True) -> list[str]:
+    """Reasons the documents of a run can't be issued yet (empty = ready).
+
+    include_payment=False leaves out the payment profile (the approval view
+    shows documents without bank data, marked "nicht versandbereit").
+    """
     today = today or local_today()
     detail = get_billing_run(db_path, run_id)
     run = detail.run
@@ -348,9 +444,8 @@ def issue_problems(db_path: Path, run_id: int, *, today: date | None = None) -> 
         problems.append("Diese Abrechnung wurde trotz offener Prüfpunkte (mit Begründung) freigegeben — sie gilt nur "
                         "als interne Auswertung. Rechnungen nur aus vollständig geprüften Abrechnungen: Daten "
                         "ergänzen, neu berechnen und ohne Übersteuerung freigeben.")
-    payee, iban = get_payment_details(db_path)
-    if not payee or not iban:
-        problems.append("Zahlungsangaben (Kontoinhaber, IBAN) fehlen.")
+    if include_payment and any(i.net_amount_chf > 0 for i in detail.line_items):
+        problems.extend(payment_problems(db_path))
     creditor = _creditor(db_path, today, run.period_start, run.period_end)
     if not creditor["name"] or not creditor["address_line"] or not creditor["city"]:
         problems.append("Name und Adresse des LEG-Vertreters fehlen (Vertrag bzw. Gemeinschaft).")
@@ -373,6 +468,12 @@ def issue_problems(db_path: Path, run_id: int, *, today: date | None = None) -> 
         if not (r.get("label") and r.get("address_line") and r.get("postal_code") and r.get("city")):
             problems.append(f"{item.participant_label}: Postadresse fehlte beim Berechnen der Abrechnung — Adresse "
                             "ergänzen, Abrechnung stornieren und neu berechnen.")
+        elif item.net_amount_chf > 0:
+            try:
+                _debtor(r["label"], r["address_line"], r["postal_code"], r["city"]).validated("Zahlungspflichtiger")
+            except SwissQrError as exc:
+                problems.append(f"{item.participant_label}: {exc} (QR-Rechnung) — Stammdaten korrigieren, "
+                                "Abrechnung stornieren und neu berechnen.")
         if item.participant_id in open_storno:
             problems.append(f"{item.participant_label}: Stornobeleg zu {open_storno[item.participant_id]} ist noch "
                             "nicht zugestellt — erst danach kann ein Ersatzbeleg erstellt werden.")
@@ -406,7 +507,8 @@ def recipient_changes(db_path: Path, run_id: int) -> list[str]:
 def documents_fingerprint(planned: list[dict]) -> str:
     """What the user approves: every planned document's number, recipient, amount and full text."""
     payload = [[p["number"], p["doc_type"], p["item"].participant_id, str(p["amount"]), p["address"],
-                p["recipient"].get("email", ""), _sha(p["html"])] for p in planned]
+                p["recipient"].get("email", ""), p["qr_payload"], p["profile_version"], _sha(p["html"])]
+               for p in planned]
     return _sha(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
@@ -416,7 +518,8 @@ def _planned_documents(db_path: Path, run_id: int, render: Renderer, today: date
     detail = get_billing_run(db_path, run_id)
     run = detail.run
     creditor = _creditor(db_path, today, run.period_start, run.period_end)
-    payee, iban = get_payment_details(db_path)
+    profile = get_payment_profile(db_path)
+    ready = payment_profile_status(db_path) == PROFILE_READY
     community = get_community(db_path)
     recipients = _recipients(conn, run_id)
     active = {r["participant_id"] for r in conn.execute(
@@ -443,16 +546,32 @@ def _planned_documents(db_path: Path, run_id: int, render: Renderer, today: date
         address = "\n".join(x for x in (recipient.get("address_line", ""),
                                          f"{recipient.get('postal_code', '')} {recipient.get('city', '')}".strip()) if x)
         replaces = replaced.get(item.participant_id)
+        qr, ref_type, reference = None, "", ""
+        if is_invoice and ready:
+            ref_type, reference = reference_for(profile.iban, number)
+            try:
+                qr = PaymentPartView(SwissQrPayload.build(
+                    iban=profile.iban, creditor=_profile_creditor(profile), amount=amount,
+                    debtor=_debtor(recipient.get("label", ""), recipient.get("address_line", ""),
+                                   recipient.get("postal_code", ""), recipient.get("city", "")),
+                    reference_type=ref_type, reference=reference,
+                    message=_qr_message(number, run.period_start, run.period_end)))
+            except SwissQrError as exc:
+                raise InvoicingError(f"QR-Rechnung {number}: {exc}")
         html = render("invoices/document.html", {
             "doc_type": doc_type, "number": number, "issue_date": today, "due_date": due, "amount": amount,
             "item": item, "run": run, "recipient": recipient, "creditor": creditor,
             "community_name": community.name if community else run.community_name,
-            "payee": payee, "iban": format_iban(iban), "replaces": replaces,
+            "contact_email": profile.contact_email or creditor["email"], "qr": qr,
+            "qr_missing": is_invoice and not ready, "replaces": replaces,
         })
         planned.append({"item": item, "doc_type": doc_type, "number": number, "due": due, "amount": amount,
                         "recipient": recipient, "address": address, "html": html,
                         "replaces_id": replaces[0] if replaces else None,
-                        "contract_versions": creditor["contract_versions"]})
+                        "contract_versions": creditor["contract_versions"],
+                        "qr_payload": qr.payload.text() if qr else "", "qr_reference": reference,
+                        "qr_reference_type": ref_type, "qr_iban": profile.iban if qr else "",
+                        "qr_payee": profile.payee if qr else "", "profile_version": profile.version if qr else ""})
     return planned
 
 
@@ -496,13 +615,17 @@ def issue_documents(db_path: Path, run_id: int, render: Renderer, *, today: date
                 """
                 INSERT INTO billing_documents (billing_run_id, participant_id, doc_type, number, status,
                     amount_chf, issue_date, due_date, recipient_label, recipient_email, recipient_address,
-                    replaces_document_id, contract_versions, snapshot_html, snapshot_sha256, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    replaces_document_id, contract_versions, snapshot_html, snapshot_sha256,
+                    qr_payload, qr_reference, qr_reference_type, qr_render_version, qr_iban_snapshot,
+                    qr_account_holder_snapshot, payment_profile_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (run_id, p["item"].participant_id, p["doc_type"], p["number"], DOC_STATUS_ISSUED, str(p["amount"]),
                  date_to_str(today), date_to_str(p["due"]), p["recipient"].get("label", ""),
                  p["recipient"].get("email", ""), p["address"], p["replaces_id"], p["contract_versions"],
-                 p["html"], _sha(p["html"]), now_iso()),
+                 p["html"], _sha(p["html"]), p["qr_payload"], p["qr_reference"], p["qr_reference_type"],
+                 QR_RENDER_VERSION if p["qr_payload"] else "", p["qr_iban"], p["qr_payee"], p["profile_version"],
+                 now_iso()),
             )
             created.append(cur.lastrowid)
             record_event(conn, "billing_document", cur.lastrowid, "issued",
@@ -839,7 +962,10 @@ def reminder_proposals(db_path: Path, *, today: date | None = None) -> list[Remi
 def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today: date | None = None) -> DocumentReminder:
     """Create the next due reminder, frozen like the invoice; debtor and address from the invoice snapshot."""
     today = today or local_today()
-    payee, iban = get_payment_details(db_path)
+    problems = payment_problems(db_path)
+    if problems:
+        raise InvoicingError(problems[0])
+    profile = get_payment_profile(db_path)
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
         _require_integrity(doc)
@@ -847,18 +973,37 @@ def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today:
         if proposal is None:
             raise InvoicingError("Für diese Rechnung ist derzeit keine Mahnung fällig (bezahlt, gesperrt, nicht "
                                  "versendet, vorherige Mahnung nicht versendet oder deren Frist läuft noch).")
+        # Same claim, same reference as the invoice; only the open amount is new.
+        if doc.qr_reference:
+            if doc.qr_reference_type != reference_type_for(profile.iban):
+                raise InvoicingError(
+                    f"Die Referenz der Rechnung ({doc.qr_reference_type}) passt nicht zum aktuellen Konto "
+                    f"({reference_type_for(profile.iban)}) — Zahlungserinnerung manuell mit den Kontodaten der "
+                    "Rechnung erstellen oder Rechnung stornieren und neu ausstellen.")
+            ref_type, reference = doc.qr_reference_type, doc.qr_reference
+        else:
+            ref_type, reference = reference_for(profile.iban, doc.number)
+        try:
+            qr = PaymentPartView(SwissQrPayload.build(
+                iban=profile.iban, creditor=_profile_creditor(profile), amount=doc.open_chf,
+                debtor=_debtor_from_document(doc), reference_type=ref_type, reference=reference,
+                message=_qr_message(doc.number, doc.period_start, doc.period_end)))
+        except SwissQrError as exc:
+            raise InvoicingError(f"QR-Zahlteil der Mahnung: {exc}")
         creditor = _creditor(db_path, today, doc.period_start, doc.period_end)
         new_due = today + timedelta(days=REMINDER_PAYMENT_DAYS)
         html = render("invoices/reminder.html", {
             "doc": doc, "level": proposal.level, "label": REMINDER_LABELS[proposal.level], "issue_date": today,
             "open_amount": doc.open_chf, "new_due_date": new_due, "creditor": creditor,
-            "payee": payee, "iban": format_iban(iban),
+            "community_name": (get_community(db_path).name if get_community(db_path) else ""),
+            "contact_email": profile.contact_email or creditor["email"], "qr": qr, "qr_missing": False,
         })
         cur = conn.execute(
             "INSERT INTO document_reminders (document_id, level, issue_date, open_amount_chf, snapshot_html, "
-            "snapshot_sha256, new_due_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "snapshot_sha256, new_due_date, qr_payload, qr_reference, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (doc.id, proposal.level, date_to_str(today), str(doc.open_chf), html, _sha(html),
-             date_to_str(new_due), now_iso()))
+             date_to_str(new_due), qr.payload.text(), reference, now_iso()))
         reminder_id = cur.lastrowid
         record_event(conn, "billing_document", doc.id, "reminder_created",
                      f"{doc.number} {REMINDER_LABELS[proposal.level]} offen CHF {doc.open_chf}")

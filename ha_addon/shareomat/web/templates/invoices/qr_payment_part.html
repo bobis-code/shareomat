@@ -1,0 +1,56 @@
+{# Swiss QR bill payment part with receipt (SIX style guide): 210 x 105 mm,
+   receipt 62 mm, payment part 148 mm, QR code 46 x 46 mm with Swiss cross.
+   Every value shown comes from the same validated SwissQrPayload as the
+   code itself (qr.payload). Fixed mm sizes — print at 100 %, no scaling.
+   Without a ready payment profile only a grey placeholder is rendered:
+   never a QR code that isn't a valid payment. #}
+{% if qr %}
+{% set p = qr.payload %}
+{% macro addr(a) %}{{ a.name }}<br>{% if a.street %}{{ a.street }}{% if a.building %} {{ a.building }}{% endif %}<br>{% endif %}{{ a.postal_code }} {{ a.city }}{% endmacro %}
+<div class="qr-bill" style="width:210mm;height:105mm;box-sizing:border-box;display:flex;font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;border-top:0.2mm dashed #000;position:relative;page-break-inside:avoid;break-inside:avoid;line-height:1.15">
+  <span style="position:absolute;top:-2.6mm;left:3mm;font-size:9pt">&#9986;</span>
+  <div style="width:62mm;height:105mm;box-sizing:border-box;padding:5mm;border-right:0.2mm dashed #000;position:relative">
+    <span style="position:absolute;top:3mm;right:-2.1mm;font-size:9pt;transform:rotate(-90deg)">&#9986;</span>
+    <div style="font-size:11pt;font-weight:bold;height:7mm">Empfangsschein</div>
+    <div style="height:56mm;font-size:8pt">
+      <div style="font-size:6pt;font-weight:bold">Konto / Zahlbar an</div>
+      <div style="margin-bottom:3mm">{{ qr.iban_display }}<br>{{ addr(p.creditor) }}</div>
+      {% if p.reference %}<div style="font-size:6pt;font-weight:bold">Referenz</div>
+      <div style="margin-bottom:3mm">{{ qr.reference_display }}</div>{% endif %}
+      <div style="font-size:6pt;font-weight:bold">Zahlbar durch</div>
+      <div>{{ addr(p.debtor) if p.debtor }}</div>
+    </div>
+    <div style="height:14mm;display:flex;font-size:8pt">
+      <div style="width:22mm"><div style="font-size:6pt;font-weight:bold">Währung</div>{{ p.currency }}</div>
+      <div><div style="font-size:6pt;font-weight:bold">Betrag</div>{{ '{:,.2f}'.format(p.amount).replace(',', ' ') if p.amount is not none }}</div>
+    </div>
+    <div style="height:18mm;text-align:right;font-size:6pt;font-weight:bold">Annahmestelle</div>
+  </div>
+  <div style="width:148mm;height:105mm;box-sizing:border-box;padding:5mm;display:flex">
+    <div style="width:51mm">
+      <div style="font-size:11pt;font-weight:bold;height:7mm">Zahlteil</div>
+      <div style="margin:5mm 0 5mm 0;width:46mm;height:46mm">{{ qr.svg | safe }}</div>
+      <div style="display:flex;font-size:10pt">
+        <div style="width:22mm"><div style="font-size:8pt;font-weight:bold">Währung</div>{{ p.currency }}</div>
+        <div><div style="font-size:8pt;font-weight:bold">Betrag</div>{{ '{:,.2f}'.format(p.amount).replace(',', ' ') if p.amount is not none }}</div>
+      </div>
+    </div>
+    <div style="width:87mm;font-size:10pt">
+      <div style="font-size:8pt;font-weight:bold">Konto / Zahlbar an</div>
+      <div style="margin-bottom:3mm">{{ qr.iban_display }}<br>{{ addr(p.creditor) }}</div>
+      {% if p.reference %}<div style="font-size:8pt;font-weight:bold">Referenz</div>
+      <div style="margin-bottom:3mm">{{ qr.reference_display }}</div>{% endif %}
+      {% if p.message %}<div style="font-size:8pt;font-weight:bold">Zusätzliche Informationen</div>
+      <div style="margin-bottom:3mm">{{ p.message }}</div>{% endif %}
+      <div style="font-size:8pt;font-weight:bold">Zahlbar durch</div>
+      <div>{{ addr(p.debtor) if p.debtor }}</div>
+    </div>
+  </div>
+</div>
+{% elif qr_missing %}
+<div class="qr-bill qr-missing" style="width:210mm;height:105mm;box-sizing:border-box;border:0.4mm dashed #999;background:#f3f3f3;color:#555;font-family:Arial,Helvetica,sans-serif;display:flex;align-items:center;justify-content:center;text-align:center">
+  <div><strong style="font-size:12pt">Swiss QR-Zahlteil</strong><br><br>
+    <span style="color:#b91c1c;font-weight:bold">Bankdaten fehlen – nicht versandbereit</span><br>
+    Wird nach Eingabe und Bestätigung einer gültigen IBAN<br>mit Empfänger, Betrag und Rechnungsreferenz erzeugt.</div>
+</div>
+{% endif %}

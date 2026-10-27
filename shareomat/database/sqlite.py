@@ -545,6 +545,15 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "cancel_number": "TEXT",
         "cancel_snapshot_html": "TEXT NOT NULL DEFAULT ''",
         "cancel_sha256": "TEXT NOT NULL DEFAULT ''",
+        # Swiss QR bill, frozen at issue time (invoices only): the exact encoded
+        # text, its reference and the account/holder it was made for.
+        "qr_payload": "TEXT NOT NULL DEFAULT ''",
+        "qr_reference": "TEXT NOT NULL DEFAULT ''",
+        "qr_reference_type": "TEXT NOT NULL DEFAULT ''",
+        "qr_render_version": "TEXT NOT NULL DEFAULT ''",
+        "qr_iban_snapshot": "TEXT NOT NULL DEFAULT ''",
+        "qr_account_holder_snapshot": "TEXT NOT NULL DEFAULT ''",
+        "payment_profile_version": "TEXT NOT NULL DEFAULT ''",
     },
     "document_deliveries": {
         "item": "TEXT NOT NULL DEFAULT 'document'",   # document | reminder | cancellation
@@ -552,6 +561,8 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
     "document_reminders": {
         "new_due_date": "TEXT",
         "discarded_at": "TEXT",
+        "qr_payload": "TEXT NOT NULL DEFAULT ''",
+        "qr_reference": "TEXT NOT NULL DEFAULT ''",
     },
     "participant_contract": {
         # Separate from accepted_at: accepted_at is the participant's original,
