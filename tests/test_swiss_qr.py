@@ -244,3 +244,139 @@ def issued_qr(db_path, runtime):
     _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     return run_id
+
+
+# ── audit round 4 (71267d3) ─────────────────────────────────────────────────
+
+
+def test_tampered_qr_reference_fails_integrity_and_blocks_reminders(db_path, runtime, issued_qr):
+    """P1-01 reproduced: only billing_documents.qr_reference changed -> integrity fails, no reminder."""
+    from shareomat.database.sqlite import connect
+
+    docs = _by_participant(db_path)
+    a, b = docs["cons_a"], docs["cons_b"]
+    record_delivery(db_path, a.id, "paper")
+    for column, value in (("qr_reference", b.qr_reference), ("qr_iban_snapshot", "CH4431999123000889012"),
+                          ("amount_chf", "9.99"), ("qr_payload", b.qr_payload)):
+        with connect(db_path) as conn:
+            with conn:
+                original = conn.execute(f"SELECT {column} FROM billing_documents WHERE id = ?", (a.id,)).fetchone()[0]
+                conn.execute(f"UPDATE billing_documents SET {column} = ? WHERE id = ?", (value, a.id))
+        assert not get_document(db_path, a.id).integrity_ok, column
+        with pytest.raises(InvoicingError, match="Prüfsumme"):
+            create_reminder(db_path, a.id, render_document, today=a.due_date + timedelta(days=5))
+        with connect(db_path) as conn:
+            with conn:
+                conn.execute(f"UPDATE billing_documents SET {column} = ? WHERE id = ?", (original, a.id))
+        assert get_document(db_path, a.id).integrity_ok
+    reminder = create_reminder(db_path, a.id, render_document, today=a.due_date + timedelta(days=5))
+    assert reminder.qr_reference == a.qr_reference and reminder.integrity_ok
+
+
+def test_tampered_reminder_record_fails_integrity(db_path, runtime, issued_qr):
+    from shareomat.database.sqlite import connect
+
+    doc = _by_participant(db_path)["cons_a"]
+    record_delivery(db_path, doc.id, "paper")
+    reminder = create_reminder(db_path, doc.id, render_document, today=doc.due_date + timedelta(days=5))
+    with connect(db_path) as conn:
+        with conn:
+            conn.execute("UPDATE document_reminders SET open_amount_chf = '0.01' WHERE id = ?", (reminder.id,))
+    assert not get_document(db_path, doc.id).integrity_ok
+
+
+def test_data_that_would_overflow_the_payment_part_is_refused():
+    """P1-03: allowed field lengths alone don't guarantee a legible payment part -> hard stop, no cutting."""
+    long_creditor = QrAddress(name="A" * 70, street="B" * 70, building="1" * 16, postal_code="4000", city="C" * 35)
+    long_debtor = QrAddress(name="Kunde " + "Langer" * 10, street="Testgasse", building="2", postal_code="4000",
+                            city="Musterdorf")
+    with pytest.raises(SwissQrError, match="zu lang"):
+        _payload(creditor=long_creditor, debtor=long_debtor, message="x" * 140)
+    _payload(debtor=long_debtor)                    # a long debtor name alone still fits (wrapped)
+
+
+def test_issuing_is_blocked_when_the_payment_part_would_overflow(db_path, runtime):
+    run_id = _released_run(db_path, runtime, _SIMPLE)
+    save_payment_profile(db_path, PaymentProfile(payee="A" * 70, street="B" * 70, building="1" * 16,
+                                                 postal_code="4000", city="C" * 35, iban=IBAN))
+    confirm_payment_profile(db_path, version=get_payment_profile(db_path).version)
+    with pytest.raises(InvoicingError, match="zu lang"):
+        issue_documents(db_path, run_id, render_document, today=ISSUED)
+
+
+def test_qr_iban_only_in_chf():
+    """P2-01: QR-IBAN/QRR is CHF only (IG 2.4)."""
+    with pytest.raises(SwissQrError, match="nur in CHF"):
+        _payload(iban=QR_IBAN, reference_type="QRR", reference=qr_reference("R-2026-001"), currency="EUR")
+    _payload(currency="EUR")
+
+
+def test_country_must_be_an_iso_code():
+    """P2-02: ZZ is not an ISO 3166-1 code."""
+    with pytest.raises(SwissQrError, match="ISO-3166"):
+        _payload(creditor=QrAddress(name="X", postal_code="4000", city="Basel", country="ZZ"))
+    _payload(creditor=QrAddress(name="X", postal_code="9490", city="Vaduz", country="LI"))
+
+
+def test_sample_without_debtor_has_the_writing_field_with_corner_marks(db_path):
+    """P2-03: empty debtor -> 'Zahlbar durch (Name/Adresse)' with corner marks on receipt and payment part."""
+    from shareomat.database.invoicing import sample_payment_part
+    from shareomat.web.rendering import _env
+
+    _ready_profile(db_path)
+    html = _env.get_template("invoices/qr_payment_part.html").render(qr=sample_payment_part(db_path))
+    assert html.count("Zahlbar durch (Name/Adresse)") == 2
+    assert 'width="52mm" height="20mm"' in html and 'width="65mm" height="25mm"' in html
+
+
+def _browser() -> str | None:
+    import shutil
+    from pathlib import Path
+
+    for candidate in ("msedge", "chrome", "chromium", "google-chrome",
+                      r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                      r"C:\Program Files\Google\Chrome\Application\chrome.exe"):
+        found = shutil.which(candidate) or (candidate if Path(candidate).exists() else None)
+        if found:
+            return found
+    return None
+
+
+@pytest.mark.skipif(_browser() is None, reason="needs Edge/Chrome for the print geometry test")
+def test_printed_payment_part_sits_at_the_bottom_of_a4(db_path, runtime, issued_qr, tmp_path):
+    """P1-02 / P2-04: real A4 print (headless browser): one page, payment part 105 mm at the bottom edge,
+    QR 46 x 46 mm at x 67 / y 209 mm, and — when OpenCV is available — the printed code decodes to the payload."""
+    import subprocess
+
+    fitz = pytest.importorskip("fitz")
+    from shareomat.web.pages import invoices as invoices_page
+    from shareomat.web.rendering import RequestContext
+
+    doc = _by_participant(db_path)["cons_a"]
+    html = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", segments=[str(doc.id), "print"]))
+    page_file, pdf_file = tmp_path / "invoice.html", tmp_path / "invoice.pdf"
+    page_file.write_text(html, encoding="utf-8")
+    subprocess.run([_browser(), "--headless=new", "--disable-gpu", "--no-pdf-header-footer",
+                    f"--print-to-pdf={pdf_file}", page_file.as_uri()], check=True, timeout=120,
+                   capture_output=True)
+    pdf = fitz.open(pdf_file)
+    mm = 72 / 25.4
+    assert len(pdf) == 1
+    page = pdf[0]
+    assert abs(page.rect.height / mm - 297) < 0.5
+    receipt = page.search_for("Empfangsschein")[0]
+    assert abs(receipt.y0 / mm - 197.3) < 1.0                   # 192 mm separator + 5 mm margin
+    qr_boxes = [d["rect"] for d in page.get_drawings()
+                if abs(d["rect"].width / mm - 46) < 0.3 and abs(d["rect"].height / mm - 46) < 0.3]
+    assert qr_boxes and abs(qr_boxes[0].x0 / mm - 67) < 0.5 and abs(qr_boxes[0].y0 / mm - 209) < 0.8
+    sha = page.search_for("SHA-256")[0]
+    assert sha.y1 / mm < 192                                    # nothing of the letter below the separator
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        return
+    pix = page.get_pixmap(dpi=300)
+    image = np.frombuffer(pix.samples, np.uint8).reshape(pix.h, pix.w, pix.n)[:, :, :3]
+    text, *_ = cv2.QRCodeDetectorAruco().detectAndDecode(cv2.cvtColor(image, cv2.COLOR_RGB2GRAY))
+    assert text == doc.qr_payload
