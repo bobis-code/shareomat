@@ -19,16 +19,13 @@
     {% if p.problems %}
     <div class="error-box"><ul style="margin:0 0 0 1rem;padding:0">{% for i in p.problems %}<li>{{ i }}</li>{% endfor %}</ul></div>
     {% else %}
-    <form method="post" action="{{ url_for('invoices', suffix='/issue') }}" style="display:inline">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="run_id" value="{{ p.run.id }}">
-      <button type="submit">Rechnungen &amp; Gutschriften erstellen</button>
-    </form>
+    <a class="btn" href="{{ url_for('invoices', suffix='/runs/' + p.run.id|string + '/preview') }}">Vorschau &amp; Freigabe</a>
     {% endif %}
   </div>
   {% endfor %}
   <div class="ts">Erstellte Belege werden unveränderlich gespeichert (mit Prüfsumme). Fehler korrigieren: Beleg
-    stornieren (nur ohne gebuchte Zahlung), Daten berichtigen, Beleg neu erstellen.</div>
+    stornieren (nur ohne gebuchte Zahlung; war er schon zugestellt, entsteht ein Stornobeleg, der zuerst zugestellt
+    werden muss), danach Ersatzbeleg erstellen. Nur Abrechnungen ohne Übersteuerung können verrechnet werden.</div>
 </div>
 {% endif %}
 
@@ -121,10 +118,15 @@
 <div class="card">
   <h2>Regeln</h2>
   <ul>
-    <li>Ein Beleg pro Teilnehmer und Abrechnung; Prosumer erhalten den Saldo (Ziff. 3.4).</li>
+    <li>Ein Beleg pro Teilnehmer und Abrechnung; Prosumer erhalten den Saldo (Ziff. 3.4), bei Saldo 0 kein Beleg.</li>
+    <li>Nur vollständig geprüfte Abrechnungen (ohne Freigabe-Übersteuerung) werden verrechnet; Empfänger gemäss
+      Stand beim Berechnen der Abrechnung.</li>
     <li>Zahlungsfrist gemäss Vertrag, ab Rechnungsdatum.</li>
     <li>Mahnvorschläge {{ offsets|join(' / ') }} Tage nach Fälligkeit, ohne Gebühren; Erstellen und Versand nur von Hand.</li>
-    <li>Gutschriften: Auszahlung nur aus eingegangenen Bezüger-Zahlungen, anteilig; nie automatisch.</li>
+    <li>Gutschriften: Auszahlung nur aus eingegangenen Bezüger-Zahlungen, anteilig (auf den Rappen abgerundet,
+      Restrappen nach vollständigem Eingang); nie automatisch.</li>
+    <li>Zahlungen, Auszahlungen und Zustellungen werden manuell erfasst (kein Bankabgleich); eine bereits verwendete
+      Referenz wird nur nach ausdrücklicher Bestätigung nochmals angenommen.</li>
     <li>Versand: Papier/PDF (Drucken) oder E-Mail; jede Zustellung wird protokolliert, ein erneuter Versand erzeugt
       keine neue Forderung. Direkter E-Mail-Versand aus Shareomat folgt.</li>
   </ul>

@@ -431,8 +431,9 @@ _SCHEMA_STATEMENTS = [
         open_amount_chf TEXT NOT NULL,
         snapshot_html TEXT NOT NULL,
         snapshot_sha256 TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        UNIQUE(document_id, level)
+        new_due_date TEXT,
+        discarded_at TEXT,
+        created_at TEXT NOT NULL
     )
     """,
     """
@@ -524,12 +525,33 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "result_fingerprint": "TEXT NOT NULL DEFAULT ''",
     },
     "billing_records": {
+        # Recipient as of saving the draft (label, address, e-mail as JSON):
+        # documents are addressed from this, never from the current master data.
+        "recipient_snapshot": "TEXT NOT NULL DEFAULT ''",
         "producer_credit_chf": "TEXT NOT NULL DEFAULT '0'",
         # Rounded to 0.01 CHF per document: charge (Rechnung) and credit
         # (Gutschrift) are shown separately, net = charge - credit (Saldo).
         "charge_chf": "TEXT NOT NULL DEFAULT '0'",
         "credit_chf": "TEXT NOT NULL DEFAULT '0'",
         "net_amount_chf": "TEXT NOT NULL DEFAULT '0'",
+    },
+    "billing_documents": {
+        "recipient_address": "TEXT NOT NULL DEFAULT ''",
+        # A replacement document points to the cancelled one it replaces.
+        "replaces_document_id": "INTEGER REFERENCES billing_documents(id)",
+        "contract_versions": "TEXT NOT NULL DEFAULT ''",
+        # Cancelling a delivered document produces a numbered cancellation
+        # notice (Stornobeleg) that must itself be delivered.
+        "cancel_number": "TEXT",
+        "cancel_snapshot_html": "TEXT NOT NULL DEFAULT ''",
+        "cancel_sha256": "TEXT NOT NULL DEFAULT ''",
+    },
+    "document_deliveries": {
+        "item": "TEXT NOT NULL DEFAULT 'document'",   # document | reminder | cancellation
+    },
+    "document_reminders": {
+        "new_due_date": "TEXT",
+        "discarded_at": "TEXT",
     },
     "participant_contract": {
         # Separate from accepted_at: accepted_at is the participant's original,
@@ -565,6 +587,15 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "paper_original_location": "TEXT NOT NULL DEFAULT ''",
     },
 }
+
+
+# Run after _ensure_columns: they use columns that older databases only get by migration.
+_POST_MIGRATION_STATEMENTS = [
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_document_reminders_active
+        ON document_reminders(document_id, level) WHERE discarded_at IS NULL
+    """,
+]
 
 
 def _ensure_columns(conn: sqlite3.Connection) -> None:
@@ -618,6 +649,8 @@ def init_db(db_path: Path) -> None:
             for statement in _SCHEMA_STATEMENTS:
                 conn.execute(statement)
             _ensure_columns(conn)
+            for statement in _POST_MIGRATION_STATEMENTS:
+                conn.execute(statement)
             applied = conn.execute(
                 "SELECT 1 FROM schema_migrations WHERE version = ?", (_SCHEMA_VERSION,)
             ).fetchone()

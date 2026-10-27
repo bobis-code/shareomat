@@ -1,0 +1,23 @@
+{# Cancellation notice (Stornobeleg) for a document that had already been
+   delivered — frozen in billing_documents.cancel_snapshot_html. It formally
+   withdraws the original claim/credit; a replacement document refers back
+   to it. #}
+<div class="doc-head">
+  <div class="doc-sender">
+    {{ creditor.name }}<br>{{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
+    {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
+  </div>
+  <div class="doc-recipient">
+    {{ doc.recipient_label }}{% for line in doc.recipient_address.split('\n') %}<br>{{ line }}{% endfor %}
+  </div>
+</div>
+
+<p class="doc-date">{{ creditor.city }}, {{ issue_date.strftime('%d.%m.%Y') }}</p>
+
+<h2>Stornobeleg {{ number }}</h2>
+<p>{{ 'Die Rechnung' if doc.is_invoice else 'Die Gutschrift' }} <strong>{{ doc.number }}</strong> vom
+  {{ doc.issue_date.strftime('%d.%m.%Y') }} über CHF {{ '%.2f'|format(doc.amount_chf) }} für die
+  Abrechnungsperiode {{ doc.period_start.strftime('%d.%m.%Y') }} – {{ doc.period_end.strftime('%d.%m.%Y') }}
+  wird hiermit vollständig storniert{% if doc.is_invoice %} und ist nicht zu bezahlen{% endif %}.</p>
+<p>Grund: {{ reason }}</p>
+<p>Sie erhalten für diese Abrechnungsperiode einen neuen Beleg, der auf diesen Stornobeleg verweist.</p>

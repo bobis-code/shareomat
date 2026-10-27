@@ -5,7 +5,7 @@ File: shareomat/database/invoicing.py
 Purpose:
     "Rechnungen & Gutschriften": issue one document per participant from a
     released billing run, and keep the append-only logs of payments
-    received, producer payouts, deliveries and payment reminders.
+    received, refunds, producer payouts, deliveries and payment reminders.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
@@ -13,32 +13,49 @@ Part of:
 Notes:
     Contract §3.4 (Mustervertrag + decision of 27.10.2026):
       - Prosumers get ONE document with the net balance: invoice when the
-        charge exceeds the credit, credit note otherwise.
+        charge exceeds the credit, credit note otherwise; a zero balance
+        gets no document.
       - Credits are paid out only from, and as far as, consumer payments for
-        the same billing run arrived, distributed pro rata to the credits
-        (largest-remainder cents). The representative never pre-finances,
-        so a payout above the available share is refused.
+        the same billing run arrived. Each producer's share is
+        floor(received x credit / all credits) to the cent — monotone in the
+        received amount, so a later payment can never lower a share that was
+        already paid out; the last cents follow once everything was paid.
+        Every payout is checked against both the producer's share and the
+        run total (sum of payouts <= received) — no pre-financing.
 
-    Issuing is all-or-nothing per run and idempotent: a second call only
-    issues documents for participants that have none (e.g. after a
-    cancelled document was corrected). A document can be cancelled only
-    while nothing was booked on it; its number is never reused.
+    Integrity:
+      - Every check-then-write runs in ONE write transaction (BEGIN
+        IMMEDIATE), so two concurrent clicks can't both pass a check.
+      - Documents are rendered once and frozen with SHA-256; recipients come
+        from the snapshot taken when the billing draft was saved, never from
+        the current master data.
+      - Only runs released WITHOUT an override (all quality checks passed)
+        can be invoiced; an overridden run stays an internal evaluation.
+      - A delivered document can only be cancelled with a numbered
+        cancellation notice (Stornobeleg) that must be delivered before a
+        replacement is issued; an undelivered one is simply cancelled.
+        Nothing booked on it is a precondition either way.
+      - A payment reference already used needs an explicit confirmation
+        (double booking of one bank transfer).
 
     Rendering is injected (`render(template_name, context) -> html`) so this
-    module stays free of the web layer; the HTML is frozen with its SHA-256.
+    module stays free of the web layer.
 
     Not yet here (later phases): e-mail sending via SMTP, Swiss QR bill,
-    pain.001 payout files, correction documents for corrected grid-operator
-    data.
+    camt.054 bank import, pain.001 payout files, correction documents after
+    payments or for corrected grid-operator data.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
-from collections.abc import Callable
+import sqlite3
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
@@ -47,12 +64,12 @@ from zoneinfo import ZoneInfo
 from shareomat.database.audit import record_event
 from shareomat.database.billing import get_billing_run
 from shareomat.database.community import get_community
-from shareomat.database.contract_versions import get_contract_version_for_date
-from shareomat.database.participants import get_participant, list_participants
+from shareomat.database.contract_versions import get_contract_version_for_date, list_contract_versions
 from shareomat.database.settings import get_setting, set_setting
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
-from shareomat.leg_const import BILLING_STATUS_RELEASED
+from shareomat.leg_const import BILLING_STATUS_RELEASED, CONTRACT_STATUS_PUBLISHED
 from shareomat.models.invoicing import (
+    DELIVERY_ITEMS,
     DELIVERY_METHODS,
     DOC_STATUS_CANCELLED,
     DOC_STATUS_ISSUED,
@@ -60,6 +77,7 @@ from shareomat.models.invoicing import (
     DOC_TYPE_INVOICE,
     PAYMENT_KIND_PAYMENT,
     PAYMENT_KIND_PAYOUT,
+    PAYMENT_KIND_REFUND,
     REMINDER_LABELS,
     REMINDER_OFFSETS_DAYS,
     BillingDocument,
@@ -80,6 +98,9 @@ Renderer = Callable[[str, dict], str]
 SETTING_PAYEE = "invoice_payee"
 SETTING_IBAN = "invoice_iban"
 
+REMINDER_PAYMENT_DAYS = 10    # new payment deadline printed on a reminder
+REMINDER_GRACE_DAYS = 5       # after that deadline before the next level is proposed
+
 
 class InvoicingError(Exception):
     """A document action was refused; the message is shown to the user."""
@@ -87,6 +108,23 @@ class InvoicingError(Exception):
 
 def local_today() -> date:
     return datetime.now(_TZ).date()
+
+
+@contextmanager
+def _write_txn(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """One write transaction taken BEFORE the checks read anything (serializes concurrent writers)."""
+    with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 # ── payment details (Zahlungsangaben) ───────────────────────────────────────
@@ -128,113 +166,17 @@ def save_payment_details(db_path: Path, payee: str, iban: str) -> None:
     set_setting(db_path, SETTING_IBAN, iban)
 
 
-# ── issuing ─────────────────────────────────────────────────────────────────
-
-
-def _next_number(conn, prefix: str, year: int) -> str:
-    stem = f"{prefix}-{year}-"
-    rows = conn.execute("SELECT number FROM billing_documents WHERE number LIKE ?", (stem + "%",)).fetchall()
-    used = [int(r["number"][len(stem):]) for r in rows if r["number"][len(stem):].isdigit()]
-    return f"{stem}{(max(used) + 1 if used else 1):03d}"
-
-
-def issue_problems(db_path: Path, run_id: int) -> list[str]:
-    """Reasons the documents of a run can't be issued yet (empty = ready)."""
-    detail = get_billing_run(db_path, run_id)
-    problems: list[str] = []
-    if detail.run.status != BILLING_STATUS_RELEASED:
-        problems.append("Nur freigegebene Abrechnungen können verrechnet werden.")
-    payee, iban = get_payment_details(db_path)
-    if not payee or not iban:
-        problems.append("Zahlungsangaben (Kontoinhaber, IBAN) fehlen.")
-    creditor = _creditor(db_path, detail.run.period_end)
-    if not creditor["name"] or not creditor["address_line"] or not creditor["city"]:
-        problems.append("Name und Adresse des LEG-Vertreters fehlen (Vertrag bzw. Gemeinschaft).")
-    participants = {p.participant_id: p for p in list_participants(db_path)}
-    for item in detail.line_items:
-        if item.charge_chf == 0 and item.credit_chf == 0:
-            continue
-        p = participants.get(item.participant_id)
-        if p is None:
-            problems.append(f"Teilnehmer {item.participant_id} existiert nicht mehr.")
-        elif not (p.address_line and p.postal_code and p.city):
-            problems.append(f"{p.label}: Postadresse unvollständig.")
-    return problems
-
-
-def _creditor(db_path: Path, as_of: date | None) -> dict:
-    version = get_contract_version_for_date(db_path, as_of) if as_of else None
-    if version is not None and version.representative_name:
-        return {"name": version.representative_name, "address_line": version.representative_address_line,
-                "postal_code": version.representative_postal_code, "city": version.representative_city,
-                "email": version.representative_email, "contract_version": version.version,
-                "payment_term_days": version.payment_term_days}
-    community = get_community(db_path)
-    return {"name": community.name if community else "", "address_line": community.address_line if community else "",
-            "postal_code": community.postal_code if community else "", "city": community.city if community else "",
-            "email": "", "contract_version": None, "payment_term_days": 30}
-
-
-def issue_documents(db_path: Path, run_id: int, render: Renderer, *, today: date | None = None) -> list[BillingDocument]:
-    """Issue the missing invoices/credit notes of a released run (all or nothing). Returns the new ones."""
-    problems = issue_problems(db_path, run_id)
-    if problems:
-        raise InvoicingError("Belege können nicht erstellt werden: " + " ".join(problems))
-    today = today or local_today()
-    detail = get_billing_run(db_path, run_id)
-    run = detail.run
-    creditor = _creditor(db_path, run.period_end)
-    payee, iban = get_payment_details(db_path)
-    community = get_community(db_path)
-    participants = {p.participant_id: p for p in list_participants(db_path)}
-    created: list[int] = []
-    with connect(db_path) as conn:
-        with conn:
-            existing = {r["participant_id"] for r in conn.execute(
-                "SELECT participant_id FROM billing_documents WHERE billing_run_id = ? AND status != ?",
-                (run_id, DOC_STATUS_CANCELLED))}
-            for item in detail.line_items:
-                if item.participant_id in existing or (item.charge_chf == 0 and item.credit_chf == 0):
-                    continue
-                p = participants[item.participant_id]
-                is_invoice = item.net_amount_chf > 0 or (item.net_amount_chf == 0 and item.charge_chf > 0)
-                doc_type = DOC_TYPE_INVOICE if is_invoice else DOC_TYPE_CREDIT
-                number = _next_number(conn, "R" if is_invoice else "G", today.year)
-                due = today + timedelta(days=int(creditor["payment_term_days"])) if is_invoice else None
-                amount = abs(item.net_amount_chf)
-                html = render("invoices/document.html", {
-                    "doc_type": doc_type, "number": number, "issue_date": today, "due_date": due,
-                    "amount": amount, "item": item, "run": run, "participant": p, "creditor": creditor,
-                    "community_name": community.name if community else run.community_name,
-                    "payee": payee, "iban": format_iban(iban),
-                })
-                cur = conn.execute(
-                    """
-                    INSERT INTO billing_documents (billing_run_id, participant_id, doc_type, number, status,
-                        amount_chf, issue_date, due_date, recipient_label, recipient_email, snapshot_html,
-                        snapshot_sha256, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (run_id, p.participant_id, doc_type, number, DOC_STATUS_ISSUED, str(amount),
-                     date_to_str(today), date_to_str(due), p.label, p.email, html,
-                     hashlib.sha256(html.encode("utf-8")).hexdigest(), now_iso()),
-                )
-                created.append(cur.lastrowid)
-                record_event(conn, "billing_document", cur.lastrowid, "issued",
-                             f"{number} {p.label} CHF {amount} (Abrechnung {run_id})")
-    logger.info("Invoicing: issued %d document(s) for run %d", len(created), run_id)
-    return [get_document(db_path, doc_id) for doc_id in created]
-
-
 # ── reading ─────────────────────────────────────────────────────────────────
 
 _DOC_SELECT = """
     SELECT d.*, bp.period_start AS bp_start, bp.period_end AS bp_end,
-           r.local_received_kwh AS rec_received, r.local_supplied_kwh AS rec_supplied
+           r.local_received_kwh AS rec_received, r.local_supplied_kwh AS rec_supplied,
+           rep.number AS replaces_number
     FROM billing_documents d
     JOIN billing_runs br ON br.id = d.billing_run_id
     JOIN billing_periods bp ON bp.id = br.billing_period_id
     LEFT JOIN billing_records r ON r.billing_run_id = d.billing_run_id AND r.participant_id = d.participant_id
+    LEFT JOIN billing_documents rep ON rep.id = d.replaces_document_id
 """
 
 
@@ -252,18 +194,25 @@ def _load_logs(conn, doc: BillingDocument) -> None:
     doc.booked_chf = sum((p.amount_chf for p in doc.payments), Decimal(0))
     doc.deliveries = [
         DocumentDelivery(id=r["id"], document_id=r["document_id"], reminder_id=r["reminder_id"], method=r["method"],
-                         status=r["status"], detail=r["detail"], recorded_at=_ts(r["recorded_at"]))
+                         status=r["status"], detail=r["detail"], item=r["item"], recorded_at=_ts(r["recorded_at"]))
         for r in conn.execute("SELECT * FROM document_deliveries WHERE document_id = ? ORDER BY id", (doc.id,))
     ]
-    sent = [d.recorded_at for d in doc.deliveries if d.status == "sent" and d.reminder_id is None]
-    doc.sent_at = sent[0] if sent else None
-    doc.reminders = []
-    for r in conn.execute("SELECT * FROM document_reminders WHERE document_id = ? ORDER BY level", (doc.id,)):
-        reminder_sent = [d.recorded_at for d in doc.deliveries if d.status == "sent" and d.reminder_id == r["id"]]
-        doc.reminders.append(DocumentReminder(
+
+    def first_sent(item: str, reminder_id: int | None = None) -> datetime | None:
+        sent = [d.recorded_at for d in doc.deliveries
+                if d.status == "sent" and d.item == item and d.reminder_id == reminder_id]
+        return sent[0] if sent else None
+
+    doc.sent_at = first_sent("document")
+    doc.cancellation_sent_at = first_sent("cancellation")
+    doc.reminders = [
+        DocumentReminder(
             id=r["id"], document_id=r["document_id"], level=r["level"], issue_date=str_to_date(r["issue_date"]),
             open_amount_chf=Decimal(r["open_amount_chf"]), snapshot_html=r["snapshot_html"],
-            snapshot_sha256=r["snapshot_sha256"], sent_at=reminder_sent[0] if reminder_sent else None))
+            snapshot_sha256=r["snapshot_sha256"], new_due_date=str_to_date(r["new_due_date"]),
+            discarded_at=_ts(r["discarded_at"]), sent_at=first_sent("reminder", r["id"]))
+        for r in conn.execute("SELECT * FROM document_reminders WHERE document_id = ? ORDER BY id", (doc.id,))
+    ]
 
 
 def _row_to_document(row) -> BillingDocument:
@@ -274,11 +223,32 @@ def _row_to_document(row) -> BillingDocument:
         doc_type=row["doc_type"], number=row["number"], status=row["status"], amount_chf=Decimal(row["amount_chf"]),
         issue_date=str_to_date(row["issue_date"]), due_date=str_to_date(row["due_date"]),
         recipient_label=row["recipient_label"], recipient_email=row["recipient_email"],
+        recipient_address=row["recipient_address"],
         snapshot_html=row["snapshot_html"], snapshot_sha256=row["snapshot_sha256"],
         reminder_block_reason=row["reminder_block_reason"], cancel_reason=row["cancel_reason"],
-        cancelled_at=_ts(row["cancelled_at"]), period_start=str_to_date(row["bp_start"]),
-        period_end=str_to_date(row["bp_end"]), local_kwh=Decimal(kwh or "0"),
+        cancelled_at=_ts(row["cancelled_at"]), cancel_number=row["cancel_number"] or "",
+        cancel_snapshot_html=row["cancel_snapshot_html"], cancel_sha256=row["cancel_sha256"],
+        replaces_number=row["replaces_number"] or "", contract_versions=row["contract_versions"],
+        period_start=str_to_date(row["bp_start"]), period_end=str_to_date(row["bp_end"]),
+        local_kwh=Decimal(kwh or "0"),
     )
+
+
+def _load_document(conn, document_id: int) -> BillingDocument:
+    row = conn.execute(_DOC_SELECT + " WHERE d.id = ?", (document_id,)).fetchone()
+    if row is None:
+        raise InvoicingError(f"Beleg {document_id} wurde nicht gefunden.")
+    doc = _row_to_document(row)
+    _load_logs(conn, doc)
+    return doc
+
+
+def _query_documents(conn, where: list[str], params: list) -> list[BillingDocument]:
+    sql = _DOC_SELECT + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY d.issue_date DESC, d.number DESC"
+    docs = [_row_to_document(r) for r in conn.execute(sql, params).fetchall()]
+    for doc in docs:
+        _load_logs(conn, doc)
+    return docs
 
 
 def list_documents(db_path: Path, *, doc_type: str | None = None, run_id: int | None = None) -> list[BillingDocument]:
@@ -290,96 +260,295 @@ def list_documents(db_path: Path, *, doc_type: str | None = None, run_id: int | 
     if run_id is not None:
         where.append("d.billing_run_id = ?")
         params.append(run_id)
-    sql = _DOC_SELECT + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY d.issue_date DESC, d.number DESC"
     with connect(db_path) as conn:
-        docs = [_row_to_document(r) for r in conn.execute(sql, params).fetchall()]
-        for doc in docs:
-            _load_logs(conn, doc)
-    return docs
+        return _query_documents(conn, where, params)
 
 
 def get_document(db_path: Path, document_id: int) -> BillingDocument:
     with connect(db_path) as conn:
-        row = conn.execute(_DOC_SELECT + " WHERE d.id = ?", (document_id,)).fetchone()
-        if row is None:
-            raise InvoicingError(f"Beleg {document_id} wurde nicht gefunden.")
-        doc = _row_to_document(row)
-        _load_logs(conn, doc)
-    return doc
+        return _load_document(conn, document_id)
+
+
+# ── issuing ─────────────────────────────────────────────────────────────────
+
+
+def _next_number(conn, prefix: str, year: int) -> str:
+    """Next free number; called inside the write transaction, so two issuers can't take the same one."""
+    stem = f"{prefix}-{year}-"
+    used = []
+    for column in ("number", "cancel_number"):
+        for r in conn.execute(f"SELECT {column} AS n FROM billing_documents WHERE {column} LIKE ?", (stem + "%",)):
+            tail = r["n"][len(stem):]
+            if tail.isdigit():
+                used.append(int(tail))
+    return f"{stem}{(max(used) + 1 if used else 1):03d}"
+
+
+def _recipients(conn, run_id: int) -> dict[str, dict]:
+    """Recipients as frozen when the billing draft was saved (participant_id -> label/address/e-mail)."""
+    result = {}
+    for r in conn.execute("SELECT participant_id, recipient_snapshot FROM billing_records WHERE billing_run_id = ?",
+                          (run_id,)):
+        result[r["participant_id"]] = json.loads(r["recipient_snapshot"]) if r["recipient_snapshot"] else {}
+    return result
+
+
+def _billable(item) -> bool:
+    """Participants with a non-zero balance get a document (zero balance: nothing to pay or pay out)."""
+    return item.net_amount_chf != 0
+
+
+def _creditor(db_path: Path, issue_date: date, period_start: date | None, period_end: date | None) -> dict:
+    """Issuer as of the document date (contract in force then, else at period end), and the contract
+    versions in force during the period."""
+    version = get_contract_version_for_date(db_path, issue_date) or (
+        get_contract_version_for_date(db_path, period_end) if period_end else None)
+    in_period = []
+    if period_start and period_end:
+        for v in sorted(list_contract_versions(db_path), key=lambda v: v.version):
+            if v.status != CONTRACT_STATUS_PUBLISHED or v.valid_from is None or v.valid_from > period_end:
+                continue
+            if v.valid_until is not None and v.valid_until < period_start:
+                continue
+            in_period.append(v.version)
+    versions = ", ".join(str(v) for v in in_period)
+    if version is not None and version.representative_name:
+        return {"name": version.representative_name, "address_line": version.representative_address_line,
+                "postal_code": version.representative_postal_code, "city": version.representative_city,
+                "email": version.representative_email, "contract_versions": versions,
+                "payment_term_days": version.payment_term_days}
+    community = get_community(db_path)
+    return {"name": community.name if community else "", "address_line": community.address_line if community else "",
+            "postal_code": community.postal_code if community else "", "city": community.city if community else "",
+            "email": "", "contract_versions": versions, "payment_term_days": 30}
+
+
+def issue_problems(db_path: Path, run_id: int, *, today: date | None = None) -> list[str]:
+    """Reasons the documents of a run can't be issued yet (empty = ready)."""
+    today = today or local_today()
+    detail = get_billing_run(db_path, run_id)
+    run = detail.run
+    problems: list[str] = []
+    if run.status != BILLING_STATUS_RELEASED:
+        problems.append("Nur freigegebene Abrechnungen können verrechnet werden.")
+    if run.release_override_reason:
+        problems.append("Diese Abrechnung wurde trotz offener Prüfpunkte (mit Begründung) freigegeben — sie gilt nur "
+                        "als interne Auswertung. Rechnungen nur aus vollständig geprüften Abrechnungen: Daten "
+                        "ergänzen, neu berechnen und ohne Übersteuerung freigeben.")
+    payee, iban = get_payment_details(db_path)
+    if not payee or not iban:
+        problems.append("Zahlungsangaben (Kontoinhaber, IBAN) fehlen.")
+    creditor = _creditor(db_path, today, run.period_start, run.period_end)
+    if not creditor["name"] or not creditor["address_line"] or not creditor["city"]:
+        problems.append("Name und Adresse des LEG-Vertreters fehlen (Vertrag bzw. Gemeinschaft).")
+    billable = [i for i in detail.line_items if _billable(i)]
+    charges = sum((i.net_amount_chf for i in billable if i.net_amount_chf > 0), Decimal(0))
+    credits = sum((-i.net_amount_chf for i in billable if i.net_amount_chf < 0), Decimal(0))
+    if charges != credits:
+        problems.append(f"Rappenabstimmung fehlgeschlagen: Rechnungen CHF {charges} ≠ Gutschriften CHF {credits}.")
+    with connect(db_path) as conn:
+        recipients = _recipients(conn, run_id)
+        open_storno = {r["participant_id"]: r["number"] for r in conn.execute(
+            """
+            SELECT d.participant_id, d.number FROM billing_documents d
+            WHERE d.billing_run_id = ? AND d.status = ? AND d.cancel_number IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM document_deliveries x
+                              WHERE x.document_id = d.id AND x.item = 'cancellation' AND x.status = 'sent')
+            """, (run_id, DOC_STATUS_CANCELLED))}
+    for item in billable:
+        r = recipients.get(item.participant_id) or {}
+        if not (r.get("label") and r.get("address_line") and r.get("postal_code") and r.get("city")):
+            problems.append(f"{item.participant_label}: Postadresse fehlte beim Berechnen der Abrechnung — Adresse "
+                            "ergänzen, Abrechnung stornieren und neu berechnen.")
+        if item.participant_id in open_storno:
+            problems.append(f"{item.participant_label}: Stornobeleg zu {open_storno[item.participant_id]} ist noch "
+                            "nicht zugestellt — erst danach kann ein Ersatzbeleg erstellt werden.")
+    return problems
+
+
+def _planned_documents(db_path: Path, run_id: int, render: Renderer, today: date, conn) -> list[dict]:
+    """The documents that issuing would create now, rendered. Numbers are only final when `conn`
+    is the write transaction that stores them."""
+    detail = get_billing_run(db_path, run_id)
+    run = detail.run
+    creditor = _creditor(db_path, today, run.period_start, run.period_end)
+    payee, iban = get_payment_details(db_path)
+    community = get_community(db_path)
+    recipients = _recipients(conn, run_id)
+    active = {r["participant_id"] for r in conn.execute(
+        "SELECT participant_id FROM billing_documents WHERE billing_run_id = ? AND status != ?",
+        (run_id, DOC_STATUS_CANCELLED))}
+    replaced = {r["participant_id"]: (r["id"], r["number"], r["cancel_number"]) for r in conn.execute(
+        "SELECT id, participant_id, number, cancel_number FROM billing_documents "
+        "WHERE billing_run_id = ? AND status = ? ORDER BY id", (run_id, DOC_STATUS_CANCELLED))}
+    counters: dict[str, int] = {}
+    planned = []
+    for item in detail.line_items:
+        if item.participant_id in active or not _billable(item):
+            continue
+        is_invoice = item.net_amount_chf > 0
+        doc_type = DOC_TYPE_INVOICE if is_invoice else DOC_TYPE_CREDIT
+        prefix = "R" if is_invoice else "G"
+        if prefix not in counters:
+            counters[prefix] = int(_next_number(conn, prefix, today.year).rsplit("-", 1)[1]) - 1
+        counters[prefix] += 1
+        number = f"{prefix}-{today.year}-{counters[prefix]:03d}"
+        due = today + timedelta(days=int(creditor["payment_term_days"])) if is_invoice else None
+        amount = abs(item.net_amount_chf)
+        recipient = recipients.get(item.participant_id) or {}
+        address = "\n".join(x for x in (recipient.get("address_line", ""),
+                                         f"{recipient.get('postal_code', '')} {recipient.get('city', '')}".strip()) if x)
+        replaces = replaced.get(item.participant_id)
+        html = render("invoices/document.html", {
+            "doc_type": doc_type, "number": number, "issue_date": today, "due_date": due, "amount": amount,
+            "item": item, "run": run, "recipient": recipient, "creditor": creditor,
+            "community_name": community.name if community else run.community_name,
+            "payee": payee, "iban": format_iban(iban), "replaces": replaces,
+        })
+        planned.append({"item": item, "doc_type": doc_type, "number": number, "due": due, "amount": amount,
+                        "recipient": recipient, "address": address, "html": html,
+                        "replaces_id": replaces[0] if replaces else None,
+                        "contract_versions": creditor["contract_versions"]})
+    return planned
+
+
+def preview_documents(db_path: Path, run_id: int, render: Renderer, *, today: date | None = None) -> list[dict]:
+    """Rendered documents for the approval view (nothing stored; numbers provisional)."""
+    with connect(db_path) as conn:
+        return _planned_documents(db_path, run_id, render, today or local_today(), conn)
 
 
 def missing_documents(db_path: Path, run_id: int) -> tuple[int, int]:
-    """(issued, still missing) documents of a run — participants with nothing to bill need none."""
+    """(issued, still missing) documents of a run — zero balances need none."""
     with connect(db_path) as conn:
         issued = {r["participant_id"] for r in conn.execute(
             "SELECT participant_id FROM billing_documents WHERE billing_run_id = ? AND status != ?",
             (run_id, DOC_STATUS_CANCELLED))}
-    billable = {i.participant_id for i in get_billing_run(db_path, run_id).line_items
-                if i.charge_chf != 0 or i.credit_chf != 0}
+    billable = {i.participant_id for i in get_billing_run(db_path, run_id).line_items if _billable(i)}
     return len(issued), len(billable - issued)
+
+
+def issue_documents(db_path: Path, run_id: int, render: Renderer, *, today: date | None = None) -> list[BillingDocument]:
+    """Issue the missing invoices/credit notes of a released run (all or nothing). Returns the new ones."""
+    today = today or local_today()
+    problems = issue_problems(db_path, run_id, today=today)
+    if problems:
+        raise InvoicingError("Belege können nicht erstellt werden: " + " ".join(problems))
+    created: list[int] = []
+    with _write_txn(db_path) as conn:
+        for p in _planned_documents(db_path, run_id, render, today, conn):
+            cur = conn.execute(
+                """
+                INSERT INTO billing_documents (billing_run_id, participant_id, doc_type, number, status,
+                    amount_chf, issue_date, due_date, recipient_label, recipient_email, recipient_address,
+                    replaces_document_id, contract_versions, snapshot_html, snapshot_sha256, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, p["item"].participant_id, p["doc_type"], p["number"], DOC_STATUS_ISSUED, str(p["amount"]),
+                 date_to_str(today), date_to_str(p["due"]), p["recipient"].get("label", ""),
+                 p["recipient"].get("email", ""), p["address"], p["replaces_id"], p["contract_versions"],
+                 p["html"], _sha(p["html"]), now_iso()),
+            )
+            created.append(cur.lastrowid)
+            record_event(conn, "billing_document", cur.lastrowid, "issued",
+                         f"{p['number']} {p['recipient'].get('label', '')} CHF {p['amount']} (Abrechnung {run_id})")
+    logger.info("Invoicing: issued %d document(s) for run %d", len(created), run_id)
+    return [get_document(db_path, doc_id) for doc_id in created]
 
 
 # ── cancelling, delivery, reminder block ────────────────────────────────────
 
 
-def cancel_document(db_path: Path, document_id: int, reason: str) -> BillingDocument:
-    """Cancel a document nothing was booked on; the run can then be re-issued for that participant."""
+def cancel_document(db_path: Path, document_id: int, reason: str, render: Renderer, *,
+                    today: date | None = None) -> BillingDocument:
+    """Cancel a document nothing was booked on.
+
+    Not yet delivered: simply cancelled. Delivered: a numbered cancellation
+    notice (S-YYYY-NNN) referring to the original is frozen; it must be
+    delivered before a replacement can be issued.
+    """
     reason = reason.strip()
     if not reason:
         raise InvoicingError("Bitte einen Stornogrund angeben.")
-    doc = get_document(db_path, document_id)
-    if doc.status == DOC_STATUS_CANCELLED:
-        raise InvoicingError("Beleg ist bereits storniert.")
-    if doc.payments:
-        raise InvoicingError("Auf diesem Beleg sind Zahlungen/Auszahlungen gebucht — Storno nicht möglich. "
-                             "Korrekturen erfolgen mit einem Korrekturbeleg.")
-    with connect(db_path) as conn:
-        with conn:
-            conn.execute("UPDATE billing_documents SET status = ?, cancel_reason = ?, cancelled_at = ? WHERE id = ?",
-                         (DOC_STATUS_CANCELLED, reason, now_iso(), document_id))
-            record_event(conn, "billing_document", document_id, "cancelled", f"{doc.number}: {reason}")
+    today = today or local_today()
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        if doc.status == DOC_STATUS_CANCELLED:
+            raise InvoicingError("Beleg ist bereits storniert.")
+        if doc.payments:
+            raise InvoicingError("Auf diesem Beleg sind Zahlungen/Auszahlungen gebucht — Storno nicht möglich. "
+                                 "Korrekturen erfolgen mit einem Korrekturbeleg.")
+        number, html = None, ""
+        if doc.sent_at is not None:
+            number = _next_number(conn, "S", today.year)
+            creditor = _creditor(db_path, today, doc.period_start, doc.period_end)
+            html = render("invoices/cancellation.html", {"doc": doc, "number": number, "issue_date": today,
+                                                         "reason": reason, "creditor": creditor})
+        conn.execute(
+            "UPDATE billing_documents SET status = ?, cancel_reason = ?, cancelled_at = ?, cancel_number = ?, "
+            "cancel_snapshot_html = ?, cancel_sha256 = ? WHERE id = ?",
+            (DOC_STATUS_CANCELLED, reason, now_iso(), number, html, _sha(html) if html else "", document_id))
+        conn.execute("UPDATE document_reminders SET discarded_at = ? WHERE document_id = ? AND discarded_at IS NULL",
+                     (now_iso(), document_id))
+        record_event(conn, "billing_document", document_id, "cancelled",
+                     f"{doc.number}{' mit Stornobeleg ' + number if number else ''}: {reason}")
     return get_document(db_path, document_id)
 
 
 def record_delivery(db_path: Path, document_id: int, method: str, *, status: str = "sent", detail: str = "",
-                    reminder_id: int | None = None) -> None:
-    """Log one delivery attempt. Re-sending only adds a log entry — never a second claim."""
+                    item: str = "document", reminder_id: int | None = None) -> None:
+    """Log one delivery attempt (manually recorded). Re-sending only adds a log entry — never a second claim."""
     if method not in DELIVERY_METHODS:
         raise InvoicingError("Unbekannter Zustellweg.")
     if status not in ("sent", "failed"):
         raise InvoicingError("Unbekannter Zustellstatus.")
-    doc = get_document(db_path, document_id)
-    if doc.status == DOC_STATUS_CANCELLED:
-        raise InvoicingError("Stornierte Belege werden nicht versendet.")
-    if method == "email" and not doc.recipient_email:
-        raise InvoicingError("Für diesen Empfänger ist keine E-Mail-Adresse hinterlegt — Zustellung per Papier.")
-    if reminder_id is not None and reminder_id not in {r.id for r in doc.reminders}:
-        raise InvoicingError("Mahnung gehört nicht zu diesem Beleg.")
-    with connect(db_path) as conn:
-        with conn:
-            conn.execute(
-                "INSERT INTO document_deliveries (document_id, reminder_id, method, status, detail, recorded_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (document_id, reminder_id, method, status, detail.strip(), now_iso()))
-            what = f"Mahnung {reminder_id}" if reminder_id else doc.number
-            record_event(conn, "billing_document", document_id, f"delivery_{status}",
-                         f"{what} {DELIVERY_METHODS[method]} {detail.strip()}".strip())
+    if item not in DELIVERY_ITEMS or (item == "reminder") != (reminder_id is not None):
+        raise InvoicingError("Unbekanntes Zustellobjekt.")
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        if method == "email" and not doc.recipient_email:
+            raise InvoicingError("Für diesen Empfänger ist keine E-Mail-Adresse hinterlegt — Zustellung per Papier.")
+        if item == "cancellation":
+            if not doc.cancel_number:
+                raise InvoicingError("Zu diesem Beleg gibt es keinen Stornobeleg.")
+            what = doc.cancel_number
+        elif doc.status == DOC_STATUS_CANCELLED:
+            raise InvoicingError("Stornierte Belege und ihre Mahnungen werden nicht mehr versendet.")
+        elif item == "reminder":
+            reminder = next((r for r in doc.reminders if r.id == reminder_id), None)
+            if reminder is None or reminder.discarded_at is not None:
+                raise InvoicingError("Mahnung gehört nicht zu diesem Beleg oder wurde verworfen.")
+            if status == "sent":
+                if doc.reminder_block_reason:
+                    raise InvoicingError("Für diese Rechnung gilt eine Mahnsperre.")
+                if doc.open_chf == 0:
+                    raise InvoicingError("Die Rechnung ist inzwischen bezahlt — Mahnung nicht versenden, sondern verwerfen.")
+                if doc.open_chf != reminder.open_amount_chf:
+                    raise InvoicingError(
+                        f"Seit dem Erstellen der Mahnung hat sich der offene Betrag geändert (jetzt CHF {doc.open_chf}) "
+                        "— Mahnung verwerfen und neu erstellen.")
+            what = reminder.label
+        else:
+            what = doc.number
+        conn.execute(
+            "INSERT INTO document_deliveries (document_id, reminder_id, item, method, status, detail, recorded_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (document_id, reminder_id, item, method, status, detail.strip(), now_iso()))
+        record_event(conn, "billing_document", document_id, f"delivery_{status}",
+                     f"{what} {DELIVERY_METHODS[method]} (manuell erfasst) {detail.strip()}".strip())
 
 
 def set_reminder_block(db_path: Path, document_id: int, reason: str) -> None:
     """Set (non-empty reason) or lift (empty) the Mahnsperre of an invoice."""
-    doc = get_document(db_path, document_id)
-    if not doc.is_invoice:
-        raise InvoicingError("Mahnsperren gibt es nur für Rechnungen.")
-    with connect(db_path) as conn:
-        with conn:
-            conn.execute("UPDATE billing_documents SET reminder_block_reason = ? WHERE id = ?",
-                         (reason.strip(), document_id))
-            record_event(conn, "billing_document", document_id, "reminder_block",
-                         reason.strip() or "aufgehoben")
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        if not doc.is_invoice:
+            raise InvoicingError("Mahnsperren gibt es nur für Rechnungen.")
+        conn.execute("UPDATE billing_documents SET reminder_block_reason = ? WHERE id = ?", (reason.strip(), document_id))
+        record_event(conn, "billing_document", document_id, "reminder_block", reason.strip() or "aufgehoben")
 
 
-# ── payments and payouts ────────────────────────────────────────────────────
+# ── payments, refunds and payouts ───────────────────────────────────────────
 
 
 def _parse_amount(raw) -> Decimal:
@@ -392,166 +561,256 @@ def _parse_amount(raw) -> Decimal:
     return amount
 
 
-def _insert_payment(db_path: Path, doc: BillingDocument, kind: str, amount: Decimal, booked_on: date,
-                    reference: str, note: str) -> None:
-    with connect(db_path) as conn:
-        with conn:
-            conn.execute(
-                "INSERT INTO document_payments (document_id, kind, amount_chf, booked_on, reference, note, recorded_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (doc.id, kind, str(amount), date_to_str(booked_on), reference.strip(), note.strip(), now_iso()))
-            record_event(conn, "billing_document", doc.id, kind,
-                         f"{doc.number} CHF {amount} am {booked_on.isoformat()} {reference.strip()}".strip())
+def _check_booking_date(doc: BillingDocument, booked_on: date, today: date) -> None:
+    if booked_on > today:
+        raise InvoicingError("Das Buchungsdatum liegt in der Zukunft.")
+    if booked_on < doc.issue_date:
+        raise InvoicingError(f"Das Buchungsdatum liegt vor dem Belegdatum ({doc.issue_date.strftime('%d.%m.%Y')}).")
 
 
-def record_payment(db_path: Path, document_id: int, amount, booked_on: date, *, reference: str = "",
-                   note: str = "") -> BillingDocument:
-    """Book a payment received on an invoice. Partial and over-payments are allowed; a negative
-    amount reverses a wrong booking and needs a note. The total can never become negative."""
-    amount = _parse_amount(amount)
-    doc = get_document(db_path, document_id)
-    if not doc.is_invoice:
-        raise InvoicingError("Zahlungseingänge werden auf Rechnungen gebucht, Auszahlungen auf Gutschriften.")
-    if doc.status == DOC_STATUS_CANCELLED:
-        raise InvoicingError("Auf stornierte Belege kann nichts gebucht werden.")
+def _check_duplicate(conn, doc: BillingDocument, kind: str, amount: Decimal, booked_on: date, reference: str,
+                     confirm_duplicate: bool, note: str) -> None:
+    """One bank transfer must not be booked twice: same reference, or same amount and date on the document."""
     if amount < 0:
-        if not note.strip():
-            raise InvoicingError("Eine Korrekturbuchung braucht eine Begründung.")
-        if doc.booked_chf + amount < 0:
-            raise InvoicingError("Die Korrektur ist grösser als die gebuchten Zahlungen.")
-        if min(doc.booked_chf + amount, doc.amount_chf) < _paid_out_against(db_path, doc.billing_run_id, excluding=doc.id):
-            raise InvoicingError("Diese Zahlung wurde bereits an Produzenten weitergegeben — Korrektur nicht möglich.")
-    _insert_payment(db_path, doc, PAYMENT_KIND_PAYMENT, amount, booked_on, reference, note)
-    return get_document(db_path, document_id)
+        return
+    ref = reference.strip().lower()
+    clash = []
+    if ref:
+        clash = conn.execute(
+            "SELECT p.document_id FROM document_payments p WHERE p.kind = ? AND lower(trim(p.reference)) = ? "
+            "AND p.amount_chf NOT LIKE '-%'", (kind, ref)).fetchall()
+    same = [p for p in doc.payments if p.kind == kind and p.amount_chf == amount and p.booked_on == booked_on]
+    if (clash or same) and not confirm_duplicate:
+        raise InvoicingError(
+            "Mögliche Doppelbuchung: Diese Referenz bzw. derselbe Betrag am selben Tag ist bereits gebucht. "
+            "Nur wenn es wirklich eine zweite Zahlung ist: «Zweite Buchung bestätigt» ankreuzen und begründen.")
+    if (clash or same) and not note.strip():
+        raise InvoicingError("Eine bestätigte zweite Buchung braucht eine Begründung.")
 
 
-def _paid_out_against(db_path: Path, run_id: int, *, excluding: int) -> Decimal:
-    """Payouts of the run that the received payments of the OTHER invoices can't cover any more."""
-    docs = list_documents(db_path, run_id=run_id)
-    received_others = sum((min(d.booked_chf, d.amount_chf) for d in docs
-                           if d.is_invoice and d.status != DOC_STATUS_CANCELLED and d.id != excluding), Decimal(0))
-    paid_out = sum((d.booked_chf for d in docs if not d.is_invoice), Decimal(0))
-    return max(paid_out - received_others, Decimal(0))
+def _insert_payment(conn, doc: BillingDocument, kind: str, amount: Decimal, booked_on: date,
+                    reference: str, note: str) -> None:
+    conn.execute(
+        "INSERT INTO document_payments (document_id, kind, amount_chf, booked_on, reference, note, recorded_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (doc.id, kind, str(amount), date_to_str(booked_on), reference.strip(), note.strip(), now_iso()))
+    record_event(conn, "billing_document", doc.id, kind,
+                 f"{doc.number} CHF {amount} am {booked_on.isoformat()} {reference.strip()} (manuell erfasst)".strip())
 
 
-def _largest_remainder_cents(pool: Decimal, weights: list[Decimal]) -> list[Decimal]:
-    """Split `pool` (0.01) in proportion to `weights`; the cents add up exactly to `pool`."""
-    total = sum(weights, Decimal(0))
-    if total <= 0 or pool <= 0:
-        return [Decimal(0) for _ in weights]
-    exact = [pool * w / total for w in weights]
-    floors = [e.quantize(_CENT, rounding=ROUND_DOWN) for e in exact]
-    rest = int(((pool - sum(floors, Decimal(0))) / _CENT).to_integral_value())
-    order = sorted(range(len(weights)), key=lambda i: (-(exact[i] - floors[i]), i))
-    for i in order[:rest]:
-        floors[i] += _CENT
-    return floors
+def _floor_shares(pool: Decimal, credits: list[Decimal]) -> list[Decimal]:
+    """Each credit's share of `pool`, rounded DOWN to the cent.
 
-
-def payout_status(db_path: Path, run_id: int) -> dict[int, PayoutStatus]:
-    """Per credit note of a run: its pro-rata share of the consumer payments received (§3.4).
-
-    Received = what was paid on the run's invoices, each capped at the
-    invoice amount (an over-payment belongs to the payer, not the producers).
+    Monotone: a larger pool never lowers any share, so what was paid out
+    stays covered. The sum never exceeds the pool; the few cents left over
+    by rounding follow once everything was received (then share = credit).
     """
-    docs = [d for d in list_documents(db_path, run_id=run_id) if d.status != DOC_STATUS_CANCELLED]
+    total = sum(credits, Decimal(0))
+    if total <= 0 or pool <= 0:
+        return [Decimal(0) for _ in credits]
+    if pool >= total:
+        return list(credits)
+    return [(pool * c / total).quantize(_CENT, rounding=ROUND_DOWN) for c in credits]
+
+
+def _received(doc: BillingDocument) -> Decimal:
+    """What an invoice contributes to the payout pool: money kept, capped at the invoice amount."""
+    return min(max(doc.booked_chf, Decimal(0)), doc.amount_chf)
+
+
+def _payout_status(conn, run_id: int) -> tuple[dict[int, PayoutStatus], Decimal, Decimal]:
+    docs = [d for d in _query_documents(conn, ["d.billing_run_id = ?"], [run_id]) if d.status != DOC_STATUS_CANCELLED]
     credits = sorted((d for d in docs if not d.is_invoice), key=lambda d: d.id)
-    received = sum((min(max(d.booked_chf, Decimal(0)), d.amount_chf) for d in docs if d.is_invoice), Decimal(0))
-    pool = min(received, sum((c.amount_chf for c in credits), Decimal(0)))
-    shares = _largest_remainder_cents(pool, [c.amount_chf for c in credits])
-    return {
+    received = sum((_received(d) for d in docs if d.is_invoice), Decimal(0))
+    paid_out = sum((c.booked_chf for c in credits), Decimal(0))
+    shares = _floor_shares(received, [c.amount_chf for c in credits])
+    status = {
         c.id: PayoutStatus(document_id=c.id, amount_chf=c.amount_chf, entitled_chf=share, paid_out_chf=c.booked_chf,
                            available_chf=max(share - c.booked_chf, Decimal(0)))
         for c, share in zip(credits, shares)
     }
+    return status, received, paid_out
+
+
+def payout_status(db_path: Path, run_id: int) -> dict[int, PayoutStatus]:
+    """Per credit note of a run: its share of the consumer payments received (§3.4)."""
+    with connect(db_path) as conn:
+        return _payout_status(conn, run_id)[0]
+
+
+def record_payment(db_path: Path, document_id: int, amount, booked_on: date, *, reference: str = "",
+                   note: str = "", confirm_duplicate: bool = False, today: date | None = None) -> BillingDocument:
+    """Book a payment received on an invoice (bank or cash reference required).
+
+    Partial and over-payments are allowed. A negative amount reverses a
+    wrong booking (note required); it is refused when the money was already
+    passed on to producers. An over-payment returned to the payer is a
+    refund (record_refund), not a correction.
+    """
+    amount = _parse_amount(amount)
+    today = today or local_today()
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        if not doc.is_invoice:
+            raise InvoicingError("Zahlungseingänge werden auf Rechnungen gebucht, Auszahlungen auf Gutschriften.")
+        if doc.status == DOC_STATUS_CANCELLED:
+            raise InvoicingError("Auf stornierte Belege kann nichts gebucht werden.")
+        _check_booking_date(doc, booked_on, today)
+        if amount > 0 and not reference.strip():
+            raise InvoicingError("Bitte die Referenz der Zahlung angeben (Bankbuchung, «bar» mit Quittungsnummer …).")
+        if amount < 0:
+            if not note.strip():
+                raise InvoicingError("Eine Korrekturbuchung braucht eine Begründung.")
+            payments = sum((p.amount_chf for p in doc.payments if p.kind == PAYMENT_KIND_PAYMENT), Decimal(0))
+            if payments + amount < 0 or doc.booked_chf + amount < 0:
+                raise InvoicingError("Die Korrektur ist grösser als die gebuchten Zahlungen.")
+            _, received, paid_out = _payout_status(conn, doc.billing_run_id)
+            after = received - _received(doc) + min(max(doc.booked_chf + amount, Decimal(0)), doc.amount_chf)
+            if after < paid_out:
+                raise InvoicingError("Diese Zahlung wurde bereits an Produzenten weitergegeben — Korrektur nicht möglich.")
+        _check_duplicate(conn, doc, PAYMENT_KIND_PAYMENT, amount, booked_on, reference, confirm_duplicate, note)
+        _insert_payment(conn, doc, PAYMENT_KIND_PAYMENT, amount, booked_on, reference, note)
+    return get_document(db_path, document_id)
+
+
+def record_refund(db_path: Path, document_id: int, amount, booked_on: date, *, reference: str,
+                  note: str = "", today: date | None = None) -> BillingDocument:
+    """Record an over-payment returned to the payer (a real outgoing transfer, bank reference required)."""
+    amount = _parse_amount(amount)
+    today = today or local_today()
+    if amount < 0:
+        raise InvoicingError("Rückerstattungen als positiven Betrag erfassen.")
+    if not reference.strip():
+        raise InvoicingError("Bitte die Bankreferenz der Rückerstattung angeben.")
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        if not doc.is_invoice:
+            raise InvoicingError("Rückerstattungen gibt es nur auf Rechnungen.")
+        _check_booking_date(doc, booked_on, today)
+        overpaid = doc.booked_chf - doc.amount_chf
+        if amount > overpaid:
+            raise InvoicingError(
+                f"Zurückerstattet werden kann höchstens die Überzahlung von CHF {max(overpaid, Decimal(0))}.")
+        _insert_payment(conn, doc, PAYMENT_KIND_REFUND, -amount, booked_on, reference, note)
+    return get_document(db_path, document_id)
 
 
 def record_payout(db_path: Path, document_id: int, amount, booked_on: date, *, reference: str,
-                  note: str = "") -> BillingDocument:
+                  note: str = "", confirm_duplicate: bool = False, today: date | None = None) -> BillingDocument:
     """Record a payout made by the representative's bank (never executed by Shareomat).
 
-    Refused above the share of received consumer payments — contract §3.4:
-    no pre-financing. The bank reference is mandatory.
+    Checked in the same write transaction against the producer's share AND
+    the run total: payouts never exceed the consumer payments received
+    (contract §3.4, no pre-financing). The bank reference is mandatory.
     """
     amount = _parse_amount(amount)
-    doc = get_document(db_path, document_id)
-    if doc.is_invoice:
-        raise InvoicingError("Auszahlungen werden auf Gutschriften gebucht.")
-    if doc.status == DOC_STATUS_CANCELLED:
-        raise InvoicingError("Auf stornierte Belege kann nichts gebucht werden.")
+    today = today or local_today()
     if not reference.strip():
         raise InvoicingError("Bitte die Bankreferenz der Auszahlung angeben.")
-    if amount < 0:
-        if not note.strip():
-            raise InvoicingError("Eine Korrekturbuchung braucht eine Begründung.")
-        if doc.booked_chf + amount < 0:
-            raise InvoicingError("Die Korrektur ist grösser als die gebuchten Auszahlungen.")
-    else:
-        available = payout_status(db_path, doc.billing_run_id)[doc.id].available_chf
-        if amount > available:
-            raise InvoicingError(
-                f"Auszahlbar sind derzeit höchstens CHF {available} — Gutschriften werden nur aus eingegangenen "
-                "Zahlungen der LEG-Bezüger ausbezahlt (Vertrag Ziff. 3.4).")
-    _insert_payment(db_path, doc, PAYMENT_KIND_PAYOUT, amount, booked_on, reference, note)
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        if doc.is_invoice:
+            raise InvoicingError("Auszahlungen werden auf Gutschriften gebucht.")
+        if doc.status == DOC_STATUS_CANCELLED:
+            raise InvoicingError("Auf stornierte Belege kann nichts gebucht werden.")
+        _check_booking_date(doc, booked_on, today)
+        if amount < 0:
+            if not note.strip():
+                raise InvoicingError("Eine Korrekturbuchung braucht eine Begründung.")
+            if doc.booked_chf + amount < 0:
+                raise InvoicingError("Die Korrektur ist grösser als die gebuchten Auszahlungen.")
+        else:
+            status, received, paid_out = _payout_status(conn, doc.billing_run_id)
+            available = min(status[doc.id].available_chf, max(received - paid_out, Decimal(0)))
+            if amount > available:
+                raise InvoicingError(
+                    f"Auszahlbar sind derzeit höchstens CHF {available} — Gutschriften werden nur aus eingegangenen "
+                    "Zahlungen der LEG-Bezüger ausbezahlt (Vertrag Ziff. 3.4).")
+        _check_duplicate(conn, doc, PAYMENT_KIND_PAYOUT, amount, booked_on, reference, confirm_duplicate, note)
+        _insert_payment(conn, doc, PAYMENT_KIND_PAYOUT, amount, booked_on, reference, note)
     return get_document(db_path, document_id)
 
 
 # ── reminders (Mahnwesen) ───────────────────────────────────────────────────
 
 
+def _proposal_for(doc: BillingDocument, today: date) -> ReminderProposal | None:
+    if doc.state(today) != "overdue" or doc.reminder_block_reason or doc.sent_at is None:
+        return None
+    active = doc.active_reminders
+    level = len(active) + 1
+    if level > len(REMINDER_OFFSETS_DAYS):
+        return None
+    earliest = doc.due_date + timedelta(days=REMINDER_OFFSETS_DAYS[level - 1])
+    if active:
+        previous = active[-1]
+        if previous.sent_at is None:
+            return None
+        if previous.new_due_date is not None:
+            earliest = max(earliest, previous.new_due_date + timedelta(days=REMINDER_GRACE_DAYS))
+    return ReminderProposal(document=doc, level=level, due_since=earliest) if today >= earliest else None
+
+
 def reminder_proposals(db_path: Path, *, today: date | None = None) -> list[ReminderProposal]:
     """Overdue, delivered, unblocked invoices whose next reminder level is due.
 
-    Level n is proposed from due date + REMINDER_OFFSETS_DAYS[n-1]; never
-    before the due date, never for a paid/cancelled/blocked invoice, and
-    only after the previous reminder was actually sent.
+    Level n from due date + REMINDER_OFFSETS_DAYS[n-1], and never before the
+    deadline of the previous reminder + REMINDER_GRACE_DAYS; never for a
+    paid/cancelled/blocked invoice, and only after the previous reminder was
+    actually sent.
     """
     today = today or local_today()
-    proposals: list[ReminderProposal] = []
-    for doc in list_documents(db_path, doc_type=DOC_TYPE_INVOICE):
-        if doc.state(today) != "overdue" or doc.reminder_block_reason or doc.sent_at is None:
-            continue
-        level = len(doc.reminders) + 1
-        if level > len(REMINDER_OFFSETS_DAYS):
-            continue
-        if doc.reminders and doc.reminders[-1].sent_at is None:
-            continue
-        due_since = doc.due_date + timedelta(days=REMINDER_OFFSETS_DAYS[level - 1])
-        if today >= due_since:
-            proposals.append(ReminderProposal(document=doc, level=level, due_since=due_since))
-    return proposals
+    return [p for doc in list_documents(db_path, doc_type=DOC_TYPE_INVOICE)
+            if (p := _proposal_for(doc, today)) is not None]
 
 
 def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today: date | None = None) -> DocumentReminder:
-    """Create the next due reminder (frozen like the invoice). Idempotent per level."""
+    """Create the next due reminder, frozen like the invoice; debtor and address from the invoice snapshot."""
     today = today or local_today()
-    proposal = next((p for p in reminder_proposals(db_path, today=today) if p.document.id == document_id), None)
-    if proposal is None:
-        raise InvoicingError("Für diese Rechnung ist derzeit keine Mahnung fällig "
-                             "(bezahlt, gesperrt, nicht versendet, vorherige Mahnung nicht versendet oder zu früh).")
-    doc = proposal.document
-    creditor = _creditor(db_path, doc.period_end)
     payee, iban = get_payment_details(db_path)
-    html = render("invoices/reminder.html", {
-        "doc": doc, "participant": get_participant(db_path, doc.participant_id), "level": proposal.level, "label": REMINDER_LABELS[proposal.level], "issue_date": today,
-        "open_amount": doc.open_chf, "new_due_date": today + timedelta(days=10), "creditor": creditor,
-        "payee": payee, "iban": format_iban(iban),
-    })
-    with connect(db_path) as conn:
-        with conn:
-            cur = conn.execute(
-                "INSERT INTO document_reminders (document_id, level, issue_date, open_amount_chf, snapshot_html, "
-                "snapshot_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (doc.id, proposal.level, date_to_str(today), str(doc.open_chf), html,
-                 hashlib.sha256(html.encode("utf-8")).hexdigest(), now_iso()))
-            record_event(conn, "billing_document", doc.id, "reminder_created",
-                         f"{doc.number} {REMINDER_LABELS[proposal.level]} offen CHF {doc.open_chf}")
-    return next(r for r in get_document(db_path, document_id).reminders if r.id == cur.lastrowid)
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        proposal = _proposal_for(doc, today)
+        if proposal is None:
+            raise InvoicingError("Für diese Rechnung ist derzeit keine Mahnung fällig (bezahlt, gesperrt, nicht "
+                                 "versendet, vorherige Mahnung nicht versendet oder deren Frist läuft noch).")
+        creditor = _creditor(db_path, today, doc.period_start, doc.period_end)
+        new_due = today + timedelta(days=REMINDER_PAYMENT_DAYS)
+        html = render("invoices/reminder.html", {
+            "doc": doc, "level": proposal.level, "label": REMINDER_LABELS[proposal.level], "issue_date": today,
+            "open_amount": doc.open_chf, "new_due_date": new_due, "creditor": creditor,
+            "payee": payee, "iban": format_iban(iban),
+        })
+        cur = conn.execute(
+            "INSERT INTO document_reminders (document_id, level, issue_date, open_amount_chf, snapshot_html, "
+            "snapshot_sha256, new_due_date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (doc.id, proposal.level, date_to_str(today), str(doc.open_chf), html, _sha(html),
+             date_to_str(new_due), now_iso()))
+        reminder_id = cur.lastrowid
+        record_event(conn, "billing_document", doc.id, "reminder_created",
+                     f"{doc.number} {REMINDER_LABELS[proposal.level]} offen CHF {doc.open_chf}")
+    return get_reminder(db_path, reminder_id)
+
+
+def discard_reminder(db_path: Path, reminder_id: int, reason: str) -> None:
+    """Discard an unsent reminder (paid meanwhile, amount changed, ...); it stays archived."""
+    if not reason.strip():
+        raise InvoicingError("Bitte einen Grund angeben.")
+    with _write_txn(db_path) as conn:
+        row = conn.execute("SELECT document_id FROM document_reminders WHERE id = ? AND discarded_at IS NULL",
+                           (reminder_id,)).fetchone()
+        if row is None:
+            raise InvoicingError("Mahnung nicht gefunden oder bereits verworfen.")
+        doc = _load_document(conn, row["document_id"])
+        if next(r for r in doc.reminders if r.id == reminder_id).sent_at is not None:
+            raise InvoicingError("Eine versendete Mahnung kann nicht verworfen werden.")
+        conn.execute("UPDATE document_reminders SET discarded_at = ? WHERE id = ?", (now_iso(), reminder_id))
+        record_event(conn, "billing_document", doc.id, "reminder_discarded", f"Mahnung {reminder_id}: {reason.strip()}")
 
 
 def get_reminder(db_path: Path, reminder_id: int) -> DocumentReminder:
     with connect(db_path) as conn:
         row = conn.execute("SELECT document_id FROM document_reminders WHERE id = ?", (reminder_id,)).fetchone()
-    if row is None:
-        raise InvoicingError(f"Mahnung {reminder_id} wurde nicht gefunden.")
-    return next(r for r in get_document(db_path, row["document_id"]).reminders if r.id == reminder_id)
+        if row is None:
+            raise InvoicingError(f"Mahnung {reminder_id} wurde nicht gefunden.")
+        return next(r for r in _load_document(conn, row["document_id"]).reminders if r.id == reminder_id)

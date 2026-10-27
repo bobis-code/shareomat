@@ -23,6 +23,7 @@ Notes:
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
@@ -35,8 +36,10 @@ DOC_STATUS_CANCELLED = "cancelled"
 
 PAYMENT_KIND_PAYMENT = "payment"  # money received from a consumer (on an invoice)
 PAYMENT_KIND_PAYOUT = "payout"    # money paid out to a producer (on a credit)
+PAYMENT_KIND_REFUND = "refund"    # over-payment returned to the payer (on an invoice, stored negative)
 
 DELIVERY_METHODS = {"paper": "Papier / PDF", "email": "E-Mail"}
+DELIVERY_ITEMS = ("document", "reminder", "cancellation")
 
 # Reminder levels: days after the due date from which a level is proposed.
 REMINDER_OFFSETS_DAYS = (5, 20, 35)
@@ -65,6 +68,7 @@ class DocumentDelivery:
     method: str
     status: str          # "sent" | "failed"
     detail: str = ""
+    item: str = "document"   # document | reminder | cancellation
     reminder_id: int | None = None
     recorded_at: datetime | None = None
     id: int | None = None
@@ -80,6 +84,8 @@ class DocumentReminder:
     open_amount_chf: Decimal
     snapshot_html: str = ""
     snapshot_sha256: str = ""
+    new_due_date: date | None = None
+    discarded_at: datetime | None = None
     sent_at: datetime | None = None
     id: int | None = None
 
@@ -101,12 +107,19 @@ class BillingDocument:
     due_date: date | None
     recipient_label: str
     recipient_email: str = ""
+    recipient_address: str = ""        # frozen with the document (multi-line)
     status: str = DOC_STATUS_ISSUED
     snapshot_html: str = ""
     snapshot_sha256: str = ""
     reminder_block_reason: str = ""
     cancel_reason: str = ""
     cancelled_at: datetime | None = None
+    cancel_number: str = ""            # Stornobeleg, only when the document had been delivered
+    cancel_snapshot_html: str = ""
+    cancel_sha256: str = ""
+    cancellation_sent_at: datetime | None = None
+    replaces_number: str = ""
+    contract_versions: str = ""
     period_start: date | None = None   # joined in from the billing run
     period_end: date | None = None
     local_kwh: Decimal = Decimal(0)    # LEG-Bezug (invoice) or LEG-Lieferung (credit) of the line item
@@ -120,6 +133,19 @@ class BillingDocument:
     @property
     def is_invoice(self) -> bool:
         return self.doc_type == DOC_TYPE_INVOICE
+
+    @property
+    def active_reminders(self) -> list[DocumentReminder]:
+        return [r for r in self.reminders if r.discarded_at is None]
+
+    @property
+    def integrity_ok(self) -> bool:
+        """The stored text still matches the checksum taken when it was frozen."""
+        ok = hashlib.sha256(self.snapshot_html.encode("utf-8")).hexdigest() == self.snapshot_sha256
+        if self.cancel_number:
+            ok = ok and hashlib.sha256(self.cancel_snapshot_html.encode("utf-8")).hexdigest() == self.cancel_sha256
+        return ok and all(hashlib.sha256(r.snapshot_html.encode("utf-8")).hexdigest() == r.snapshot_sha256
+                          for r in self.reminders)
 
     @property
     def open_chf(self) -> Decimal:
