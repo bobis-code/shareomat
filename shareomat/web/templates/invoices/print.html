@@ -7,7 +7,12 @@
   <meta charset="utf-8">
   <title>{{ title }}</title>
   <style>
-    body { font-family: Arial, Helvetica, sans-serif; max-width: 44rem; margin: 2rem auto; line-height: 1.4; color: #111; font-size: 10.5pt; }
+    @page { size: A4; margin: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; line-height: 1.4; color: #111; font-size: 10.5pt; background: #ddd; }
+    .page { width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; position: relative; box-sizing: border-box;
+            padding: 15mm 20mm 20mm 20mm; }
+    .page.with-qr { padding-bottom: 115mm; }
+    .page .qr-bill { position: absolute; left: 0; bottom: 0; }
     h2 { font-size: 1.3rem; margin-top: 1.6rem; }
     .doc-head { display: flex; justify-content: space-between; gap: 2rem; }
     .doc-recipient { margin-top: 3.5rem; min-width: 16rem; }
@@ -21,13 +26,16 @@
     .meta { border-top: 1px solid #999; margin-top: 2rem; padding-top: .5rem; font-size: .75rem; color: #555; }
     .stamp { border: 2px solid #b91c1c; color: #b91c1c; padding: .4rem .6rem; margin-bottom: 1rem; font-weight: bold; }
     .noprint { margin-bottom: 1rem; }
-    @media print { .noprint { display: none; } body { margin: 0 auto; } }
+    @media print { .noprint { display: none; } body { background: #fff; } .page { margin: 0; } }
   </style>
 </head>
 <body>
-  <div class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></div>
+  <div class="noprint" style="text-align:center;padding:4mm"><button onclick="window.print()">Drucken / als PDF speichern</button>
+    <span class="ts">Beim Drucken: Massstab 100 % / «Tatsächliche Grösse», keine Seitenränder.</span></div>
+  <div class="page{{ ' with-qr' if 'class="qr-bill' in body }}">
   {% if stamp %}<div class="stamp">{{ stamp }}</div>{% endif %}
   {{ body | safe }}
   <div class="meta">SHA-256 des Belegs (eingefrorene Fassung): <span style="font-family:monospace;word-break:break-all">{{ sha256 }}</span></div>
+  </div>
 </body>
 </html>

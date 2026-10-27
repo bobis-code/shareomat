@@ -20,7 +20,8 @@ Notes:
         GET  /reminders/<rid>/print      frozen reminder, printable
         GET  /runs/<run_id>/preview      all documents a run would get, with sums — approval step
         POST /issue                      approve + issue (form: run_id, confirm)
-        POST /settings                   payment details (payee, IBAN)
+        POST /settings                   payment profile (account holder, address, IBAN, contact e-mail)
+        POST /settings/confirm           confirm the profile after the scan test (form: version)
         POST /<id>/payment               book a payment received (invoice)
         POST /<id>/refund                record an over-payment returned (invoice)
         POST /<id>/payout                record a payout made (credit)
@@ -42,9 +43,9 @@ from shareomat.database.invoicing import (
     cancel_document,
     create_reminder,
     discard_reminder,
-    format_iban,
+    confirm_payment_profile,
     get_document,
-    get_payment_details,
+    get_payment_profile,
     get_reminder,
     issue_documents,
     issue_problems,
@@ -60,11 +61,18 @@ from shareomat.database.invoicing import (
     record_payout,
     record_refund,
     reminder_proposals,
-    save_payment_details,
+    payment_problems,
+    payment_profile_status,
+    sample_payment_part,
+    save_payment_profile,
     set_reminder_block,
 )
 from shareomat.leg_const import BILLING_STATUS_RELEASED
+from shareomat.core.payments.swiss_qr import format_iban, split_street
+from shareomat.database.invoicing import _creditor
 from shareomat.models.invoicing import (
+    PROFILE_STATUS_LABELS,
+    PaymentProfile,
     DELIVERY_METHODS,
     DOC_TYPE_CREDIT,
     DOC_TYPE_INVOICE,
@@ -98,7 +106,7 @@ def _pending_runs(ctx: RequestContext) -> list[dict]:
         issued, missing = missing_documents(ctx.db_path, run.id)
         if missing:
             pending.append({"run": run, "issued": issued, "missing": missing,
-                            "problems": issue_problems(ctx.db_path, run.id)})
+                            "problems": issue_problems(ctx.db_path, run.id, include_payment=False)})
     return pending
 
 
@@ -108,7 +116,13 @@ def handle_get(ctx: RequestContext) -> str:
     if not ctx.segments:
         tab = ctx.query.get("tab", "invoices")
         tab = tab if tab in _TABS else "invoices"
-        payee, iban = get_payment_details(ctx.db_path)
+        profile = get_payment_profile(ctx.db_path)
+        if tab == "settings" and not profile.iban:
+            # Suggestions from the contract's representative; the account holder stays empty on purpose.
+            rep = _creditor(ctx.db_path, today, None, None)
+            street, building = split_street(rep["address_line"])
+            profile = PaymentProfile(street=street, building=building, postal_code=rep["postal_code"],
+                                     city=rep["city"], contact_email=rep["email"])
         docs = list_documents(ctx.db_path, doc_type=DOC_TYPE_CREDIT if tab == "credits" else DOC_TYPE_INVOICE) \
             if tab in ("invoices", "credits") else []
         payouts = {}
@@ -118,18 +132,22 @@ def handle_get(ctx: RequestContext) -> str:
         return render_page(
             "invoices/list.html", ctx, "invoices", tab=tab, docs=docs, today=today, state_labels=STATE_LABELS,
             pending=_pending_runs(ctx), proposals=reminder_proposals(ctx.db_path, today=today) if tab != "settings" else [],
-            payouts=payouts, payee=payee, iban=format_iban(iban), offsets=REMINDER_OFFSETS_DAYS,
+            payouts=payouts, offsets=REMINDER_OFFSETS_DAYS, profile=profile, iban=format_iban(profile.iban),
+            profile_status=payment_profile_status(ctx.db_path), status_labels=PROFILE_STATUS_LABELS,
+            sample=sample_payment_part(ctx.db_path) if tab == "settings" else None,
         )
 
     if len(ctx.segments) == 3 and ctx.segments[0] == "runs" and ctx.segments[2] == "preview":
         try:
             run_id = int(ctx.segments[1])
-            problems = issue_problems(ctx.db_path, run_id, today=today)
+            problems = issue_problems(ctx.db_path, run_id, today=today, include_payment=False)
         except (ValueError, BillingWorkflowError):
             return _not_found(ctx, "Abrechnung")
         planned = [] if problems else preview_documents(ctx.db_path, run_id, render_document, today=today)
+        blocked = payment_problems(ctx.db_path) if any(p["doc_type"] == DOC_TYPE_INVOICE for p in planned) else []
         return render_page(
             "invoices/issue_preview.html", ctx, "invoices", run_id=run_id, problems=problems, planned=planned,
+            payment_blocked=blocked,
             fingerprint=documents_fingerprint(planned), changes=recipient_changes(ctx.db_path, run_id),
             total_invoices=sum((p["amount"] for p in planned if p["doc_type"] == DOC_TYPE_INVOICE), Decimal(0)),
             total_credits=sum((p["amount"] for p in planned if p["doc_type"] == DOC_TYPE_CREDIT), Decimal(0)),
@@ -194,8 +212,22 @@ def handle_post(ctx: RequestContext) -> str | None:
 
 def _handle_post(ctx: RequestContext) -> str | None:
     if ctx.segments == ["settings"]:
-        save_payment_details(ctx.db_path, ctx.form.get("payee", ""), ctx.form.get("iban", ""))
-        get_state().set_flash("Zahlungsangaben gespeichert.", ok=True)
+        f = ctx.form
+        save_payment_profile(ctx.db_path, PaymentProfile(
+            payee=f.get("payee", ""), street=f.get("street", ""), building=f.get("building", ""),
+            postal_code=f.get("postal_code", ""), city=f.get("city", ""), country=f.get("country", "CH"),
+            iban=f.get("iban", ""), contact_email=f.get("contact_email", "")))
+        status = payment_profile_status(ctx.db_path)
+        get_state().set_flash("Zahlungsangaben gespeichert — Status: " + PROFILE_STATUS_LABELS[status]
+                              + (". Jetzt den Musterzahlteil prüfen und bestätigen." if status != "ready" else "."),
+                              ok=True)
+        raise Redirect(url_for(ctx.ingress_path, "invoices") + "?tab=settings")
+
+    if ctx.segments == ["settings", "confirm"]:
+        if not (form_bool(ctx, "bank_matched") and form_bool(ctx, "scan_tested")):
+            raise FormError("Bitte beide Punkte bestätigen (Bankabgleich und Scan-Test).")
+        confirm_payment_profile(ctx.db_path, version=ctx.form.get("version", ""))
+        get_state().set_flash("Zahlungsangaben bestätigt — Rechnungen mit QR-Zahlteil sind jetzt möglich.", ok=True)
         raise Redirect(url_for(ctx.ingress_path, "invoices") + "?tab=settings")
 
     if ctx.segments == ["issue"]:

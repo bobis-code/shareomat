@@ -40,7 +40,9 @@ from shareomat.database.invoicing import (
     record_refund,
     recipient_changes,
     reminder_proposals,
-    save_payment_details,
+    confirm_payment_profile,
+    get_payment_profile,
+    save_payment_profile,
     set_reminder_block,
 )
 from shareomat.database.meters import create_meter
@@ -49,6 +51,7 @@ from shareomat.database.sqlite import connect, init_db
 from shareomat.database.tariffs import create_tariff
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
+from shareomat.models.invoicing import PaymentProfile
 from shareomat.models.participant import Participant
 from shareomat.models.tariff import Tariff
 from shareomat.web.pages import invoices as invoices_page
@@ -127,6 +130,13 @@ def _released_run(db_path: Path, runtime: RuntimeConfig, values: dict, *, overri
 _SIMPLE = {("M1", "export"): "2.0", ("M2", "import"): "1.0", ("M4", "import"): "1.0"}
 
 
+def _ready_profile(db_path, *, payee: str = "LEG Test Konto", iban: str = IBAN):
+    """Payment profile saved and confirmed (status "bereit")."""
+    save_payment_profile(db_path, PaymentProfile(payee=payee, street="Dorfstrasse", building="1", postal_code="4000",
+                                                 city="Basel", iban=iban, contact_email="leg@example.ch"))
+    confirm_payment_profile(db_path, version=get_payment_profile(db_path).version)
+
+
 def _by_participant(db_path):
     return {d.participant_id: d for d in list_documents(db_path) if d.status != "cancelled"}
 
@@ -134,7 +144,7 @@ def _by_participant(db_path):
 @pytest.fixture
 def issued(db_path, runtime):
     run_id = _released_run(db_path, runtime, _SIMPLE)
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     return run_id
 
@@ -150,7 +160,7 @@ def test_iban_check():
 
 def test_issue_requires_payment_details(db_path, runtime):
     run_id = _released_run(db_path, runtime, _SIMPLE)
-    assert any("Zahlungsangaben" in p for p in issue_problems(db_path, run_id))
+    assert any("Bankdaten fehlen" in p for p in issue_problems(db_path, run_id))
     with pytest.raises(InvoicingError):
         issue_documents(db_path, run_id, render_document, today=ISSUED)
     assert list_documents(db_path) == []
@@ -165,7 +175,7 @@ def test_overridden_release_is_never_invoiced(db_path, runtime):
             writer.writerow(["2027-07-01T10:00:00+00:00", meter, _SIMPLE.get((meter, direction), "0"), direction])
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     release_billing_run(db_path, run.id, override_reason="nur ein Tag")
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     assert any("interne Auswertung" in p for p in issue_problems(db_path, run.id))
     with pytest.raises(InvoicingError, match="interne Auswertung"):
         issue_documents(db_path, run.id, render_document, today=ISSUED)
@@ -191,7 +201,7 @@ def test_recipient_comes_from_the_billing_snapshot(db_path, runtime):
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     update_participant(db_path, "cons_a", _addr("cons_a", "Neue Mieterin", street="Neuweg 9"))
     release_billing_run(db_path, run.id)
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     issue_documents(db_path, run.id, render_document, today=ISSUED)
     doc = _by_participant(db_path)["cons_a"]
     assert doc.recipient_label == "Consumer A" and "Weg 1" in doc.recipient_address
@@ -201,7 +211,7 @@ def test_recipient_comes_from_the_billing_snapshot(db_path, runtime):
 def test_missing_address_at_billing_time_blocks(db_path, runtime):
     update_participant(db_path, "cons_b", Participant("cons_b", "Consumer B"))
     run_id = _released_run(db_path, runtime, _SIMPLE)
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     update_participant(db_path, "cons_b", _addr("cons_b", "Consumer B"))     # too late: snapshot counts
     assert any("Consumer B: Postadresse fehlte" in p for p in issue_problems(db_path, run_id))
 
@@ -209,7 +219,7 @@ def test_missing_address_at_billing_time_blocks(db_path, runtime):
 def test_prosumer_netting_and_zero_balance(db_path, runtime):
     """§3.4 netting; P1-11: an exactly balanced prosumer gets no 0.00 document."""
     run_id = _released_run(db_path, runtime, {("M2", "import"): "1.0", ("M3", "export"): "1.0"})
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     docs = _by_participant(db_path)
     assert set(docs) == {"cons_a", "prosumer"}
@@ -219,7 +229,7 @@ def test_prosumer_netting_and_zero_balance(db_path, runtime):
 def test_balanced_prosumer_gets_no_document(db_path, runtime):
     # prosumer imports 1 and exports 1 in the same slot: LEG gives it 1 kWh from itself -> charge 0.10, credit 0.10
     run_id = _released_run(db_path, runtime, {("M3", "import"): "1.0", ("M3", "export"): "1.0"})
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     assert issue_documents(db_path, run_id, render_document, today=ISSUED) == []
 
 
@@ -247,7 +257,7 @@ def test_payouts_never_exceed_received_payments(db_path, runtime):
     run_id = _released_run(db_path, runtime, {("M1", "export"): "0.1", ("M3", "export"): "0.3",
                                               ("M5", "export"): "0.3", ("M2", "import"): "0.3",
                                               ("M4", "import"): "0.4"}, channels=channels)
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     docs = _by_participant(db_path)
     credits = [d for d in docs.values() if d.doc_type == "credit"]
@@ -451,19 +461,38 @@ def test_invoices_page_workflow(db_path, runtime):
     csrf = get_state().csrf_token
 
     html = invoices_page.handle_get(RequestContext(method="GET", ingress_path=""))
-    assert "Zahlungsangaben (Kontoinhaber, IBAN) fehlen" in html
+    assert "Vorschau &amp; Freigabe" in html          # the run itself is fine; bank data only blocks issuing
+    preview = invoices_page.handle_get(RequestContext(method="GET", ingress_path="",
+                                                      segments=["runs", str(run_id), "preview"]))
+    assert "Bankdaten fehlen – nicht versandbereit" in preview and "disabled" in preview
+    assert "<svg" not in preview                                   # no QR code at all without bank data
 
-    with pytest.raises(FormError, match="IBAN ist ungültig"):
+    settings = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": "settings"}))
+    assert "nicht eingerichtet" in settings and "Bankdaten fehlen" in settings and "<svg" not in settings
+    form = {"csrf_token": csrf, "payee": "LEG Test Konto", "street": "Dorfstrasse", "building": "1",
+            "postal_code": "4000", "city": "Basel", "country": "CH", "contact_email": "leg@example.ch"}
+    with pytest.raises(FormError, match="IBAN ungültig"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings"],
-                                                 form={"csrf_token": csrf, "payee": "LEG", "iban": "CH00"}))
+                                                 form={**form, "iban": "CH00"}))
     with pytest.raises(Redirect):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings"],
-                                                 form={"csrf_token": csrf, "payee": "LEG Test", "iban": IBAN}))
+                                                 form={**form, "iban": IBAN}))
+    settings = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": "settings"}))
+    assert "prüfen" in settings and "Musterzahlteil" in settings and "<svg" in settings
+    version = get_payment_profile(db_path).version
+    with pytest.raises(FormError, match="beide Punkte"):
+        invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings", "confirm"],
+                                                 form={"csrf_token": csrf, "version": version, "scan_tested": "on"}))
+    with pytest.raises(Redirect):
+        invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings", "confirm"],
+                                                 form={"csrf_token": csrf, "version": version, "scan_tested": "on",
+                                                       "bank_matched": "on"}))
     html = invoices_page.handle_get(RequestContext(method="GET", ingress_path=""))
     assert "Vorschau &amp; Freigabe" in html
     preview = invoices_page.handle_get(RequestContext(method="GET", ingress_path="",
                                                       segments=["runs", str(run_id), "preview"]))
     assert "Consumer A" in preview and "Freigeben &amp; Belege erstellen" in preview and "0.20" in preview
+    assert "Zahlteil" in preview and "Empfangsschein" in preview and "disabled" not in preview
     assert list_documents(db_path) == []                                  # preview stores nothing
     fingerprint = re.search(r'name="fingerprint" value="([0-9a-f]{64})"', preview).group(1)
     with pytest.raises(FormError, match="bestätigen"):
@@ -519,7 +548,7 @@ def _three_producers(db_path, runtime):
     run_id = _released_run(db_path, runtime, {("M1", "export"): "0.1", ("M3", "export"): "0.3",
                                               ("M5", "export"): "0.3", ("M2", "import"): "0.3",
                                               ("M4", "import"): "0.4"}, channels=_CHANNELS + [("M5", "export")])
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     return run_id, _by_participant(db_path)
 
@@ -545,7 +574,7 @@ def test_issue_rechecks_inside_the_write_lock(db_path, runtime, monkeypatch):
     import shareomat.database.invoicing as inv
 
     run_id = _released_run(db_path, runtime, _SIMPLE)
-    save_payment_details(db_path, "LEG Test", IBAN)
+    _ready_profile(db_path)
     original = inv._write_txn
 
     def cancel_first(path):
@@ -574,9 +603,9 @@ def test_issue_stores_only_the_approved_preview(db_path, runtime):
     from shareomat.database.invoicing import preview_documents
 
     run_id = _released_run(db_path, runtime, _SIMPLE)
-    save_payment_details(db_path, "OLD PAYEE", IBAN)
+    _ready_profile(db_path, payee="OLD PAYEE")
     approved = documents_fingerprint(preview_documents(db_path, run_id, render_document, today=ISSUED))
-    save_payment_details(db_path, "NEW PAYEE", IBAN)
+    _ready_profile(db_path, payee="NEW PAYEE")
     with pytest.raises(InvoicingError, match="Vorschau neu laden"):
         issue_documents(db_path, run_id, render_document, today=ISSUED, expected_fingerprint=approved)
     assert list_documents(db_path) == []

@@ -87,6 +87,8 @@ class DocumentReminder:
     new_due_date: date | None = None
     discarded_at: datetime | None = None
     sent_at: datetime | None = None
+    qr_payload: str = ""               # frozen Swiss QR text (open amount, same reference as the invoice)
+    qr_reference: str = ""
     id: int | None = None
 
     @property
@@ -120,6 +122,11 @@ class BillingDocument:
     cancellation_sent_at: datetime | None = None
     replaces_number: str = ""
     contract_versions: str = ""
+    qr_payload: str = ""               # frozen Swiss QR text, invoices only
+    qr_reference: str = ""
+    qr_reference_type: str = ""
+    qr_iban_snapshot: str = ""
+    qr_account_holder_snapshot: str = ""
     period_start: date | None = None   # joined in from the billing run
     period_end: date | None = None
     local_kwh: Decimal = Decimal(0)    # LEG-Bezug (invoice) or LEG-Lieferung (credit) of the line item
@@ -206,3 +213,39 @@ class ReminderProposal:
     @property
     def label(self) -> str:
         return REMINDER_LABELS.get(self.level, f"Mahnstufe {self.level}")
+
+
+PROFILE_MISSING = "missing"   # nicht eingerichtet
+PROFILE_CHECK = "check"       # gültig gespeichert, Scan-Test/Bankabgleich noch nicht bestätigt
+PROFILE_READY = "ready"       # bestätigt — Rechnungen mit QR-Zahlteil dürfen erstellt werden
+PROFILE_STATUS_LABELS = {PROFILE_MISSING: "nicht eingerichtet", PROFILE_CHECK: "prüfen", PROFILE_READY: "bereit"}
+
+
+@dataclass
+class PaymentProfile:
+    """Bank account for consumer payments (QR bill creditor) and the invoice contact e-mail.
+
+    payee and address must be those the bank keeps for the account — not
+    necessarily the LEG's name. Only documents issued afterwards use a
+    changed profile; issued documents keep their frozen QR payload.
+    """
+
+    payee: str = ""
+    street: str = ""
+    building: str = ""
+    postal_code: str = ""
+    city: str = ""
+    country: str = "CH"
+    iban: str = ""
+    contact_email: str = ""
+
+    def as_dict(self) -> dict:
+        return {k: getattr(self, k) for k in ("payee", "street", "building", "postal_code", "city", "country",
+                                              "iban", "contact_email")}
+
+    @property
+    def version(self) -> str:
+        """Hash of everything that goes into a QR bill (the confirmation is bound to it)."""
+        import json
+        data = {k: v for k, v in self.as_dict().items() if k != "contact_email"}
+        return hashlib.sha256(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()[:16]

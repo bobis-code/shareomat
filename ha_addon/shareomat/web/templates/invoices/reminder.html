@@ -4,12 +4,12 @@
    fees are charged (the contract has no basis for them). #}
 <div class="doc-head">
   <div class="doc-sender">
-    {{ creditor.name }}<br>{{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
-    {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
+    {% if community_name and community_name != creditor.name %}{{ community_name }}<br>vertreten durch {% endif %}{{ creditor.name }}<br>
+    {{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
+    {% if contact_email %}<br>Kontakt: {{ contact_email }}{% endif %}
   </div>
   <div class="doc-recipient">
-    {{ doc.recipient_label }}{% for line in doc.recipient_address.split('
-') %}<br>{{ line }}{% endfor %}
+    {{ doc.recipient_label }}{% for line in doc.recipient_address.split('\n') %}<br>{{ line }}{% endfor %}
   </div>
 </div>
 
@@ -34,12 +34,9 @@
 
 <p>Wir bitten Sie, den offenen Betrag bis <strong>{{ new_due_date.strftime('%d.%m.%Y') }}</strong> zu überweisen.
   Falls Sie inzwischen bezahlt haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.</p>
-<table class="doc-pay">
-  <tr><td>Zahlungsempfänger</td><td>{{ payee }}</td></tr>
-  <tr><td>IBAN</td><td>{{ iban }}</td></tr>
-  <tr><td>Zahlungszweck</td><td>{{ doc.number }}</td></tr>
-</table>
 {% if level >= 3 %}
 <p>Bleibt die Zahlung weiterhin aus, behält sich der LEG-Vertreter die weiteren Schritte gemäss
   Gesellschaftsvertrag vor.</p>
 {% endif %}
+<p>Bitte mit dem QR-Zahlteil unten bezahlen (Referenz der ursprünglichen Rechnung {{ qr.reference_display }}).</p>
+{% include "invoices/qr_payment_part.html" %}

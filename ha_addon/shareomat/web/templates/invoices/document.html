@@ -7,8 +7,9 @@
 {% set is_invoice = doc_type == 'invoice' %}
 <div class="doc-head">
   <div class="doc-sender">
-    {{ creditor.name }}<br>{{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
-    {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
+    {% if community_name and community_name != creditor.name %}{{ community_name }}<br>vertreten durch {% endif %}{{ creditor.name }}<br>
+    {{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
+    {% if contact_email %}<br>Kontakt: {{ contact_email }}{% endif %}
   </div>
   <div class="doc-recipient">
     {{ recipient.label }}<br>{{ recipient.address_line }}<br>{{ recipient.postal_code }} {{ recipient.city }}
@@ -50,11 +51,7 @@
 {% if is_invoice %}
 <p><strong>Zahlbar bis {{ due_date.strftime('%d.%m.%Y') }}</strong> (innert
   {{ creditor.payment_term_days }} Tagen ab Rechnungsdatum, Ziff. 3.4).</p>
-<table class="doc-pay">
-  <tr><td>Zahlungsempfänger</td><td>{{ payee }}</td></tr>
-  <tr><td>IBAN</td><td>{{ iban }}</td></tr>
-  <tr><td>Zahlungszweck</td><td>{{ number }}</td></tr>
-</table>
+<p>Bitte mit dem QR-Zahlteil unten bezahlen{% if qr %} (Referenz {{ qr.reference_display }}){% endif %}.</p>
 {% else %}
 <p>Die Gutschrift wird gemäss Ziff. 3.4 des Gesellschaftsvertrags ausbezahlt, sobald und soweit die Zahlungen
   der LEG-Bezüger für diese Abrechnungsperiode eingegangen sind.</p>
@@ -62,3 +59,4 @@
 
 <p class="ts">Beanstandungen sind möglichst innerhalb von {{ creditor.payment_term_days }} Tagen ab Rechnungsdatum
   schriftlich an den LEG-Vertreter zu richten (Ziff. 3.4).</p>
+{% if is_invoice %}{% include "invoices/qr_payment_part.html" %}{% endif %}

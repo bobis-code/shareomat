@@ -9,6 +9,13 @@
   <div class="actions-row"><a class="btn btn-muted" href="{{ url_for('invoices') }}">Zurück</a></div>
 </div>
 {% else %}
+{% if payment_blocked %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Bankdaten fehlen – nicht versandbereit.</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in payment_blocked %}<li>{{ i }}</li>{% endfor %}</ul>
+    <a href="{{ url_for('invoices') }}?tab=settings">Zahlungsangaben einrichten</a></div>
+</div>
+{% endif %}
 {% if changes %}
 <div class="card">
   <div class="error-box" style="margin-top:0"><strong>Stammdaten seit dem Berechnen geändert:</strong>
@@ -37,7 +44,7 @@
     <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
     <label style="margin:0"><input type="checkbox" name="confirm" required> Empfänger, Adressen, Beträge und Belegtexte
       geprüft</label>
-    <button type="submit">Freigeben &amp; Belege erstellen</button>
+    <button type="submit" {{ 'disabled' if payment_blocked }}>Freigeben &amp; Belege erstellen</button>
     <a class="btn btn-muted" href="{{ url_for('invoices') }}">Abbrechen</a>
   </form>
   <div class="ts">Nach der Freigabe sind die Belege unveränderlich (Prüfsumme). Erstellt werden genau die hier
@@ -47,7 +54,7 @@
 {% for p in planned %}
 <div class="card">
   <h2>{{ p.number }} — {{ p.recipient.label }}</h2>
-  <div style="border:1px solid #ddd;padding:1rem;background:#fff;color:#111">{{ p.html | safe }}</div>
+  <div style="border:1px solid #ddd;padding:1rem;background:#fff;color:#111;overflow-x:auto">{{ p.html | safe }}</div>
 </div>
 {% endfor %}
 {% endif %}
