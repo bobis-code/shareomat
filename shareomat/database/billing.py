@@ -36,12 +36,13 @@ Notes:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -120,6 +121,63 @@ def _chf(value: Decimal) -> Decimal:
     return value.quantize(_CHF_CENT, rounding=ROUND_HALF_UP)
 
 
+_REQUIRED_CHANNELS = {
+    "consumer": ("import",),
+    "producer": ("export",),
+    "producer_consumer": ("import", "export"),
+    "storage": ("import", "export"),
+}
+
+
+def _largest_remainder(amounts: list[Decimal]) -> list[Decimal]:
+    """Round amounts to cents so they sum to the rounded total (largest remainder method).
+
+    Each amount is first rounded down; the cents still missing to reach the
+    commercially rounded total go to the amounts with the largest dropped
+    remainders (ties: earlier position). E.g. 3 x 0.0154 (total 0.0462 ->
+    0.05) -> 0.02 / 0.02 / 0.01 instead of 3 x 0.02 = 0.06.
+    """
+    if not amounts:
+        return []
+    floors = [a.quantize(_CHF_CENT, rounding=ROUND_DOWN) for a in amounts]
+    target = _chf(sum(amounts, Decimal(0)))
+    missing = int(((target - sum(floors, Decimal(0))) / _CHF_CENT).to_integral_value())
+    order = sorted(range(len(amounts)), key=lambda i: (-(amounts[i] - floors[i]), i))
+    result = list(floors)
+    for i in order[:max(missing, 0)]:
+        result[i] += _CHF_CENT
+    return result
+
+
+def _allocate_cents(items: list[BillingLineItem]) -> None:
+    """Set charge/credit/net per participant so the rounded totals reconcile.
+
+    Σ charges is the commercially rounded total of all consumer amounts,
+    Σ credits the rounded total of all producer amounts — so with equal
+    prices and no fee Σ charges == Σ credits exactly, and otherwise the
+    difference is the (rounded) agreed fee. Prosumers keep both lines and
+    are netted.
+    """
+    charges = _largest_remainder([i.local_amount_chf for i in items])
+    credits = _largest_remainder([i.producer_credit_chf for i in items])
+    for item, charge, credit in zip(items, charges, credits):
+        item.charge_chf, item.credit_chf, item.net_amount_chf = charge, credit, charge - credit
+
+
+def _result_fingerprint(preview: BillingPreview) -> str:
+    """Stable hash of everything a release depends on (amounts, quantities, sources, issues)."""
+    payload = {
+        "lines": [
+            [i.participant_id, str(i.local_received_kwh), str(i.local_amount_chf), str(i.local_supplied_kwh),
+             str(i.producer_credit_chf), str(i.charge_chf), str(i.credit_chf), ",".join(i.meter_ids)]
+            for i in sorted(preview.line_items, key=lambda x: x.participant_id)
+        ],
+        "sources": sorted(s.sha256 for s in preview.availability.sources),
+        "issues": preview.availability.blocking_issues,
+    }
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def _collect_readings_for_period(
     db_path: Path, runtime: RuntimeConfig, period_start: date, period_end: date,
 ) -> tuple[list[IntervalReading], list[BillingSourceFile], list[str]]:
@@ -155,8 +213,10 @@ def _collect_readings_for_period(
     for origin, imp in files:
         if imp.sha256 in seen_sha256:
             continue  # identical file already read (e.g. inbox + archive)
+        row_errors: list[str] = []
         try:
-            file_readings = parse_file(imp, SLOT_MINUTES, None, meter_data_source=meter_data_source)
+            file_readings = parse_file(imp, SLOT_MINUTES, None, meter_data_source=meter_data_source,
+                                       errors=row_errors)
         except Exception as exc:
             logger.warning("Billing scan: failed to parse %s: %s", imp.path.name, exc)
             issues.append(f"Datei {imp.path.name} konnte nicht gelesen werden: {exc}")
@@ -164,6 +224,10 @@ def _collect_readings_for_period(
         in_range = [r for r in file_readings if start_dt <= r.slot_start < end_dt]
         if not in_range:
             continue
+        if row_errors:
+            issues.append(
+                f"Datei {imp.path.name}: {len(row_errors)} Zeile(n) abgewiesen (z. B. {row_errors[0]})."
+            )
         seen_sha256.add(imp.sha256)
         sources.append(BillingSourceFile(filename=imp.path.name, sha256=imp.sha256, origin=origin))
         for r in in_range:
@@ -219,7 +283,9 @@ def compute_billing_preview(
 
     days = [period_start + timedelta(days=i) for i in range((period_end - period_start).days + 1)]
     base_config = _base_config(db_path, runtime, days)
-    readings, sources, issues = _collect_readings_for_period(db_path, runtime, period_start, period_end)
+    # hard: never releasable (wrong or missing basis); soft: releasable only with a written reason.
+    readings, sources, hard = _collect_readings_for_period(db_path, runtime, period_start, period_end)
+    soft: list[str] = []
     resolver = EligibilityResolver(db_path)
 
     configured_meter_ids = {m.meter_id for m in list_meters(db_path)}
@@ -242,16 +308,21 @@ def compute_billing_preview(
 
     billable: list[IntervalReading] = []
     present_slots: dict[str, set] = {}
+    present_channels: dict[tuple[str, str], set] = {}
     for r in readings:
         day = _local_day(r.slot_start)
         if r.meter_id in eligible_by_day.get(day, {}) and tariffs_by_day.get(day) is not None:
             billable.append(r)
             present_slots.setdefault(r.meter_id, set()).add(r.slot_start)
+            present_channels.setdefault((r.meter_id, r.direction), set()).add(r.slot_start)
         elif r.meter_id in configured_meter_ids:
             reason = resolver.for_day(day).excluded.get(r.meter_id, "an diesem Tag nicht abrechnungsberechtigt")
             excluded.setdefault(r.meter_id, reason)
 
     # ── quality gate ──
+    # Completeness per CHANNEL: a consumer needs its import series, a producer its
+    # export series, a prosumer/storage both — "no value" is never treated as 0 kWh.
+    role_of = {m.meter_id: m.role for m in list_meters(db_path)}
     expected_slots: dict[str, int] = {}
     for day in days:
         if tariffs_by_day.get(day) is None:
@@ -259,24 +330,28 @@ def compute_billing_preview(
         for meter_id in eligible_by_day[day]:
             expected_slots[meter_id] = expected_slots.get(meter_id, 0) + _slots_in_local_day(day)
     for meter_id, expected in sorted(expected_slots.items()):
-        present = len(present_slots.get(meter_id, ()))
-        if present < expected:
-            issues.append(f"Messpunkt {meter_id}: {expected - present} von {expected} Viertelstunden ohne Messwert.")
+        for direction in _REQUIRED_CHANNELS.get(role_of.get(meter_id, ""), ("import", "export")):
+            present = len(present_channels.get((meter_id, direction), ()))
+            label = "Bezug" if direction == "import" else "Einspeisung"
+            if present == 0:
+                hard.append(f"Messpunkt {meter_id}: keine Messwerte für {label} im ganzen Zeitraum.")
+            elif present < expected:
+                soft.append(f"Messpunkt {meter_id} ({label}): {expected - present} von {expected} Viertelstunden ohne Messwert.")
     if days_without_tariff:
-        issues.append(
+        soft.append(
             f"Kein gültiger LEG-Preis für {len(days_without_tariff)} Tag(e) ab "
             f"{days_without_tariff[0].strftime('%d.%m.%Y')} — diese Tage wurden nicht abgerechnet."
         )
     unknown = sorted(set(meter_ids_with_data) - configured_meter_ids)
     if unknown:
-        issues.append(f"Unbekannte Messpunkte in den Daten: {', '.join(unknown)}.")
+        hard.append(f"Unbekannte Messpunkte in den Daten: {', '.join(unknown)}.")
     if resolver.contract_mode and resolver.community_confirmed_start is None:
-        issues.append("Der vom Netzbetreiber bestätigte LEG-Start ist unter „Gemeinschaft“ nicht erfasst.")
+        soft.append("Der vom Netzbetreiber bestätigte LEG-Start ist unter „Gemeinschaft“ nicht erfasst.")
     if unconfirmed:
-        issues.append("Beitritt vom Netzbetreiber noch nicht bestätigt: " + ", ".join(sorted(unconfirmed)) + ".")
+        soft.append("Beitritt vom Netzbetreiber noch nicht bestätigt: " + ", ".join(sorted(unconfirmed)) + ".")
     storage_meters = sorted(m.meter_id for m in list_meters(db_path) if m.role == "storage" and m.meter_id in present_slots)
     if storage_meters:
-        issues.append(
+        hard.append(
             "Speicher-Messpunkte (" + ", ".join(storage_meters) + "): die Mengenbegrenzung nach Art. 19h Abs. 4 "
             "StromVV wird von Shareomat noch nicht geprüft."
         )
@@ -317,7 +392,7 @@ def compute_billing_preview(
         acc = totals[pid]
         local_amount = _round4(acc["local_cost"])
         producer_credit = _round4(acc["payout"])
-        charge, credit = _chf(local_amount), _chf(producer_credit)
+        charge, credit = Decimal(0), Decimal(0)  # set by _allocate_cents below
         line_items.append(BillingLineItem(
             participant_id=pid,
             participant_label=acc["label"],
@@ -333,12 +408,13 @@ def compute_billing_preview(
             credit_chf=credit,
             net_amount_chf=charge - credit,
         ))
+    _allocate_cents(line_items)
 
     # Energy clearing: every LEG kWh received was supplied by someone in the same quarter hour.
     received_total = sum(acc["local_received"] for acc in totals.values())
     supplied_total = sum(acc["local_supplied"] for acc in totals.values())
     if abs(received_total - supplied_total) > 1e-6:
-        issues.append(
+        hard.append(
             f"Energie-Clearing stimmt nicht: bezogen {received_total:.4f} kWh ≠ geliefert {supplied_total:.4f} kWh."
         )
     # Money clearing (contract prices): Bezugspreis = Produzentenvergütung + Verwaltungsgebühr, so consumers pay
@@ -346,10 +422,17 @@ def compute_billing_preview(
     if resolver.contract_mode:
         for t in tariff_obj.values():
             if t.local_rate_chf_kwh != t.feed_in_rate_chf_kwh + t.admin_fee_chf_kwh:
-                issues.append(
+                hard.append(
                     f"Tarif „{t.name}“: Bezugspreis ≠ Produzentenvergütung + Verwaltungsgebühr — "
                     "Differenz ohne vertragliche Grundlage."
                 )
+
+    # Nothing to bill is never a successful billing (e.g. no signed member yet).
+    if received_total <= 0 or supplied_total <= 0:
+        hard.append(
+            "Keine abrechenbaren LEG-Mengen im Zeitraum — kein wirksam beigetretener Bezüger/Produzent mit "
+            "zeitgleichen Messwerten (siehe „Nicht abgerechnet“)."
+        )
 
     reference_tariff = next((t for t in tariffs_by_day.values() if t is not None), base_config.tariff)
     availability = DataAvailability(
@@ -358,7 +441,8 @@ def compute_billing_preview(
         unknown_meter_ids=unknown,
         reading_count=len(readings),
         sources=sources,
-        blocking_issues=issues,
+        blocking_issues=hard + soft,
+        hard_issues=hard,
         excluded=excluded,
     )
     tariff_names = sorted({t.name for t in tariff_obj.values()}) or [reference_tariff.name]
@@ -385,6 +469,16 @@ _RUN_SELECT = """
 """
 
 
+def _load_issues(raw: str) -> tuple[list[str], list[str]]:
+    """(hard, soft) from the stored JSON; runs saved before the split stored a plain list (all soft)."""
+    if not raw:
+        return [], []
+    data = json.loads(raw)
+    if isinstance(data, list):
+        return [], data
+    return data.get("hard", []), data.get("soft", [])
+
+
 def _row_to_run(row) -> BillingRun:
     return BillingRun(
         id=row["id"],
@@ -405,7 +499,9 @@ def _row_to_run(row) -> BillingRun:
         computed_at=datetime.fromisoformat(row["computed_at"]),
         released_at=datetime.fromisoformat(row["released_at"]) if row["released_at"] else None,
         total_producer_credit_chf=Decimal(row["total_producer_credit_chf"]),
-        quality_issues=json.loads(row["quality_issues"]) if row["quality_issues"] else [],
+        quality_issues=_load_issues(row["quality_issues"])[0] + _load_issues(row["quality_issues"])[1],
+        hard_issues=_load_issues(row["quality_issues"])[0],
+        result_fingerprint=row["result_fingerprint"],
         release_override_reason=row["release_override_reason"],
         period_start=str_to_date(row["bp_start"]),
         period_end=str_to_date(row["bp_end"]),
@@ -448,8 +544,8 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
                     (billing_period_id, version, status, community_id, community_name, tariff_name,
                      local_rate_chf_kwh, grid_rate_chf_kwh, feed_in_rate_chf_kwh, participant_count,
                      total_local_kwh, total_leg_amount_chf, total_grid_kwh, total_grid_amount_chf,
-                     total_producer_credit_chf, quality_issues, computed_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     total_producer_credit_chf, quality_issues, result_fingerprint, computed_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     period_id, version, BILLING_STATUS_DRAFT,
@@ -459,7 +555,12 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
                     str(preview.total_local_kwh), str(preview.total_leg_amount_chf),
                     str(preview.total_grid_kwh), str(preview.total_grid_amount_chf),
                     str(preview.total_producer_credit_chf),
-                    json.dumps(preview.availability.blocking_issues, ensure_ascii=False),
+                    json.dumps({
+                        "hard": preview.availability.hard_issues,
+                        "soft": [i for i in preview.availability.blocking_issues
+                                 if i not in preview.availability.hard_issues],
+                    }, ensure_ascii=False),
+                    _result_fingerprint(preview),
                     now, now, now,
                 ),
             )
@@ -499,13 +600,28 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
     return get_billing_run(db_path, run_id).run
 
 
-def release_billing_run(db_path: Path, run_id: int, *, override_reason: str = "") -> BillingRun:
+def release_billing_run(
+    db_path: Path, run_id: int, *, override_reason: str = "", runtime: RuntimeConfig | None = None,
+) -> BillingRun:
     """Release a draft — from this point its billing_records are permanently immutable.
 
-    Refused while the run has quality issues (see compute_billing_preview),
-    unless a written reason for releasing anyway is given; that reason is
-    stored on the run and in the audit log.
+    Hard issues (wrong or missing basis: nothing billable, unreadable or
+    conflicting data, unknown meters, clearing errors, unsupported storage)
+    can never be released. Soft issues (data gaps, missing grid-operator
+    confirmations) need a written reason, stored on the run and in the
+    audit log. With `runtime`, the period is recomputed first and the
+    release refused if anything changed since the draft was saved
+    (corrected meter data, membership, tariffs).
     """
+    if runtime is not None:
+        draft = get_billing_run(db_path, run_id).run
+        if draft.status == BILLING_STATUS_DRAFT and draft.result_fingerprint:
+            current = compute_billing_preview(db_path, runtime, draft.period_start, draft.period_end)
+            if _result_fingerprint(current) != draft.result_fingerprint:
+                raise BillingWorkflowError(
+                    "Seit dem Speichern des Entwurfs haben sich Messdaten, Mitgliedschaften oder Tarife geändert — "
+                    "bitte den Zeitraum neu berechnen und als neuen Entwurf speichern."
+                )
     with connect(db_path) as conn:
         with conn:
             row = conn.execute("SELECT status, quality_issues FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
@@ -515,7 +631,13 @@ def release_billing_run(db_path: Path, run_id: int, *, override_reason: str = ""
                 raise BillingWorkflowError(
                     f"Nur Entwürfe können freigegeben werden (aktueller Status: {row['status']})."
                 )
-            issues = json.loads(row["quality_issues"]) if row["quality_issues"] else []
+            hard_issues, soft_issues = _load_issues(row["quality_issues"])
+            if hard_issues:
+                raise BillingWorkflowError(
+                    "Freigabe nicht möglich — nicht übersteuerbare Fehler: " + " ".join(hard_issues[:3])
+                    + (" …" if len(hard_issues) > 3 else "")
+                )
+            issues = soft_issues
             reason = override_reason.strip()
             if issues and not reason:
                 raise BillingWorkflowError(

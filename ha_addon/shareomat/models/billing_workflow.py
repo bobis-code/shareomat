@@ -90,8 +90,10 @@ class BillingRun:
     computed_at: datetime
     released_at: datetime | None = None
     total_producer_credit_chf: Decimal = Decimal(0)
-    quality_issues: list[str] = field(default_factory=list)
+    quality_issues: list[str] = field(default_factory=list)   # all (hard + soft)
+    hard_issues: list[str] = field(default_factory=list)      # never releasable
     release_override_reason: str = ""
+    result_fingerprint: str = ""
     period_start: date | None = None  # joined in from billing_periods for display convenience
     period_end: date | None = None
     period_label: str = ""
@@ -120,6 +122,8 @@ class DataAvailability:
     # hours, conflicting duplicates, unparseable files, unconfirmed members,
     # clearing mismatch, ...). Empty = quality gate passed.
     blocking_issues: list[str] = field(default_factory=list)
+    # Subset of blocking_issues that can never be released, not even with a reason.
+    hard_issues: list[str] = field(default_factory=list)
     # Meters with data that were deliberately not counted, with the reason.
     excluded: dict[str, str] = field(default_factory=dict)
 

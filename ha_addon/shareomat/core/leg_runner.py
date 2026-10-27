@@ -66,8 +66,12 @@ def parse_file(
     slot_minutes: int,
     known_meter_ids: set[str] | None,
     meter_data_source: str = "email_csv",
+    errors: list[str] | None = None,
 ) -> list[IntervalReading]:
     """Parse one file into meter readings, choosing the right parser by type.
+
+    errors, when given, collects rows the CSV parser rejected (so the
+    interactive billing can block release instead of silently skipping).
 
     Public (not prefixed `_`) because shareomat.database.billing reuses it
     to parse inbox/archive files on demand for an arbitrary billing period,
@@ -80,7 +84,7 @@ def parse_file(
     keeps using the legacy experimental parser in leg_parser.py.
     """
     if imp.file_type == "csv":
-        return parse_csv(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)
+        return parse_csv(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids, errors=errors)
     if imp.file_type == "sdat":
         if meter_data_source == METER_DATA_SOURCE_SDAT_LEG:
             return parse_sdat_ch(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids)

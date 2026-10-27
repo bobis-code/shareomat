@@ -67,10 +67,11 @@ def parse_csv(
     path: Path,
     slot_minutes: int = SLOT_MINUTES,
     known_meter_ids: set[str] | None = None,
+    errors: list[str] | None = None,
 ) -> list[IntervalReading]:
     """Parse a meter data CSV file into individual 15-minute energy readings."""
     readings: list[IntervalReading] = []
-    seen: set[tuple[str, datetime, str]] = set()
+    seen: dict = {}
 
     with path.open(newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
@@ -98,11 +99,18 @@ def parse_csv(
 
                 dedup_key = (meter_id, slot, direction)
                 if dedup_key in seen:
+                    # Never sum: an identical repeat is dropped, a different value is an error.
+                    if abs(seen[dedup_key] - value) > 1e-9:
+                        raise ValueError(
+                            f"widersprüchliche Doppelzeile für {meter_id} {direction} {slot.isoformat()}: "
+                            f"{seen[dedup_key]} vs. {value}"
+                        )
                     logger.warning(
-                        "%s:%d: duplicate row (meter_id=%s slot=%s dir=%s) — summing",
+                        "%s:%d: identical duplicate row (meter_id=%s slot=%s dir=%s) — ignored",
                         path.name, lineno, meter_id, slot.isoformat(), direction,
                     )
-                seen.add(dedup_key)
+                    continue
+                seen[dedup_key] = value
 
                 readings.append(IntervalReading(
                     meter_id=meter_id,
@@ -114,6 +122,8 @@ def parse_csv(
                 ))
             except (KeyError, ValueError) as exc:
                 logger.warning("%s:%d: skipping row – %s", path.name, lineno, exc)
+                if errors is not None:
+                    errors.append(f"Zeile {lineno}: {exc}")
 
     logger.info("Parsed %d reading(s) from %s", len(readings), path.name)
     return readings

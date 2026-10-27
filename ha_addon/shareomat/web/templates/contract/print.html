@@ -37,8 +37,10 @@
     „Vertragstext (Original)“ auf der Vertragsseite.
     {% if declaration_sha256 %}<br>SHA-256 Beitrittserklärung (eingefrorene Fassung):
     <span style="font-family:monospace;word-break:break-all">{{ declaration_sha256 }}</span>{% endif %}
-    {% if package_sha256 %}<br>SHA-256 Vertragspaket (Erklärung + Vertrag):
-    <span style="font-family:monospace;word-break:break-all">{{ package_sha256 }}</span>{% endif %}
+    {% if package_sha256 %}<br>Paket-Kennung (SHA-256 über die Prüfsummen von Erklärung und Vertrag, kein Datei-Hash
+    dieses Ausdrucks/PDF): <span style="font-family:monospace;word-break:break-all">{{ package_sha256 }}</span>{% endif %}
+    <br>Die unterschriebene Fassung wird durch den beim Erfassen gespeicherten Scan (mit eigener Prüfsumme) bzw. das
+    abgelegte Papieroriginal nachgewiesen.
     {% else %}<br>Entwurf — noch nicht veröffentlicht, keine Prüfsumme.{% endif %}
   </div>
 </body>

@@ -76,6 +76,14 @@ def _write_csv(directory: Path, filename: str, rows: list[tuple]) -> Path:
     return path
 
 
+_ALL_CHANNELS_ONE_SLOT = [
+    ("2027-07-01T10:00:00+00:00", "M1", "1.0", "export"),
+    ("2027-07-01T10:00:00+00:00", "M2", "1.0", "import"),
+    ("2027-07-01T10:00:00+00:00", "M3", "0", "import"),
+    ("2027-07-01T10:00:00+00:00", "M3", "0", "export"),
+]
+
+
 def _line(preview, pid):
     return next(i for i in preview.line_items if i.participant_id == pid)
 
@@ -165,10 +173,10 @@ def test_producer_credit_is_stored_and_prosumer_is_netted(db_path, runtime):
 
 
 def test_incomplete_data_blocks_release_unless_a_reason_is_given(db_path, runtime):
-    _write_csv(runtime.paths.inbox, "jul.csv", [("2027-07-01T10:00:00+00:00", "M1", "1.0", "export"),
-                                                 ("2027-07-01T10:00:00+00:00", "M2", "1.0", "import")])
+    _write_csv(runtime.paths.inbox, "jul.csv", _ALL_CHANNELS_ONE_SLOT)
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     assert any("Viertelstunden ohne Messwert" in i for i in preview.availability.blocking_issues)
+    assert preview.availability.hard_issues == []   # gaps only: releasable with a reason
     run = save_draft(db_path, preview)
     with pytest.raises(BillingWorkflowError, match="Freigabe gesperrt"):
         release_billing_run(db_path, run.id)
@@ -245,8 +253,7 @@ def test_second_report_for_same_period_gets_a_new_file(tmp_path):
 
 def test_billed_meter_cannot_be_moved_to_another_participant(db_path, runtime):
     from shareomat.database.meters import update_meter
-    _write_csv(runtime.paths.inbox, "jul.csv", [("2027-07-01T10:00:00+00:00", "M1", "1.0", "export"),
-                                                 ("2027-07-01T10:00:00+00:00", "M2", "1.0", "import")])
+    _write_csv(runtime.paths.inbox, "jul.csv", _ALL_CHANNELS_ONE_SLOT)
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     update_meter(db_path, "M2", Meter("M2", "prosumer", "Bezug", "consumer"))   # draft only: still allowed
     update_meter(db_path, "M2", Meter("M2", "cons_a", "Bezug", "consumer"))
@@ -254,3 +261,101 @@ def test_billed_meter_cannot_be_moved_to_another_participant(db_path, runtime):
     with pytest.raises(ValueError, match="freigegebenen Abrechnung"):
         update_meter(db_path, "M2", Meter("M2", "prosumer", "Bezug", "consumer"))
     update_meter(db_path, "M2", Meter("M2", "cons_a", "Bezug neu", "consumer"))  # other edits stay possible
+
+
+
+# ── v3 review: S-04/S-05/S-06/S-09/S-10/S-11/S-14 ───────────────────────────
+
+
+def test_nothing_billable_is_a_hard_error(db_path, runtime):
+    """S-04: a period without any LEG quantity can never be released, not even with a reason."""
+    _write_csv(runtime.paths.inbox, "jul.csv", [("2027-07-01T10:00:00+00:00", "M2", "1.0", "import")])
+    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    assert any("Keine abrechenbaren LEG-Mengen" in i for i in preview.availability.hard_issues)
+    run = save_draft(db_path, preview)
+    with pytest.raises(BillingWorkflowError, match="nicht übersteuerbare"):
+        release_billing_run(db_path, run.id, override_reason="trotzdem")
+
+
+def test_contract_without_signed_members_cannot_be_released(db_path, runtime, monkeypatch):
+    """S-04 reproduced: published contract + confirmed start, but nobody signed -> hard block."""
+    import shareomat.database.contract_versions as cv
+    from shareomat.database.contract_versions import publish_version, save_draft_version
+    from shareomat.models.contract import ContractVersion
+
+    class _Today(date):
+        @classmethod
+        def today(cls):
+            return date(2027, 5, 1)
+
+    monkeypatch.setattr(cv, "date", _Today)
+    save_community(db_path, Community(community_id="ZEV-001", name="Test", vnb_confirmed_start=date(2027, 6, 1)))
+    publish_version(db_path, save_draft_version(db_path, ContractVersion(
+        community_id="", version=0, status="draft", contract_text_snapshot="<p>v</p>",
+        local_rate_chf_kwh=Decimal("0.11"), feed_in_rate_chf_kwh=Decimal("0.11"), grid_operator="EBL",
+        representative_name="R", representative_address_line="A", representative_postal_code="1",
+        representative_city="C", representative_email="e@x.ch", valid_from=date(2027, 6, 1))).id)
+    monkeypatch.setattr(cv, "date", date)
+    _write_csv(runtime.paths.inbox, "jul.csv", _ALL_CHANNELS_ONE_SLOT)
+    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    assert preview.line_items == []
+    assert any("Keine abrechenbaren" in i for i in preview.availability.hard_issues)
+    run = save_draft(db_path, preview)
+    with pytest.raises(BillingWorkflowError):
+        release_billing_run(db_path, run.id, override_reason="Probelauf")
+
+
+def test_missing_export_channel_of_a_prosumer_is_detected(db_path, runtime):
+    """S-09: an import value in the slot must not hide a missing export series."""
+    _write_csv(runtime.paths.inbox, "jul.csv", [
+        ("2027-07-01T10:00:00+00:00", "M1", "1.0", "export"),
+        ("2027-07-01T10:00:00+00:00", "M2", "1.0", "import"),
+        ("2027-07-01T10:00:00+00:00", "M3", "0.2", "import"),   # export series of M3 missing entirely
+    ])
+    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    assert "Messpunkt M3: keine Messwerte für Einspeisung im ganzen Zeitraum." in preview.availability.hard_issues
+
+
+def test_cents_reconcile_with_three_consumers(db_path, runtime):
+    """S-10 reproduced: 3 x 0.0154 CHF and one producer 0.0462 CHF -> charges 0.05 total == credit 0.05."""
+    create_participant(db_path, Participant("cons_b", "Consumer B"))
+    create_participant(db_path, Participant("cons_c", "Consumer C"))
+    create_meter(db_path, Meter("M4", "cons_b", "Bezug B", "consumer"))
+    create_meter(db_path, Meter("M5", "cons_c", "Bezug C", "consumer"))
+    rows = [("2027-07-01T10:00:00+00:00", "M1", "0.42", "export"),
+            ("2027-07-01T10:00:00+00:00", "M3", "0", "import"), ("2027-07-01T10:00:00+00:00", "M3", "0", "export")]
+    rows += [("2027-07-01T10:00:00+00:00", m, "0.14", "import") for m in ("M2", "M4", "M5")]
+    _write_csv(runtime.paths.inbox, "jul.csv", rows)
+    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    charges = sorted(i.charge_chf for i in preview.line_items if i.local_received_kwh > 0)
+    assert charges == [Decimal("0.01"), Decimal("0.02"), Decimal("0.02")]
+    assert sum(i.charge_chf for i in preview.line_items) == sum(i.credit_chf for i in preview.line_items) == Decimal("0.05")
+
+
+def test_release_refuses_when_data_changed_since_draft(db_path, runtime):
+    """S-06: a corrected file after saving the draft forces a recomputation."""
+    _write_csv(runtime.paths.inbox, "jul.csv", _ALL_CHANNELS_ONE_SLOT)
+    run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
+    _write_csv(runtime.paths.inbox, "jul-nachtrag.csv", [("2027-07-02T10:00:00+00:00", "M1", "1.0", "export"),
+                                                          ("2027-07-02T10:00:00+00:00", "M2", "1.0", "import")])
+    with pytest.raises(BillingWorkflowError, match="geändert"):
+        release_billing_run(db_path, run.id, override_reason="Test", runtime=runtime)
+
+
+def test_identical_duplicate_rows_in_one_csv_count_once(tmp_path):
+    """S-11 reproduced: the automatic path summed duplicate rows within one file."""
+    path = _write_csv(tmp_path, "dup.csv", [("2027-07-01T10:00:00+00:00", "M1", "1.0", "export"),
+                                            ("2027-07-01T10:00:00+00:00", "M1", "1.0", "export")])
+    assert [r.value_kwh for r in parse_csv(path, 15)] == [1.0]
+    errors: list[str] = []
+    path2 = _write_csv(tmp_path, "conflict.csv", [("2027-07-01T10:00:00+00:00", "M1", "1.0", "export"),
+                                                  ("2027-07-01T10:00:00+00:00", "M1", "2.0", "export")])
+    assert [r.value_kwh for r in parse_csv(path2, 15, errors=errors)] == [1.0]
+    assert errors and "widersprüchliche Doppelzeile" in errors[0]
+
+
+def test_rejected_rows_block_release(db_path, runtime):
+    """S-19: rows the parser skips are reported, not silently dropped."""
+    _write_csv(runtime.paths.inbox, "jul.csv", _ALL_CHANNELS_ONE_SLOT + [("2027-07-01T11:00:00+00:00", "M1", "abc", "export")])
+    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    assert any("Zeile(n) abgewiesen" in i for i in preview.availability.hard_issues)

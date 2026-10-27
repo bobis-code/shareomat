@@ -455,6 +455,8 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "total_producer_credit_chf": "TEXT NOT NULL DEFAULT '0'",
         "quality_issues": "TEXT NOT NULL DEFAULT ''",
         "release_override_reason": "TEXT NOT NULL DEFAULT ''",
+        # Hash of the computed result at save time; release recomputes and compares.
+        "result_fingerprint": "TEXT NOT NULL DEFAULT ''",
     },
     "billing_records": {
         "producer_credit_chf": "TEXT NOT NULL DEFAULT '0'",

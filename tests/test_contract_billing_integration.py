@@ -100,7 +100,7 @@ def test_billing_uses_the_contract_rate_that_was_in_force_on_that_date(db_path, 
     from shareomat.database.participant_contract import assign_contract, mark_accepted
     for pid in ("solar", "cons_a"):
         a = assign_contract(db_path, pid, v1.id, v1.tariff_id, joined_at=date(2026, 1, 1))
-        mark_accepted(db_path, a.id, date(2025, 12, 1), method="paper", signed_by=pid)
+        mark_accepted(db_path, a.id, date(2025, 12, 1), method="paper", signed_by=pid, paper_location="Ordner")
 
     # v2: veröffentlicht 01.09.2026, gültig ab 01.01.2027, LEG-Bezug 10 Rp.
     monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 9, 1)))
@@ -145,9 +145,9 @@ def test_only_effective_members_are_billed_per_day(db_path, runtime, monkeypatch
     monkeypatch.setattr(contract_versions_module, "date", date)
     from shareomat.database.participant_contract import assign_contract, mark_accepted
     solar = assign_contract(db_path, "solar", v1.id, v1.tariff_id, joined_at=date(2026, 10, 1))
-    mark_accepted(db_path, solar.id, date(2026, 9, 20), method="paper", signed_by="solar")
+    mark_accepted(db_path, solar.id, date(2026, 9, 20), method="paper", signed_by="solar", paper_location="Ordner")
     cons = assign_contract(db_path, "cons_a", v1.id, v1.tariff_id, joined_at=date(2026, 10, 15))
-    mark_accepted(db_path, cons.id, date(2026, 9, 20), method="paper", signed_by="cons_a")
+    mark_accepted(db_path, cons.id, date(2026, 9, 20), method="paper", signed_by="cons_a", paper_location="Ordner")
 
     _write_csv(runtime.paths.inbox, "oct.csv", [
         ("2026-10-10T10:00:00+00:00", "M1", "1.0", "export"),   # before cons_a joined
