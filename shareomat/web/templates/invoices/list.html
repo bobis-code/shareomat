@@ -2,72 +2,75 @@
 {% block title %}Rechnungen{% endblock %}
 {% block heading %}Rechnungen &amp; Gutschriften{% endblock %}
 {% block content %}
-{% set tab_labels = {'invoices': 'Rechnungen', 'credits': 'Gutschriften', 'reminders': 'Mahnungen', 'settings': 'Zahlungsangaben & Regeln'} %}
-<div class="actions-row" style="margin-top:0;margin-bottom:12px">
+{% set tab_labels = {'invoices': 'Rechnungen', 'credits': 'Gutschriften', 'reminders': 'Mahnungen', 'settings': 'Bankkonto & Regeln'} %}
+<div class="tabs">
   {% for key, label in tab_labels.items() %}
-  <a class="btn {{ '' if tab == key else 'btn-muted' }}" href="{{ url_for('invoices') }}?tab={{ key }}">{{ label }}{% if key == 'reminders' and proposals %} ({{ proposals|length }}){% endif %}</a>
+  <a class="btn {{ '' if tab == key else 'btn-muted' }}" href="{{ url_for('invoices') }}?tab={{ key }}{{ '&period=' + period|string if period and key in ('invoices', 'credits') }}">{{ label }}{% if key == 'reminders' and proposals %} ({{ proposals|length }}){% endif %}</a>
   {% endfor %}
 </div>
-
-{% if pending and tab in ('invoices', 'credits') %}
-<div class="card">
-  <h2>Freigegebene Abrechnungen ohne Belege</h2>
-  {% for p in pending %}
-  <div style="margin-bottom:10px">
-    <strong>{{ p.run.period_start.strftime('%d.%m.%Y') }} – {{ p.run.period_end.strftime('%d.%m.%Y') }}</strong>
-    (Version {{ p.run.version }}) · {{ p.missing }} Beleg(e) fehlen{% if p.issued %}, {{ p.issued }} bereits erstellt{% endif %}
-    {% if p.problems %}
-    <div class="error-box"><ul style="margin:0 0 0 1rem;padding:0">{% for i in p.problems %}<li>{{ i }}</li>{% endfor %}</ul></div>
-    {% else %}
-    <a class="btn" href="{{ url_for('invoices', suffix='/runs/' + p.run.id|string + '/preview') }}">Vorschau &amp; Freigabe</a>
-    {% endif %}
-  </div>
-  {% endfor %}
-  <div class="ts">Erstellte Belege werden unveränderlich gespeichert (mit Prüfsumme). Fehler korrigieren: Beleg
-    stornieren (nur ohne gebuchte Zahlung; war er schon zugestellt, entsteht ein Stornobeleg, der zuerst zugestellt
-    werden muss), danach Ersatzbeleg erstellen. Nur Abrechnungen ohne Übersteuerung können verrechnet werden.</div>
-</div>
-{% endif %}
 
 {% if tab in ('invoices', 'credits') %}
+{% include "invoices/month_panel.html" %}
+
+{% for p in pending if p.problems %}
 <div class="card">
+  <div class="error-box" style="margin-top:0"><strong>{{ p.label }}: Belege können noch nicht erstellt werden</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in p.problems %}<li>{{ i }}</li>{% endfor %}</ul></div>
+</div>
+{% endfor %}
+
+<div class="card">
+  <form method="get" action="{{ url_for('invoices') }}" class="filter-row">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <label>Monat
+      <select name="period" onchange="this.form.submit()">
+        {% for r in periods %}<option value="{{ r.id }}" {{ 'selected' if r.id == period }}>{{ r.label }}</option>{% endfor %}
+        <option value="all" {{ 'selected' if period == 'all' }}>Alle Monate</option>
+      </select></label>
+    <label>Anzeigen
+      <select name="status" onchange="this.form.submit()">
+        {% for key, label in status_filters.items() %}<option value="{{ key }}" {{ 'selected' if key == status }}>{{ label }}</option>{% endfor %}
+      </select></label>
+    <noscript><button type="submit" class="btn-small">Filtern</button></noscript>
+  </form>
+  <div class="kpis">
+    {% for label, value in kpis %}<div class="kpi"><div class="kpi-value">{{ value }}</div><div class="kpi-label">{{ label }}</div></div>{% endfor %}
+  </div>
   {% if docs %}
   <div class="table-wrap">
-    <table>
+    <table class="cards">
       <thead><tr>
-        <th>Nummer</th><th>Teilnehmer</th><th>Periode</th><th>LEG-kWh</th><th>Betrag CHF</th>
+        <th>Nummer</th><th>Teilnehmer</th><th>Betrag CHF</th>
         <th>{{ 'Bezahlt' if tab == 'invoices' else 'Ausbezahlt' }} CHF</th>
-        {% if tab == 'credits' %}<th>Jetzt auszahlbar CHF</th>{% else %}<th>Fällig</th>{% endif %}
+        {% if tab == 'credits' %}<th>Jetzt auszahlbar</th>{% else %}<th>Fällig</th>{% endif %}
         <th>Status</th><th>Versand</th><th></th>
       </tr></thead>
       <tbody>
       {% for d in docs %}{% set st = d.state(today) %}
       <tr>
-        <td>{{ d.number }}</td>
-        <td>{{ d.recipient_label }}</td>
-        <td>{{ d.period_start.strftime('%m.%Y') if d.period_start }}</td>
-        <td>{{ '%.3f'|format(d.local_kwh) }}</td>
-        <td>{{ '%.2f'|format(d.amount_chf) }}</td>
-        <td>{{ '%.2f'|format(d.booked_chf) }}</td>
-        {% if tab == 'credits' %}<td>{{ '%.2f'|format(payouts[d.id].available_chf) if d.id in payouts else '–' }}</td>
-        {% else %}<td>{{ d.due_date.strftime('%d.%m.%Y') if d.due_date }}</td>{% endif %}
-        <td><span class="status-pill {{ 'status-pill-active' if st in ('paid', 'payout_done') else 'status-pill-inactive' }}">{{ state_labels[st] }}</span>
+        <td data-label="Nummer"><a href="{{ url_for('invoices', suffix='/' + d.id|string) }}"><strong>{{ d.number }}</strong></a></td>
+        <td data-label="Teilnehmer">{{ d.recipient_label }}</td>
+        <td data-label="Betrag CHF">{{ '%.2f'|format(d.amount_chf) }}</td>
+        <td data-label="{{ 'Bezahlt' if tab == 'invoices' else 'Ausbezahlt' }}">{{ '%.2f'|format(d.booked_chf) }}</td>
+        {% if tab == 'credits' %}<td data-label="Jetzt auszahlbar">{{ '%.2f'|format(payouts[d.id].available_chf) if d.id in payouts else '–' }}</td>
+        {% else %}<td data-label="Fällig">{{ d.due_date.strftime('%d.%m.%Y') if d.due_date }}</td>{% endif %}
+        <td data-label="Status"><span class="status-pill {{ 'status-pill-active' if st in ('paid', 'payout_done') else 'status-pill-inactive' }}">{{ state_labels[st] }}</span>
           {% if d.reminder_block_reason %}<span class="ts">Mahnsperre</span>{% endif %}</td>
-        <td>{{ d.sent_at.strftime('%d.%m.%Y') if d.sent_at else ('–' if d.status == 'cancelled' else 'offen') }}</td>
-        <td><a class="btn btn-muted btn-small" href="{{ url_for('invoices', suffix='/' + d.id|string) }}">Ansehen</a></td>
+        <td data-label="Versand">{{ d.sent_at.strftime('%d.%m.%Y') if d.sent_at else ('–' if d.status == 'cancelled' else 'noch nicht') }}</td>
+        <td data-label=""><a class="btn btn-muted btn-small" href="{{ url_for('invoices', suffix='/' + d.id|string) }}">Öffnen</a></td>
       </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <p class="ts">Noch keine {{ 'Rechnungen' if tab == 'invoices' else 'Gutschriften' }}. Belege entstehen aus einer
-    freigegebenen <a href="{{ url_for('billing') }}">Abrechnung</a>.</p>
+  <p class="ts">Keine {{ 'Rechnungen' if tab == 'invoices' else 'Gutschriften' }} für diese Auswahl. Belege entstehen
+    aus einer freigegebenen <a href="{{ url_for('billing') }}">Abrechnung</a>.</p>
   {% endif %}
   {% if tab == 'credits' %}
-  <div class="ts" style="margin-top:8px">Auszahlbar ist der Anteil an den eingegangenen Zahlungen der LEG-Bezüger
-    derselben Abrechnung, im Verhältnis der Gutschriften (Vertrag Ziff. 3.4). Shareomat führt keine Bankaufträge aus —
-    Auszahlungen werden im E-Banking gemacht und hier mit Bankreferenz erfasst.</div>
+  <div class="ts" style="margin-top:8px"><abbr title="Betrag, den die LEG einem Produzenten für gelieferten Strom schuldet">Gutschrift</abbr>:
+    Auszahlbar ist der Anteil an den bereits eingegangenen Zahlungen der Bezüger desselben Monats (Vertrag Ziff. 3.4).
+    Shareomat überweist nichts selbst — Auszahlungen im E-Banking machen und hier mit Bankreferenz erfassen.</div>
   {% endif %}
 </div>
 {% endif %}
@@ -76,15 +79,15 @@
 <div class="card">
   <h2>Fällige Mahnvorschläge</h2>
   {% if proposals %}
-  <div class="table-wrap"><table>
+  <div class="table-wrap"><table class="cards">
     <thead><tr><th>Rechnung</th><th>Teilnehmer</th><th>Fällig seit</th><th>Offen CHF</th><th>Vorschlag</th><th></th></tr></thead>
     <tbody>
     {% for p in proposals %}
     <tr>
-      <td>{{ p.document.number }}</td><td>{{ p.document.recipient_label }}</td>
-      <td>{{ p.document.due_date.strftime('%d.%m.%Y') }}</td><td>{{ '%.2f'|format(p.document.open_chf) }}</td>
-      <td>{{ p.label }}</td>
-      <td><a class="btn btn-muted btn-small" href="{{ url_for('invoices', suffix='/' + p.document.id|string) }}">Prüfen</a></td>
+      <td data-label="Rechnung"><strong>{{ p.document.number }}</strong></td><td data-label="Teilnehmer">{{ p.document.recipient_label }}</td>
+      <td data-label="Fällig seit">{{ p.document.due_date.strftime('%d.%m.%Y') }}</td><td data-label="Offen CHF">{{ '%.2f'|format(p.document.open_chf) }}</td>
+      <td data-label="Vorschlag">{{ p.label }}</td>
+      <td data-label=""><a class="btn btn-small" href="{{ url_for('invoices', suffix='/' + p.document.id|string) }}#mahnwesen">Mahnung erstellen</a></td>
     </tr>
     {% endfor %}
     </tbody>
@@ -112,7 +115,7 @@
 </div>
 <form class="form-card" method="post" action="{{ url_for('invoices', suffix='/settings') }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <h2>Zahlungsangaben (QR-Zahlteil)</h2>
+  <h2>Bankkonto für die Zahlungen der Bezüger</h2>
   <div class="field">
     <label for="contact_email">Kontakt-E-Mail auf Rechnungen</label>
     <input type="email" id="contact_email" name="contact_email" value="{{ profile.contact_email }}">
@@ -136,10 +139,11 @@
   <div class="field"><label for="country">Land</label>
     <input type="text" id="country" name="country" value="{{ profile.country or 'CH' }}" maxlength="2" required></div>
   <div class="field">
-    <label for="iban">IBAN oder QR-IBAN</label>
+    <label for="iban">IBAN des Bankkontos</label>
     <input type="text" id="iban" name="iban" value="{{ iban }}" placeholder="CH.. .... .... .... .... ." required>
-    <div class="field-hint">Normale IBAN → Referenz SCOR (RF…); nur eine von der Bank erhaltene QR-IBAN →
-      QR-Referenz (QRR). Währung CHF. Gilt nur für neu erstellte Belege; bereits erstellte bleiben unverändert.</div>
+    <div class="field-hint">Die normale IBAN Ihres Kontos (steht im E-Banking / auf dem Kontoauszug). Shareomat
+      erzeugt daraus den QR-Zahlteil mit einer eindeutigen Zahlungsreferenz pro Rechnung. Nur wenn Ihnen die Bank eine
+      spezielle «QR-IBAN» gegeben hat, diese eintragen. Gilt nur für neue Belege; erstellte bleiben unverändert.</div>
   </div>
   <button type="submit">Speichern</button>
 </form>
@@ -166,6 +170,17 @@
 {% else %}
 <div class="card">{% set qr = none %}{% set qr_missing = true %}<div style="overflow-x:auto">{% include "invoices/qr_payment_part.html" %}</div></div>
 {% endif %}
+<div class="card">
+  <h2>Begriffe</h2>
+  <dl class="glossary">
+    <dt>Rechnung</dt><dd>Ein Bezüger (oder Prosumer mit mehr Bezug als Lieferung) zahlt der LEG den bezogenen LEG-Strom.</dd>
+    <dt>Gutschrift</dt><dd>Die LEG schuldet einem Produzenten Geld für gelieferten Strom. Ausbezahlt wird, sobald die Bezüger bezahlt haben.</dd>
+    <dt>Zahlungsreferenz</dt><dd>Die Nummer im QR-Zahlteil (beginnt mit «RF»). Daran erkennen Sie im E-Banking, welche Rechnung bezahlt wurde.</dd>
+    <dt>Stornobeleg</dt><dd>Hebt eine bereits zugestellte Rechnung/Gutschrift offiziell auf. Er muss zugestellt sein, bevor der Ersatz erstellt wird.</dd>
+    <dt>Mahnsperre</dt><dd>Für diese Rechnung werden keine Mahnungen vorgeschlagen, z. B. bei vereinbarter Ratenzahlung.</dd>
+    <dt>Erfassen / Buchen</dt><dd>Hält in Shareomat fest, was auf dem Bankkonto passiert ist. Shareomat selbst überweist nie Geld.</dd>
+  </dl>
+</div>
 <div class="card">
   <h2>Regeln</h2>
   <ul>

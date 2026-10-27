@@ -556,6 +556,8 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "payment_profile_version": "TEXT NOT NULL DEFAULT ''",
         # SHA-256 over the financial record incl. the QR fields (see models.invoicing.record_hash).
         "record_sha256": "TEXT NOT NULL DEFAULT ''",
+        # ... and over the cancellation (number, reason, time, notice text hash).
+        "cancel_record_sha256": "TEXT NOT NULL DEFAULT ''",
     },
     "document_deliveries": {
         "item": "TEXT NOT NULL DEFAULT 'document'",   # document | reminder | cancellation

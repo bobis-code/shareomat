@@ -126,14 +126,16 @@ class DocumentReminder:
 
     @property
     def integrity_ok(self) -> bool:
+        """Text and record hash always; with a QR code, reference and amount must match its frozen text."""
         if hashlib.sha256(self.snapshot_html.encode("utf-8")).hexdigest() != self.snapshot_sha256:
             return False
-        if not self.qr_payload:
-            return True
-        fields = payload_fields(self.qr_payload)
-        return (fields.get("reference") == self.qr_reference
-                and fields.get("amount") == f"{self.open_amount_chf:.2f}"
-                and self.record_sha256 == record_hash(self.record_values()))
+        if self.record_sha256 != record_hash(self.record_values()):
+            return False
+        if self.qr_payload:
+            fields = payload_fields(self.qr_payload)
+            return (fields.get("reference") == self.qr_reference
+                    and fields.get("amount") == f"{self.open_amount_chf:.2f}")
+        return not self.qr_reference
 
     def record_values(self) -> dict:
         return {"document_id": self.document_id, "level": self.level, "issue_date": self.issue_date,
@@ -168,6 +170,7 @@ class BillingDocument:
     cancel_number: str = ""            # Stornobeleg, only when the document had been delivered
     cancel_snapshot_html: str = ""
     cancel_sha256: str = ""
+    cancel_record_sha256: str = ""     # record_hash() over the cancellation, see cancel_record_values()
     cancellation_sent_at: datetime | None = None
     replaces_number: str = ""
     contract_versions: str = ""
@@ -215,12 +218,26 @@ class BillingDocument:
             ok = ok and fields == {"iban": self.qr_iban_snapshot, "holder": self.qr_account_holder_snapshot,
                                    "amount": f"{self.amount_chf:.2f}", "reference_type": self.qr_reference_type,
                                    "reference": self.qr_reference}
-        if self.cancel_number:
-            ok = ok and hashlib.sha256(self.cancel_snapshot_html.encode("utf-8")).hexdigest() == self.cancel_sha256
-        return ok and all(r.integrity_ok for r in self.reminders)
+        if self.status == DOC_STATUS_CANCELLED:
+            ok = ok and self.cancel_record_sha256 == record_hash(self.cancel_record_values())
+            if self.cancel_number or self.cancel_snapshot_html:
+                ok = (ok and bool(self.cancel_number) and self.cancel_number in self.cancel_snapshot_html
+                      and hashlib.sha256(self.cancel_snapshot_html.encode("utf-8")).hexdigest() == self.cancel_sha256)
+        elif self.cancel_number or self.cancel_record_sha256:
+            ok = False                                       # cancellation data on an active document
+        # A reminder of a QR invoice must carry its own frozen QR code.
+        ok = ok and all(r.integrity_ok and (bool(r.qr_payload) or not self.qr_payload) for r in self.reminders)
+        return ok
 
     def record_values(self) -> dict:
         return {k: getattr(self, k) for k in _DOCUMENT_RECORD_FIELDS}
+
+    def cancel_record_values(self) -> dict:
+        """What a cancellation binds: the document, its number and record, the notice and its text hash."""
+        return {"document_id": self.id, "number": self.number, "record_sha256": self.record_sha256,
+                "cancel_number": self.cancel_number, "cancel_reason": self.cancel_reason,
+                "cancelled_at": self.cancelled_at.isoformat() if self.cancelled_at else "",
+                "cancel_sha256": self.cancel_sha256}
 
     @property
     def open_chf(self) -> Decimal:

@@ -38,5 +38,9 @@
 <p>Bleibt die Zahlung weiterhin aus, behält sich der LEG-Vertreter die weiteren Schritte gemäss
   Gesellschaftsvertrag vor.</p>
 {% endif %}
+{% if account_changed %}
+<p><strong>Bitte beachten: Unsere Bankverbindung hat geändert.</strong> Bitte nur noch auf das Konto im
+  QR-Zahlteil unten überweisen ({{ qr.iban_display }}), nicht mehr auf das Konto der ursprünglichen Rechnung.</p>
+{% endif %}
 <p>Bitte mit dem QR-Zahlteil unten bezahlen (Referenz der ursprünglichen Rechnung {{ qr.reference_display }}).</p>
 {% include "invoices/qr_payment_part.html" %}

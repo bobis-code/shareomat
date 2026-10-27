@@ -461,7 +461,8 @@ def test_invoices_page_workflow(db_path, runtime):
     csrf = get_state().csrf_token
 
     html = invoices_page.handle_get(RequestContext(method="GET", ingress_path=""))
-    assert "Vorschau &amp; Freigabe" in html          # the run itself is fine; bank data only blocks issuing
+    assert "Monatsabschluss" in html and "Bankkonto einrichten" in html     # next step: the one-time bank setup
+    assert "prüfen &amp; freigeben" in html                                  # the documents can already be looked at
     preview = invoices_page.handle_get(RequestContext(method="GET", ingress_path="",
                                                       segments=["runs", str(run_id), "preview"]))
     assert "Bankdaten fehlen – nicht versandbereit" in preview and "disabled" in preview
@@ -483,15 +484,17 @@ def test_invoices_page_workflow(db_path, runtime):
     with pytest.raises(FormError, match="beide Punkte"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings", "confirm"],
                                                  form={"csrf_token": csrf, "version": version, "scan_tested": "on"}))
-    with pytest.raises(Redirect):
+    with pytest.raises(Redirect) as back:
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings", "confirm"],
                                                  form={"csrf_token": csrf, "version": version, "scan_tested": "on",
                                                        "bank_matched": "on"}))
+    assert back.value.location.endswith(f"/runs/{run_id}/preview")           # back to the interrupted approval
     html = invoices_page.handle_get(RequestContext(method="GET", ingress_path=""))
-    assert "Vorschau &amp; Freigabe" in html
+    assert "Beleg(e) prüfen &amp; freigeben" in html
     preview = invoices_page.handle_get(RequestContext(method="GET", ingress_path="",
                                                       segments=["runs", str(run_id), "preview"]))
-    assert "Consumer A" in preview and "Freigeben &amp; Belege erstellen" in preview and "0.20" in preview
+    assert "Consumer A" in preview and "3 Belege erstellen" in preview and "0.20" in preview
+    assert preview.index("Schritt 2: Belege ansehen") < preview.index('name="confirm"')   # approve after reading
     assert "Zahlteil" in preview and "Empfangsschein" in preview and "disabled" not in preview
     assert list_documents(db_path) == []                                  # preview stores nothing
     fingerprint = re.search(r'name="fingerprint" value="([0-9a-f]{64})"', preview).group(1)
@@ -502,20 +505,22 @@ def test_invoices_page_workflow(db_path, runtime):
     with pytest.raises(FormError, match="Vorschau neu laden"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["issue"],
                                                  form={"csrf_token": csrf, "run_id": str(run_id), "confirm": "on"}))
-    with pytest.raises(Redirect):
+    with pytest.raises(Redirect) as to_dispatch:
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["issue"],
                                                  form={"csrf_token": csrf, "run_id": str(run_id), "confirm": "on",
                                                        "fingerprint": fingerprint}))
+    assert to_dispatch.value.location.endswith(f"/dispatch?period={run_id}")   # straight on to sending
     for tab in ("invoices", "credits", "reminders", "settings"):
         html = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": tab}))
         assert "Rechnungen &amp; Gutschriften" in html
     html = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": "invoices"}))
-    assert "Consumer A" in html and "Freigegebene Abrechnungen ohne Belege" not in html
+    assert "Consumer A" in html and "Belege versenden" in html
 
     docs = _by_participant(db_path)
     a = str(docs["cons_a"].id)
     detail = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", segments=[a]))
-    assert "Zahlung erfassen" in detail and "Mahnwesen" in detail and "Zweite Buchung bestätigt" in detail
+    assert "Zahlungseingang erfassen" in detail and "Mahnwesen" in detail and "Zweite Buchung" in detail
+    assert 'name="bank_done" required' in detail
     credit = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", segments=[str(docs["solar"].id)]))
     assert "Auszahlung erfassen" in credit and "Jetzt auszahlbar" in credit
 
@@ -532,10 +537,15 @@ def test_invoices_page_workflow(db_path, runtime):
     with pytest.raises(Redirect):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=[a, "delivery"],
                                                  form={"csrf_token": csrf, "method": "paper", "target": "cancellation"}))
-    with pytest.raises(FormError, match="Ziff. 3.4"):
+    with pytest.raises(FormError, match="E-Banking ausgeführt"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="",
                                                  segments=[str(docs["solar"].id), "payout"],
                                                  form={"csrf_token": csrf, "amount": "0.20", "reference": "X"}))
+    with pytest.raises(FormError, match="Ziff. 3.4"):
+        invoices_page.handle_post(RequestContext(method="POST", ingress_path="",
+                                                 segments=[str(docs["solar"].id), "payout"],
+                                                 form={"csrf_token": csrf, "amount": "0.20", "reference": "X",
+                                                       "bank_done": "on"}))
 
 
 # ── audit round 2 (35f8b3b) ─────────────────────────────────────────────────

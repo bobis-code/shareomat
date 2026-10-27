@@ -1,0 +1,31 @@
+{# Monatsabschluss: one next action, steps with state, totals. Expects `month` from
+   shareomat.database.invoicing.month_overview(). Used on the dashboard and on top of /invoices. #}
+{% macro action_url(a) %}{{ url_for(a.route, suffix=a.suffix) }}{{ a.query }}{% endmacro %}
+<div class="card month-panel">
+  <h2>Monatsabschluss{% if month.label %} – {{ month.label }}{% endif %}</h2>
+  {% if month.closed %}
+  <p class="month-done">✓ Dieser Monat ist abgeschlossen: alle Belege versendet, bezahlt und ausbezahlt.</p>
+  {% elif month.next %}
+  <a class="btn month-next" href="{{ action_url(month.next.action) }}">{{ month.next.action.label }} →</a>
+  <div class="ts" style="margin-top:4px">{{ month.next.detail }}</div>
+  {% endif %}
+  <ol class="month-steps">
+    {% for s in month.steps %}
+    <li class="month-step state-{{ s.state }}">
+      <span class="month-icon">{{ {'done': '✓', 'todo': '●', 'blocked': '!', 'waiting': '…', 'idle': '○'}[s.state] }}</span>
+      <span class="month-text"><strong>{{ s.title }}</strong><br><span class="ts">{{ s.detail }}</span></span>
+      {% if s.action and s.state in ('todo', 'blocked') and s is not sameas month.next %}
+      <a class="btn btn-muted btn-small" href="{{ action_url(s.action) }}">{{ s.action.label }}</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% if month.run %}
+  <div class="month-totals">
+    <span>Rechnungen <strong>CHF {{ '%.2f'|format(month.invoices_chf) }}</strong></span>
+    <span>Gutschriften <strong>CHF {{ '%.2f'|format(month.credits_chf) }}</strong></span>
+    <span>Differenz <strong>CHF {{ '%.2f'|format(month.invoices_chf - month.credits_chf) }}</strong></span>
+    <span>Noch offen <strong>CHF {{ '%.2f'|format(month.open_chf) }}</strong></span>
+    <span>Auszahlbar <strong>CHF {{ '%.2f'|format(month.payable_chf) }}</strong></span>
+  </div>
+  {% endif %}
+</div>

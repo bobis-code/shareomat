@@ -338,7 +338,7 @@ def _row_to_document(row) -> BillingDocument:
         qr_payload=row["qr_payload"], qr_reference=row["qr_reference"], qr_reference_type=row["qr_reference_type"],
         qr_iban_snapshot=row["qr_iban_snapshot"], qr_account_holder_snapshot=row["qr_account_holder_snapshot"],
         qr_render_version=row["qr_render_version"], payment_profile_version=row["payment_profile_version"],
-        record_sha256=row["record_sha256"],
+        record_sha256=row["record_sha256"], cancel_record_sha256=row["cancel_record_sha256"],
         period_start=str_to_date(row["bp_start"]), period_end=str_to_date(row["bp_end"]),
         local_kwh=Decimal(kwh or "0"),
     )
@@ -677,10 +677,16 @@ def cancel_document(db_path: Path, document_id: int, reason: str, render: Render
             creditor = _creditor(db_path, today, doc.period_start, doc.period_end)
             html = render("invoices/cancellation.html", {"doc": doc, "number": number, "issue_date": today,
                                                          "reason": reason, "creditor": creditor})
+        cancelled_at = now_iso()
+        cancelled = BillingDocument(**{**doc.__dict__, "status": DOC_STATUS_CANCELLED, "cancel_reason": reason,
+                                       "cancelled_at": datetime.fromisoformat(cancelled_at),
+                                       "cancel_number": number or "", "cancel_snapshot_html": html,
+                                       "cancel_sha256": _sha(html) if html else ""})
         conn.execute(
             "UPDATE billing_documents SET status = ?, cancel_reason = ?, cancelled_at = ?, cancel_number = ?, "
-            "cancel_snapshot_html = ?, cancel_sha256 = ? WHERE id = ?",
-            (DOC_STATUS_CANCELLED, reason, now_iso(), number, html, _sha(html) if html else "", document_id))
+            "cancel_snapshot_html = ?, cancel_sha256 = ?, cancel_record_sha256 = ? WHERE id = ?",
+            (DOC_STATUS_CANCELLED, reason, cancelled_at, number, html, cancelled.cancel_sha256,
+             record_hash(cancelled.cancel_record_values()), document_id))
         conn.execute("UPDATE document_reminders SET discarded_at = ? WHERE document_id = ? AND discarded_at IS NULL",
                      (now_iso(), document_id))
         record_event(conn, "billing_document", document_id, "cancelled",
@@ -1014,6 +1020,7 @@ def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today:
             "open_amount": doc.open_chf, "new_due_date": new_due, "creditor": creditor,
             "community_name": (get_community(db_path).name if get_community(db_path) else ""),
             "contact_email": profile.contact_email or creditor["email"], "qr": qr, "qr_missing": False,
+            "account_changed": bool(doc.qr_iban_snapshot) and doc.qr_iban_snapshot != normalize_iban(profile.iban),
         })
         record = DocumentReminder(document_id=doc.id, level=proposal.level, issue_date=today,
                                   open_amount_chf=doc.open_chf, snapshot_sha256=_sha(html), new_due_date=new_due,
@@ -1026,7 +1033,9 @@ def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today:
              date_to_str(new_due), qr.payload.text(), reference, record_hash(record), now_iso()))
         reminder_id = cur.lastrowid
         record_event(conn, "billing_document", doc.id, "reminder_created",
-                     f"{doc.number} {REMINDER_LABELS[proposal.level]} offen CHF {doc.open_chf}")
+                     f"{doc.number} {REMINDER_LABELS[proposal.level]} offen CHF {doc.open_chf}"
+                     + (f" — neues Konto …{normalize_iban(profile.iban)[-4:]} statt …{doc.qr_iban_snapshot[-4:]}"
+                        if doc.qr_iban_snapshot and doc.qr_iban_snapshot != normalize_iban(profile.iban) else ""))
     return get_reminder(db_path, reminder_id)
 
 
@@ -1052,3 +1061,133 @@ def get_reminder(db_path: Path, reminder_id: int) -> DocumentReminder:
         if row is None:
             raise InvoicingError(f"Mahnung {reminder_id} wurde nicht gefunden.")
         return next(r for r in _load_document(conn, row["document_id"]).reminders if r.id == reminder_id)
+
+
+# ── month overview (Monatsabschluss) ────────────────────────────────────────
+
+_MONTHS = ("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+           "November", "Dezember")
+
+
+def period_label(start: date | None, end: date | None) -> str:
+    """'November 2026' for a calendar month, otherwise 'dd.mm.yyyy – dd.mm.yyyy'."""
+    if start and end and start.day == 1 and (end + timedelta(days=1)).day == 1 and start.month == end.month:
+        return f"{_MONTHS[start.month - 1]} {start.year}"
+    if start and end:
+        return f"{start:%d.%m.%Y} – {end:%d.%m.%Y}"
+    return ""
+
+
+def unsent_documents(db_path: Path, run_id: int) -> list[BillingDocument]:
+    """Documents of a run still to be delivered: issued ones never sent, and undelivered cancellation notices."""
+    return [d for d in list_documents(db_path, run_id=run_id)
+            if (d.status != DOC_STATUS_CANCELLED and d.sent_at is None)
+            or (d.cancel_number and d.cancellation_sent_at is None)]
+
+
+def month_overview(db_path: Path, *, run_id: int | None = None, today: date | None = None) -> dict:
+    """The monthly closing as steps with counts and ONE next action, derived from the actual state.
+
+    Picks the latest billing run that isn't cancelled (or `run_id`). Each step:
+    key, title, state (done | todo | blocked | waiting | idle), detail, and an
+    action (route, suffix, query) the web layer turns into a link.
+    """
+    today = today or local_today()
+    from shareomat.database.billing import list_billing_runs
+
+    runs = [r for r in list_billing_runs(db_path) if r.status != "cancelled"]
+    run = next((r for r in runs if r.id == run_id), None) if run_id else \
+        max(runs, key=lambda r: (r.period_end or date.min, r.version), default=None)
+    steps: list[dict] = []
+
+    def step(key, title, state, detail, label="", route="", suffix="", query=""):
+        steps.append({"key": key, "title": title, "state": state, "detail": detail,
+                      "action": {"label": label, "route": route, "suffix": suffix, "query": query} if label else None})
+
+    summary = {"run": run, "label": period_label(run.period_start, run.period_end) if run else "",
+               "invoices_chf": Decimal(0), "credits_chf": Decimal(0), "open_chf": Decimal(0),
+               "payable_chf": Decimal(0), "steps": steps}
+    if run is None:
+        step("billing", "Abrechnung", "todo", "Noch keine Abrechnung berechnet.", "Abrechnung berechnen", "billing", "/new")
+        summary["next"] = steps[0]
+        return summary
+
+    q = f"?period={run.id}"
+    if run.status == "draft":
+        step("billing", "Abrechnung prüfen", "todo",
+             f"Entwurf mit {len(run.quality_issues)} offenen Prüfpunkt(en)." if run.quality_issues
+             else "Entwurf berechnet, Prüfungen bestanden.", "Abrechnung prüfen & freigeben", "billing", f"/{run.id}")
+    elif run.release_override_reason:
+        step("billing", "Abrechnung prüfen", "blocked",
+             "Mit Begründung trotz Prüfpunkten freigegeben — nur interne Auswertung, keine Rechnungen. "
+             "Daten ergänzen und neu berechnen.", "Zur Abrechnung", "billing", f"/{run.id}")
+    else:
+        step("billing", "Abrechnung prüfen", "done", "Messdaten vollständig, Abrechnung freigegeben.")
+
+    docs = [d for d in list_documents(db_path, run_id=run.id) if d.status != DOC_STATUS_CANCELLED]
+    released = run.status == "released" and not run.release_override_reason
+    issued, missing = missing_documents(db_path, run.id) if run.status == "released" else (0, 0)
+    detail = get_billing_run(db_path, run.id)
+    summary["invoices_chf"] = sum((i.net_amount_chf for i in detail.line_items if i.net_amount_chf > 0), Decimal(0))
+    summary["credits_chf"] = sum((-i.net_amount_chf for i in detail.line_items if i.net_amount_chf < 0), Decimal(0))
+    needs_bank = summary["invoices_chf"] > 0
+
+    if needs_bank and payment_profile_status(db_path) != PROFILE_READY:
+        step("bank", "Bankkonto einrichten", "blocked" if released and missing else "idle",
+             "Einmalig: Kontoinhaber, Adresse und IBAN erfassen und mit dem Musterzahlteil prüfen.",
+             "Bankkonto einrichten", "invoices", "", "?tab=settings")
+    if not released:
+        step("issue", "Belege prüfen & freigeben", "waiting", "Folgt nach der Freigabe der Abrechnung.")
+    elif missing:
+        step("issue", "Belege prüfen & freigeben", "todo",
+             f"{missing} Beleg(e) bereit zur Prüfung" + (f", {issued} bereits erstellt." if issued else "."),
+             f"{missing} Beleg(e) prüfen & freigeben", "invoices", f"/runs/{run.id}/preview")
+    else:
+        step("issue", "Belege prüfen & freigeben", "done", f"{issued} Beleg(e) erstellt.")
+
+    unsent = unsent_documents(db_path, run.id) if released else []
+    if docs and unsent:
+        step("send", "Belege versenden", "todo", f"{len(unsent)} Beleg(e) noch nicht versendet.",
+             f"{len(unsent)} Beleg(e) versenden", "invoices", "/dispatch", q)
+    elif docs:
+        step("send", "Belege versenden", "done", "Alle Belege versendet.")
+    else:
+        step("send", "Belege versenden", "waiting", "Folgt nach der Freigabe der Belege.")
+
+    invoices = [d for d in docs if d.is_invoice]
+    open_invoices = [d for d in invoices if d.open_chf > 0]
+    overdue = [d for d in open_invoices if d.state(today) == "overdue"]
+    summary["open_chf"] = sum((d.open_chf for d in open_invoices), Decimal(0))
+    if not invoices:
+        step("payments", "Zahlungseingänge erfassen", "waiting", "Folgt nach dem Versand.")
+    elif open_invoices:
+        step("payments", "Zahlungseingänge erfassen", "todo" if overdue else "waiting",
+             f"{len(open_invoices)} Rechnung(en) offen, CHF {summary['open_chf']:.2f}"
+             + (f", davon {len(overdue)} überfällig." if overdue else " — Eingänge im E-Banking prüfen und erfassen."),
+             "Offene Rechnungen", "invoices", "", q + "&status=open")
+    else:
+        step("payments", "Zahlungseingänge erfassen", "done", "Alle Rechnungen bezahlt.")
+
+    proposals = [p for p in reminder_proposals(db_path, today=today) if p.document.billing_run_id == run.id]
+    if proposals:
+        step("reminders", "Mahnungen", "todo", f"{len(proposals)} Mahnung(en) fällig.",
+             f"{len(proposals)} Mahnung(en) prüfen", "invoices", "", "?tab=reminders")
+
+    credits = [d for d in docs if not d.is_invoice]
+    payable = payout_status(db_path, run.id) if credits else {}
+    summary["payable_chf"] = sum((s.available_chf for s in payable.values()), Decimal(0))
+    if not credits:
+        step("payouts", "Produzenten auszahlen", "waiting" if not docs else "done",
+             "Folgt nach den Zahlungseingängen." if not docs else "Keine Gutschriften.")
+    elif summary["payable_chf"] > 0:
+        step("payouts", "Produzenten auszahlen", "todo",
+             f"CHF {summary['payable_chf']:.2f} aus eingegangenen Zahlungen auszahlbar.",
+             "Auszahlungen erfassen", "invoices", "", q + "&tab=credits&status=payable")
+    elif all(d.open_chf == 0 for d in credits):
+        step("payouts", "Produzenten auszahlen", "done", "Alle Gutschriften ausbezahlt.")
+    else:
+        step("payouts", "Produzenten auszahlen", "waiting", "Wartet auf Zahlungseingänge der Bezüger (Ziff. 3.4).")
+
+    summary["next"] = next((s for s in steps if s["state"] in ("blocked", "todo") and s["action"]), None)
+    summary["closed"] = bool(docs) and all(s["state"] in ("done", "idle") for s in steps)
+    return summary

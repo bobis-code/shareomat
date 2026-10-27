@@ -2,6 +2,12 @@
   <a class="brand" href="{{ url_for('dashboard') }}">
     <img class="brand-logo" src="{{ url_for('banner') }}" alt="Shareomat">
   </a>
+  {# On phones the menu is collapsed behind this toggle (pure CSS, no JavaScript — works in the HA app webview). #}
+  {% set ns = namespace(active='Menü') %}
+  {% for section_title, items in nav_sections %}{% for route_name, label in items %}{% if route_name == active_route %}{% set ns.active = label %}{% endif %}{% endfor %}{% endfor %}
+  <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
+  <label for="nav-toggle" class="nav-toggle">☰ Menü · <strong>{{ ns.active }}</strong></label>
+  <div class="nav-body">
   {% for section_title, items in nav_sections %}
     {% if section_title %}<div class="nav-section-title">{{ section_title }}</div>{% endif %}
     <ul class="nav-list">
@@ -16,6 +22,7 @@
       {% endfor %}
     </ul>
   {% endfor %}
+  </div>
   {% if community_name %}
     <div class="sidebar-footer">{{ community_name }}</div>
   {% endif %}

@@ -97,4 +97,17 @@ def handle_get(ctx: RequestContext) -> str:
         automation_active=automation_active,
         setup_incomplete=setup_incomplete,
         open_tasks=_open_tasks(ctx, snapshot),
+        month=_month(ctx) if not setup_incomplete else None,
     )
+
+
+def _month(ctx: RequestContext):
+    """Monatsabschluss panel (next billing/invoicing step); never breaks the dashboard."""
+    if ctx.db_path is None:
+        return None
+    try:
+        from shareomat.database.invoicing import month_overview
+        return month_overview(ctx.db_path)
+    except Exception:  # noqa: BLE001 — the status page must render even if invoicing data is odd
+        logger.exception("Monatsabschluss konnte nicht berechnet werden")
+        return None

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% block title %}Belege freigeben{% endblock %}
-{% block heading %}Rechnungen &amp; Gutschriften freigeben{% endblock %}
+{% block title %}Belege prüfen & freigeben{% endblock %}
+{% block heading %}Belege prüfen &amp; freigeben{% if label %} – {{ label }}{% endif %}{% endblock %}
 {% block content %}
 {% if problems %}
 <div class="card">
@@ -12,8 +12,8 @@
 {% if payment_blocked %}
 <div class="card">
   <div class="error-box" style="margin-top:0"><strong>Bankdaten fehlen – nicht versandbereit.</strong>
-    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in payment_blocked %}<li>{{ i }}</li>{% endfor %}</ul>
-    <a href="{{ url_for('invoices') }}?tab=settings">Zahlungsangaben einrichten</a></div>
+    Die Belege können Sie schon ansehen; erstellen lassen sie sich erst mit eingerichtetem Bankkonto.
+    <div class="actions-row"><a class="btn" href="{{ url_for('invoices') }}?tab=settings&amp;next={{ run_id }}">Bankkonto einrichten</a></div></div>
 </div>
 {% endif %}
 {% if changes %}
@@ -22,40 +22,57 @@
     <ul style="margin:.3rem 0 0 1rem;padding:0">{% for c in changes %}<li>{{ c }}</li>{% endfor %}</ul></div>
 </div>
 {% endif %}
+
 <div class="card">
-  <div class="grid">
-    <div class="tile"><div class="tile-value">{{ planned|length }}</div><div class="tile-label">Belege</div></div>
-    <div class="tile"><div class="tile-value">{{ '%.2f'|format(total_invoices) }}</div><div class="tile-label">Rechnungen CHF</div></div>
-    <div class="tile"><div class="tile-value">{{ '%.2f'|format(total_credits) }}</div><div class="tile-label">Gutschriften CHF</div></div>
+  <h2>Schritt 1: Übersicht</h2>
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-value">{{ planned|length }}</div><div class="kpi-label">Belege</div></div>
+    <div class="kpi"><div class="kpi-value">{{ '%.2f'|format(total_invoices) }}</div><div class="kpi-label">Rechnungen CHF</div></div>
+    <div class="kpi"><div class="kpi-value">{{ '%.2f'|format(total_credits) }}</div><div class="kpi-label">Gutschriften CHF</div></div>
+    <div class="kpi"><div class="kpi-value">{{ '%.2f'|format(total_invoices - total_credits) }}</div><div class="kpi-label">Differenz CHF</div></div>
   </div>
-  <div class="table-wrap" style="margin-top:12px"><table>
-    <thead><tr><th>Nr. (vorläufig)</th><th>Art</th><th>Empfänger</th><th>Adresse</th><th>E-Mail</th><th>Betrag CHF</th></tr></thead>
+  <div class="table-wrap"><table class="cards">
+    <thead><tr><th>Nr. (vorläufig)</th><th>Art</th><th>Empfänger</th><th>Zustellung</th><th>Betrag CHF</th><th></th></tr></thead>
     <tbody>
     {% for p in planned %}
-    <tr><td>{{ p.number }}</td><td>{{ 'Rechnung' if p.doc_type == 'invoice' else 'Gutschrift' }}</td>
-      <td>{{ p.recipient.label }}</td><td>{{ p.address | replace('\n', ', ') }}</td>
-      <td>{{ p.recipient.email or '– (Papier)' }}</td><td>{{ '%.2f'|format(p.amount) }}</td></tr>
+    <tr>
+      <td data-label="Nr. (vorläufig)"><strong>{{ p.number }}</strong></td>
+      <td data-label="Art">{{ 'Rechnung' if p.doc_type == 'invoice' else 'Gutschrift' }}</td>
+      <td data-label="Empfänger">{{ p.recipient.label }}<br><span class="ts">{{ p.address | replace('\n', ', ') }}</span></td>
+      <td data-label="Zustellung">{{ 'E-Mail ' + p.recipient.email if p.recipient.email else 'Papier (keine E-Mail)' }}</td>
+      <td data-label="Betrag CHF">{{ '%.2f'|format(p.amount) }}</td>
+      <td data-label=""><a class="btn btn-muted btn-small" href="#beleg-{{ loop.index }}">Ansehen</a></td>
+    </tr>
     {% endfor %}
     </tbody>
   </table></div>
-  <form method="post" action="{{ url_for('invoices', suffix='/issue') }}" class="actions-row">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="run_id" value="{{ run_id }}">
-    <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
-    <label style="margin:0"><input type="checkbox" name="confirm" required> Empfänger, Adressen, Beträge und Belegtexte
-      geprüft</label>
-    <button type="submit" {{ 'disabled' if payment_blocked }}>Freigeben &amp; Belege erstellen</button>
-    <a class="btn btn-muted" href="{{ url_for('invoices') }}">Abbrechen</a>
-  </form>
-  <div class="ts">Nach der Freigabe sind die Belege unveränderlich (Prüfsumme). Erstellt werden genau die hier
-    gezeigten Belege; hat sich seither etwas geändert (Zahlungsangaben, Nummern, Beträge), verlangt Shareomat eine
-    neue Vorschau. Der Versand ist ein eigener Schritt.</div>
 </div>
-{% for p in planned %}
+
 <div class="card">
-  <h2>{{ p.number }} — {{ p.recipient.label }}</h2>
-  <div class="doc-view">{{ p.html | safe }}</div>
+  <h2>Schritt 2: Belege ansehen</h2>
+  <p class="ts">Jeden Beleg antippen zum Öffnen. Geprüft werden Empfänger, Mengen, Beträge und der Zahlteil.</p>
+  {% for p in planned %}
+  <details class="doc-details" id="beleg-{{ loop.index }}">
+    <summary><strong>{{ p.number }}</strong> · {{ p.recipient.label }} · {{ 'Rechnung' if p.doc_type == 'invoice' else 'Gutschrift' }}
+      CHF {{ '%.2f'|format(p.amount) }}</summary>
+    <div class="doc-view">{{ p.html | safe }}</div>
+  </details>
+  {% endfor %}
 </div>
-{% endfor %}
+
+<form method="post" action="{{ url_for('invoices', suffix='/issue') }}" class="card">
+  <h2>Schritt 3: Freigeben</h2>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="run_id" value="{{ run_id }}">
+  <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
+  <label style="display:block"><input type="checkbox" name="confirm" required {{ 'disabled' if payment_blocked }}>
+    Ich habe Empfänger, Adressen, Beträge und Belege geprüft.</label>
+  <div class="actions-row">
+    <button type="submit" {{ 'disabled' if payment_blocked }}>{{ planned|length }} Belege erstellen</button>
+    <a class="btn btn-muted" href="{{ url_for('invoices') }}">Abbrechen</a>
+  </div>
+  <div class="ts">Danach sind die Belege unveränderlich. Erstellt werden genau die oben gezeigten Belege; hat sich
+    seither etwas geändert, verlangt Shareomat eine neue Vorschau. Anschliessend geht es direkt zum Versand.</div>
+</form>
 {% endif %}
 {% endblock %}
