@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import re
 import threading
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -26,6 +27,7 @@ from shareomat.database.invoicing import (
     cancel_document,
     create_reminder,
     discard_reminder,
+    documents_fingerprint,
     get_document,
     iban_is_valid,
     issue_documents,
@@ -36,6 +38,7 @@ from shareomat.database.invoicing import (
     record_payment,
     record_payout,
     record_refund,
+    recipient_changes,
     reminder_proposals,
     save_payment_details,
     set_reminder_block,
@@ -462,12 +465,18 @@ def test_invoices_page_workflow(db_path, runtime):
                                                       segments=["runs", str(run_id), "preview"]))
     assert "Consumer A" in preview and "Freigeben &amp; Belege erstellen" in preview and "0.20" in preview
     assert list_documents(db_path) == []                                  # preview stores nothing
+    fingerprint = re.search(r'name="fingerprint" value="([0-9a-f]{64})"', preview).group(1)
     with pytest.raises(FormError, match="bestätigen"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["issue"],
-                                                 form={"csrf_token": csrf, "run_id": str(run_id)}))
-    with pytest.raises(Redirect):
+                                                 form={"csrf_token": csrf, "run_id": str(run_id),
+                                                       "fingerprint": fingerprint}))
+    with pytest.raises(FormError, match="Vorschau neu laden"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["issue"],
                                                  form={"csrf_token": csrf, "run_id": str(run_id), "confirm": "on"}))
+    with pytest.raises(Redirect):
+        invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["issue"],
+                                                 form={"csrf_token": csrf, "run_id": str(run_id), "confirm": "on",
+                                                       "fingerprint": fingerprint}))
     for tab in ("invoices", "credits", "reminders", "settings"):
         html = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": tab}))
         assert "Rechnungen &amp; Gutschriften" in html
@@ -498,3 +507,107 @@ def test_invoices_page_workflow(db_path, runtime):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="",
                                                  segments=[str(docs["solar"].id), "payout"],
                                                  form={"csrf_token": csrf, "amount": "0.20", "reference": "X"}))
+
+
+# ── audit round 2 (35f8b3b) ─────────────────────────────────────────────────
+
+
+def _three_producers(db_path, runtime):
+    """Credits 0.01 / 0.03 / 0.03, invoices A 0.03 / B 0.04."""
+    create_participant(db_path, _addr("solar2", "Solar 2"))
+    create_meter(db_path, Meter("M5", "solar2", "PV 2", "producer"))
+    run_id = _released_run(db_path, runtime, {("M1", "export"): "0.1", ("M3", "export"): "0.3",
+                                              ("M5", "export"): "0.3", ("M2", "import"): "0.3",
+                                              ("M4", "import"): "0.4"}, channels=_CHANNELS + [("M5", "export")])
+    save_payment_details(db_path, "LEG Test", IBAN)
+    issue_documents(db_path, run_id, render_document, today=ISSUED)
+    return run_id, _by_participant(db_path)
+
+
+def test_correction_never_leaves_a_producer_overpaid(db_path, runtime):
+    """A1 reproduced: payouts 0.02/0.02 from CHF 0.05 received, then a -0.01 correction -> refused."""
+    run_id, docs = _three_producers(db_path, runtime)
+    record_payment(db_path, docs["cons_a"].id, "0.03", ISSUED, reference="in-a", today=LATER)
+    record_payment(db_path, docs["cons_b"].id, "0.02", ISSUED, reference="in-b", today=LATER)
+    status = payout_status(db_path, run_id)
+    big = [d for d in docs.values() if d.doc_type == "credit" and d.amount_chf == Decimal("0.03")]
+    assert [status[d.id].available_chf for d in big] == [Decimal("0.02"), Decimal("0.02")]
+    for d in big:
+        record_payout(db_path, d.id, "0.02", ISSUED, reference=f"out-{d.id}", today=LATER)
+    with pytest.raises(InvoicingError, match="überzahlt"):
+        record_payment(db_path, docs["cons_b"].id, "-0.01", ISSUED, note="Fehlbuchung", today=LATER)
+    shares = payout_status(db_path, run_id)
+    assert all(shares[d.id].paid_out_chf <= shares[d.id].entitled_chf for d in big)
+
+
+def test_issue_rechecks_inside_the_write_lock(db_path, runtime, monkeypatch):
+    """A2 reproduced: the run is cancelled right before issuing takes the lock -> nothing is issued."""
+    import shareomat.database.invoicing as inv
+
+    run_id = _released_run(db_path, runtime, _SIMPLE)
+    save_payment_details(db_path, "LEG Test", IBAN)
+    original = inv._write_txn
+
+    def cancel_first(path):
+        cancel_billing_run(path, run_id)
+        return original(path)
+
+    monkeypatch.setattr(inv, "_write_txn", cancel_first)
+    with pytest.raises(InvoicingError, match="Nur freigegebene"):
+        issue_documents(db_path, run_id, render_document, today=ISSUED)
+    assert list_documents(db_path) == []
+
+
+def test_refund_reference_can_not_be_reused(db_path, runtime, issued):
+    """A3 reproduced: the same refund twice with one bank reference -> second one refused."""
+    doc = _by_participant(db_path)["cons_a"]
+    record_payment(db_path, doc.id, "0.30", ISSUED, reference="in-1", today=LATER)
+    record_refund(db_path, doc.id, "0.05", ISSUED, reference="one-refund", today=LATER)
+    with pytest.raises(InvoicingError, match="bereits als Rückerstattung"):
+        record_refund(db_path, doc.id, "0.05", ISSUED, reference=" One-Refund", today=LATER)
+    record_refund(db_path, doc.id, "0.05", ISSUED, reference="second-transfer", today=LATER)
+    assert get_document(db_path, doc.id).booked_chf == Decimal("0.20")
+
+
+def test_issue_stores_only_the_approved_preview(db_path, runtime):
+    """B1 reproduced: payment details changed after the preview -> issuing refused until re-approved."""
+    from shareomat.database.invoicing import preview_documents
+
+    run_id = _released_run(db_path, runtime, _SIMPLE)
+    save_payment_details(db_path, "OLD PAYEE", IBAN)
+    approved = documents_fingerprint(preview_documents(db_path, run_id, render_document, today=ISSUED))
+    save_payment_details(db_path, "NEW PAYEE", IBAN)
+    with pytest.raises(InvoicingError, match="Vorschau neu laden"):
+        issue_documents(db_path, run_id, render_document, today=ISSUED, expected_fingerprint=approved)
+    assert list_documents(db_path) == []
+    fresh = documents_fingerprint(preview_documents(db_path, run_id, render_document, today=ISSUED))
+    docs = issue_documents(db_path, run_id, render_document, today=ISSUED, expected_fingerprint=fresh)
+    assert all("NEW PAYEE" in d.snapshot_html for d in docs if d.is_invoice)
+
+
+def test_tampered_document_blocks_every_further_step(db_path, runtime, issued):
+    """B2 reproduced: a document whose checksum fails can't be delivered, booked, reminded or cancelled."""
+    doc = _by_participant(db_path)["cons_a"]
+    with connect(db_path) as conn:
+        with conn:
+            conn.execute("UPDATE billing_documents SET snapshot_html = replace(snapshot_html, '0.10', '9.10') "
+                         "WHERE id = ?", (doc.id,))
+    for action in (lambda: record_delivery(db_path, doc.id, "paper"),
+                   lambda: record_payment(db_path, doc.id, "0.10", ISSUED, reference="x", today=LATER),
+                   lambda: cancel_document(db_path, doc.id, "x", render_document)):
+        with pytest.raises(InvoicingError, match="Prüfsumme"):
+            action()
+    record_delivery(db_path, doc.id, "paper", status="failed", detail="nur Protokoll")   # failures stay loggable
+
+
+def test_recipient_changes_after_the_draft_are_reported(db_path, runtime):
+    """B3: the frozen recipient stays, but a later correction is shown before release and issuing."""
+    _write_month(runtime, _SIMPLE)
+    run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
+    assert recipient_changes(db_path, run.id) == []
+    update_participant(db_path, "cons_b", _addr("cons_b", "Consumer B", street="Korrigiert 5"))
+    changes = recipient_changes(db_path, run.id)
+    assert len(changes) == 1 and changes[0].startswith("Consumer B: Adresse")
+    from shareomat.web.pages import billing as billing_page
+    html = billing_page.handle_get(RequestContext(method="GET", ingress_path="", segments=[str(run.id)]))
+    assert "Empfängerdaten seit dem Berechnen geändert" in html

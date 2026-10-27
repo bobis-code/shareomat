@@ -3,6 +3,15 @@
 {% block heading %}Abrechnung {{ detail.run.period_start }} – {{ detail.run.period_end }} (Version {{ detail.run.version }}){% endblock %}
 {% block content %}
 {% set issues = detail.run.quality_issues if detail.run.status == 'draft' else [] %}{% set hard_issues = detail.run.hard_issues %}
+{% if recipient_changes %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Empfängerdaten seit dem Berechnen geändert</strong>
+    (Rechnungen verwenden den Stand dieses Entwurfs):
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for c in recipient_changes %}<li>{{ c }}</li>{% endfor %}</ul>
+    <div class="ts" style="margin-top:6px">Gilt die Korrektur auch für diese Periode: Entwurf verwerfen und den
+      Zeitraum neu berechnen.</div></div>
+</div>
+{% endif %}
 {% if issues %}
 <div class="card">
   <div class="error-box" style="margin-top:0"><strong>Freigabe gesperrt — offene Prüfpunkte:</strong>

@@ -52,7 +52,9 @@ from shareomat.database.invoicing import (
     local_today,
     missing_documents,
     payout_status,
+    documents_fingerprint,
     preview_documents,
+    recipient_changes,
     record_delivery,
     record_payment,
     record_payout,
@@ -128,6 +130,7 @@ def handle_get(ctx: RequestContext) -> str:
         planned = [] if problems else preview_documents(ctx.db_path, run_id, render_document, today=today)
         return render_page(
             "invoices/issue_preview.html", ctx, "invoices", run_id=run_id, problems=problems, planned=planned,
+            fingerprint=documents_fingerprint(planned), changes=recipient_changes(ctx.db_path, run_id),
             total_invoices=sum((p["amount"] for p in planned if p["doc_type"] == DOC_TYPE_INVOICE), Decimal(0)),
             total_credits=sum((p["amount"] for p in planned if p["doc_type"] == DOC_TYPE_CREDIT), Decimal(0)),
         )
@@ -202,7 +205,8 @@ def _handle_post(ctx: RequestContext) -> str | None:
             raise FormError("Unbekannte Abrechnung.")
         if not form_bool(ctx, "confirm"):
             raise FormError("Bitte bestätigen, dass Empfänger, Beträge und Belege geprüft sind.")
-        created = issue_documents(ctx.db_path, run_id, render_document)
+        created = issue_documents(ctx.db_path, run_id, render_document,
+                                  expected_fingerprint=ctx.form.get("fingerprint", ""))
         get_state().set_flash(f"{len(created)} Beleg(e) erstellt.", ok=True)
         raise Redirect(url_for(ctx.ingress_path, "invoices"))
 
