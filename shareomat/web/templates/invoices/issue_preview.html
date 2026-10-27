@@ -9,6 +9,12 @@
   <div class="actions-row"><a class="btn btn-muted" href="{{ url_for('invoices') }}">Zurück</a></div>
 </div>
 {% else %}
+{% if changes %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Stammdaten seit dem Berechnen geändert:</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for c in changes %}<li>{{ c }}</li>{% endfor %}</ul></div>
+</div>
+{% endif %}
 <div class="card">
   <div class="grid">
     <div class="tile"><div class="tile-value">{{ planned|length }}</div><div class="tile-label">Belege</div></div>
@@ -28,13 +34,15 @@
   <form method="post" action="{{ url_for('invoices', suffix='/issue') }}" class="actions-row">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="run_id" value="{{ run_id }}">
+    <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
     <label style="margin:0"><input type="checkbox" name="confirm" required> Empfänger, Adressen, Beträge und Belegtexte
       geprüft</label>
     <button type="submit">Freigeben &amp; Belege erstellen</button>
     <a class="btn btn-muted" href="{{ url_for('invoices') }}">Abbrechen</a>
   </form>
-  <div class="ts">Nach der Freigabe sind die Belege unveränderlich (Prüfsumme). Die Nummern werden erst beim Erstellen
-    endgültig vergeben. Der Versand ist ein eigener Schritt.</div>
+  <div class="ts">Nach der Freigabe sind die Belege unveränderlich (Prüfsumme). Erstellt werden genau die hier
+    gezeigten Belege; hat sich seither etwas geändert (Zahlungsangaben, Nummern, Beträge), verlangt Shareomat eine
+    neue Vorschau. Der Versand ist ein eigener Schritt.</div>
 </div>
 {% for p in planned %}
 <div class="card">

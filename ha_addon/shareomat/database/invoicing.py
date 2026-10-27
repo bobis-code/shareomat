@@ -36,7 +36,14 @@ Notes:
         replacement is issued; an undelivered one is simply cancelled.
         Nothing booked on it is a precondition either way.
       - A payment reference already used needs an explicit confirmation
-        (double booking of one bank transfer).
+        (double booking of one bank transfer); a refund reference can never
+        be reused.
+      - A correction lowering received payments is refused when any producer
+        was already paid more than the share recomputed after it.
+      - Issuing checks everything inside its write transaction and only
+        stores exactly the documents the user approved (fingerprint of the
+        preview); a document whose checksum fails is frozen for every
+        further action.
 
     Rendering is injected (`render(template_name, context) -> html`) so this
     module stays free of the web layer.
@@ -125,6 +132,12 @@ def _write_txn(db_path: Path) -> Iterator[sqlite3.Connection]:
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _require_integrity(doc: BillingDocument) -> None:
+    if not doc.integrity_ok:
+        raise InvoicingError(f"Prüfsumme von {doc.number} stimmt nicht — der gespeicherte Beleg wurde verändert. "
+                             "Keine weiteren Schritte, bis er aus der Sicherung wiederhergestellt ist.")
 
 
 # ── payment details (Zahlungsangaben) ───────────────────────────────────────
@@ -366,6 +379,37 @@ def issue_problems(db_path: Path, run_id: int, *, today: date | None = None) -> 
     return problems
 
 
+def recipient_changes(db_path: Path, run_id: int) -> list[str]:
+    """Participants whose master data differs from the recipient frozen with the billing draft.
+
+    The documents always use the frozen recipient (the contract party of the
+    period); this list only tells the user that a correction made later is
+    NOT on the documents unless the run is recomputed.
+    """
+    fields = {"label": "Name", "address_line": "Adresse", "postal_code": "PLZ", "city": "Ort", "email": "E-Mail"}
+    changes = []
+    with connect(db_path) as conn:
+        frozen = _recipients(conn, run_id)
+        for pid, snap in sorted(frozen.items()):
+            row = conn.execute("SELECT label, email, address_line, postal_code, city FROM participants "
+                               "WHERE participant_id = ?", (pid,)).fetchone()
+            if row is None or not snap:
+                continue
+            diff = [label for key, label in fields.items() if (row[key] or "") != (snap.get(key) or "")]
+            if diff:
+                changes.append(f"{snap.get('label') or pid}: {', '.join(diff)} seit dem Berechnen geändert — die Belege "
+                               "verwenden den Stand der Abrechnung. Soll die Änderung gelten: Abrechnung stornieren "
+                               "und neu berechnen.")
+    return changes
+
+
+def documents_fingerprint(planned: list[dict]) -> str:
+    """What the user approves: every planned document's number, recipient, amount and full text."""
+    payload = [[p["number"], p["doc_type"], p["item"].participant_id, str(p["amount"]), p["address"],
+                p["recipient"].get("email", ""), _sha(p["html"])] for p in planned]
+    return _sha(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
 def _planned_documents(db_path: Path, run_id: int, render: Renderer, today: date, conn) -> list[dict]:
     """The documents that issuing would create now, rendered. Numbers are only final when `conn`
     is the write transaction that stores them."""
@@ -428,15 +472,26 @@ def missing_documents(db_path: Path, run_id: int) -> tuple[int, int]:
     return len(issued), len(billable - issued)
 
 
-def issue_documents(db_path: Path, run_id: int, render: Renderer, *, today: date | None = None) -> list[BillingDocument]:
-    """Issue the missing invoices/credit notes of a released run (all or nothing). Returns the new ones."""
+def issue_documents(db_path: Path, run_id: int, render: Renderer, *, today: date | None = None,
+                    expected_fingerprint: str | None = None) -> list[BillingDocument]:
+    """Issue the missing invoices/credit notes of a released run (all or nothing). Returns the new ones.
+
+    All checks run while holding the write lock, so the run can't be
+    cancelled (or anything else change) between check and write. With
+    `expected_fingerprint` (from the approval view) only exactly the
+    approved documents are stored; any difference requires a new preview.
+    """
     today = today or local_today()
-    problems = issue_problems(db_path, run_id, today=today)
-    if problems:
-        raise InvoicingError("Belege können nicht erstellt werden: " + " ".join(problems))
     created: list[int] = []
     with _write_txn(db_path) as conn:
-        for p in _planned_documents(db_path, run_id, render, today, conn):
+        problems = issue_problems(db_path, run_id, today=today)
+        if problems:
+            raise InvoicingError("Belege können nicht erstellt werden: " + " ".join(problems))
+        planned = _planned_documents(db_path, run_id, render, today, conn)
+        if expected_fingerprint is not None and documents_fingerprint(planned) != expected_fingerprint:
+            raise InvoicingError("Seit der Vorschau haben sich Belege geändert (Zahlungsangaben, Empfänger, Beträge "
+                                 "oder Nummern) — bitte die Vorschau neu laden und erneut prüfen.")
+        for p in planned:
             cur = conn.execute(
                 """
                 INSERT INTO billing_documents (billing_run_id, participant_id, doc_type, number, status,
@@ -475,6 +530,7 @@ def cancel_document(db_path: Path, document_id: int, reason: str, render: Render
         doc = _load_document(conn, document_id)
         if doc.status == DOC_STATUS_CANCELLED:
             raise InvoicingError("Beleg ist bereits storniert.")
+        _require_integrity(doc)
         if doc.payments:
             raise InvoicingError("Auf diesem Beleg sind Zahlungen/Auszahlungen gebucht — Storno nicht möglich. "
                                  "Korrekturen erfolgen mit einem Korrekturbeleg.")
@@ -506,6 +562,8 @@ def record_delivery(db_path: Path, document_id: int, method: str, *, status: str
         raise InvoicingError("Unbekanntes Zustellobjekt.")
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
+        if status == "sent":
+            _require_integrity(doc)
         if method == "email" and not doc.recipient_email:
             raise InvoicingError("Für diesen Empfänger ist keine E-Mail-Adresse hinterlegt — Zustellung per Papier.")
         if item == "cancellation":
@@ -651,6 +709,7 @@ def record_payment(db_path: Path, document_id: int, amount, booked_on: date, *, 
     today = today or local_today()
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
+        _require_integrity(doc)
         if not doc.is_invoice:
             raise InvoicingError("Zahlungseingänge werden auf Rechnungen gebucht, Auszahlungen auf Gutschriften.")
         if doc.status == DOC_STATUS_CANCELLED:
@@ -664,10 +723,16 @@ def record_payment(db_path: Path, document_id: int, amount, booked_on: date, *, 
             payments = sum((p.amount_chf for p in doc.payments if p.kind == PAYMENT_KIND_PAYMENT), Decimal(0))
             if payments + amount < 0 or doc.booked_chf + amount < 0:
                 raise InvoicingError("Die Korrektur ist grösser als die gebuchten Zahlungen.")
-            _, received, paid_out = _payout_status(conn, doc.billing_run_id)
+            status, received, paid_out = _payout_status(conn, doc.billing_run_id)
             after = received - _received(doc) + min(max(doc.booked_chf + amount, Decimal(0)), doc.amount_chf)
-            if after < paid_out:
-                raise InvoicingError("Diese Zahlung wurde bereits an Produzenten weitergegeben — Korrektur nicht möglich.")
+            credit_ids = sorted(status)
+            new_shares = _floor_shares(after, [status[i].amount_chf for i in credit_ids])
+            over = [i for i, share in zip(credit_ids, new_shares) if status[i].paid_out_chf > share]
+            if after < paid_out or over:
+                raise InvoicingError(
+                    "Diese Zahlung wurde bereits an Produzenten weitergegeben — nach der Korrektur wären "
+                    f"{len(over) or 'alle'} Produzent(en) überzahlt. Korrektur erst nach geregelter Rückforderung "
+                    "bzw. Verrechnung möglich (Vertrag Ziff. 3.4).")
         _check_duplicate(conn, doc, PAYMENT_KIND_PAYMENT, amount, booked_on, reference, confirm_duplicate, note)
         _insert_payment(conn, doc, PAYMENT_KIND_PAYMENT, amount, booked_on, reference, note)
     return get_document(db_path, document_id)
@@ -684,9 +749,15 @@ def record_refund(db_path: Path, document_id: int, amount, booked_on: date, *, r
         raise InvoicingError("Bitte die Bankreferenz der Rückerstattung angeben.")
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
+        _require_integrity(doc)
         if not doc.is_invoice:
             raise InvoicingError("Rückerstattungen gibt es nur auf Rechnungen.")
         _check_booking_date(doc, booked_on, today)
+        ref = reference.strip().lower()
+        if conn.execute("SELECT 1 FROM document_payments WHERE kind = ? AND lower(trim(reference)) = ?",
+                        (PAYMENT_KIND_REFUND, ref)).fetchone():
+            raise InvoicingError("Diese Bankreferenz ist bereits als Rückerstattung gebucht — eine zweite "
+                                 "Rückerstattung braucht die Referenz ihrer eigenen Überweisung.")
         overpaid = doc.booked_chf - doc.amount_chf
         if amount > overpaid:
             raise InvoicingError(
@@ -709,6 +780,7 @@ def record_payout(db_path: Path, document_id: int, amount, booked_on: date, *, r
         raise InvoicingError("Bitte die Bankreferenz der Auszahlung angeben.")
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
+        _require_integrity(doc)
         if doc.is_invoice:
             raise InvoicingError("Auszahlungen werden auf Gutschriften gebucht.")
         if doc.status == DOC_STATUS_CANCELLED:
@@ -770,6 +842,7 @@ def create_reminder(db_path: Path, document_id: int, render: Renderer, *, today:
     payee, iban = get_payment_details(db_path)
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
+        _require_integrity(doc)
         proposal = _proposal_for(doc, today)
         if proposal is None:
             raise InvoicingError("Für diese Rechnung ist derzeit keine Mahnung fällig (bezahlt, gesperrt, nicht "

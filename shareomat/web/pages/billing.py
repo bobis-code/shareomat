@@ -85,7 +85,9 @@ def handle_get(ctx: RequestContext) -> str:
     except BillingWorkflowError:
         return render_page("placeholders/coming_soon.html", ctx, "billing",
                             title="Abrechnung nicht gefunden", description="")
-    return render_page("billing/detail.html", ctx, "billing", detail=detail)
+    from shareomat.database.invoicing import recipient_changes
+    return render_page("billing/detail.html", ctx, "billing", detail=detail,
+                       recipient_changes=recipient_changes(ctx.db_path, run_id) if detail.run.status == "draft" else [])
 
 
 def handle_post(ctx: RequestContext) -> str | None:

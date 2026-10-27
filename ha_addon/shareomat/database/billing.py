@@ -663,8 +663,13 @@ def release_billing_run(
 
 
 def cancel_billing_run(db_path: Path, run_id: int) -> BillingRun:
-    """Cancel a draft or a released run. Never edits billing_records — only the status changes."""
+    """Cancel a draft or a released run. Never edits billing_records — only the status changes.
+
+    Takes the write lock before checking for issued documents, so it can't
+    interleave with shareomat.database.invoicing.issue_documents.
+    """
     with connect(db_path) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         with conn:
             row = conn.execute("SELECT status FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
             if row is None:
