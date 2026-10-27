@@ -27,16 +27,20 @@
     .meta { border-top: 1px solid #999; margin-top: 3mm; padding-top: 1mm; font-size: 6.5pt; color: #555; }
     .stamp { border: 2px solid #b91c1c; color: #b91c1c; padding: .4rem .6rem; margin-bottom: 1rem; font-weight: bold; }
     .noprint { margin-bottom: 1rem; }
-    @media print { .noprint { display: none; } body { background: #fff; } .page { margin: 0; } }
+    .page + .page { margin-top: 6mm; }
+    @media print { .noprint { display: none; } body { background: #fff; } .page { margin: 0 !important; break-after: page; page-break-after: always; }
+                   .page:last-child { break-after: auto; page-break-after: auto; } }
   </style>
 </head>
 <body>
   <div class="noprint" style="text-align:center;padding:4mm"><button onclick="window.print()">Drucken / als PDF speichern</button>
     <span class="ts">Beim Drucken: Massstab 100 % / «Tatsächliche Grösse», keine Seitenränder.</span></div>
-  <div class="page{{ ' with-qr' if 'class="qr-bill' in body }}">
-  {% if stamp %}<div class="stamp">{{ stamp }}</div>{% endif %}
-  {{ body | safe }}
-  <div class="meta">SHA-256 des Belegs (eingefrorene Fassung): <span style="font-family:monospace;word-break:break-all">{{ sha256 }}</span></div>
+  {% for pg in pages or [{'body': body, 'sha256': sha256, 'stamp': stamp}] %}
+  <div class="page{{ ' with-qr' if 'class="qr-bill' in pg.body }}">
+  {% if pg.stamp %}<div class="stamp">{{ pg.stamp }}</div>{% endif %}
+  {{ pg.body | safe }}
+  <div class="meta">SHA-256 des Belegs (eingefrorene Fassung): <span style="font-family:monospace;word-break:break-all">{{ pg.sha256 }}</span></div>
   </div>
+  {% endfor %}
 </body>
 </html>

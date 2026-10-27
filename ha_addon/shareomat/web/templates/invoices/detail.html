@@ -41,7 +41,9 @@
 
 {% if doc.status != 'cancelled' %}
 <div class="card">
-  <h2>{{ 'Zahlung erfassen' if doc.is_invoice else 'Auszahlung erfassen' }}</h2>
+  <h2>{{ 'Zahlungseingang erfassen' if doc.is_invoice else 'Auszahlung erfassen' }}</h2>
+  <p class="ts" style="margin-top:0">{{ 'Hält fest, was auf dem Bankkonto eingegangen ist — Shareomat bucht kein Geld.' if doc.is_invoice
+    else 'Erst im E-Banking überweisen, dann hier festhalten. Shareomat überweist nichts selbst.' }}</p>
   <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + ('/payment' if doc.is_invoice else '/payout')) }}" class="actions-row" style="margin-top:0;flex-wrap:wrap">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="text" name="amount" placeholder="Betrag CHF" required style="width:110px"
@@ -49,7 +51,9 @@
     <input type="date" name="booked_on" value="{{ today.isoformat() }}">
     <input type="text" name="reference" placeholder="{{ 'Referenz der Zahlung (Pflicht)' if doc.is_invoice else 'Bankreferenz (Pflicht)' }}" required>
     <input type="text" name="note" placeholder="Notiz (Pflicht bei Korrektur mit Minusbetrag)" style="min-width:260px">
-    <label style="margin:0"><input type="checkbox" name="confirm_duplicate"> Zweite Buchung bestätigt</label>
+    <label style="margin:0;flex-basis:100%"><input type="checkbox" name="bank_done" required>
+      {{ 'Die Zahlung ist auf dem Bankkonto eingegangen (im E-Banking geprüft).' if doc.is_invoice else 'Die Auszahlung habe ich im E-Banking ausgeführt.' }}</label>
+    <label style="margin:0"><input type="checkbox" name="confirm_duplicate"> Zweite Buchung mit gleicher Referenz bestätigt</label>
     <button type="submit">Buchen</button>
   </form>
   <div class="ts">Manuell erfasst (kein Bankabgleich). {% if not doc.is_invoice %}Nur Auszahlungen erfassen, die im
@@ -63,6 +67,7 @@
     <input type="date" name="booked_on" value="{{ today.isoformat() }}">
     <input type="text" name="reference" placeholder="Bankreferenz (Pflicht)" required>
     <input type="text" name="note" placeholder="Notiz">
+    <label style="margin:0;flex-basis:100%"><input type="checkbox" name="bank_done" required> Die Rückerstattung habe ich im E-Banking ausgeführt.</label>
     <button type="submit">Rückerstattung erfassen</button>
   </form>
   {% endif %}
@@ -121,7 +126,7 @@
 {% if doc.status != 'cancelled' %}
 {% if doc.is_invoice %}
 <div class="card">
-  <h2>Mahnwesen</h2>
+  <h2 id="mahnwesen">Mahnwesen</h2>
   {% if proposal %}
   <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/reminder') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -133,7 +138,7 @@
   <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/reminder-block') }}" class="actions-row">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="text" name="reason" value="{{ doc.reminder_block_reason }}" placeholder="Grund der Mahnsperre (leer = aufheben)" style="min-width:320px">
-    <button type="submit" class="btn-muted">Mahnsperre speichern</button>
+    <button type="submit" class="btn-muted"><abbr title="Für diese Rechnung werden keine Mahnungen vorgeschlagen, z. B. bei vereinbarter Ratenzahlung">Mahnsperre</abbr> speichern</button>
   </form>
 </div>
 {% endif %}

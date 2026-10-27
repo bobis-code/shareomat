@@ -266,3 +266,61 @@ form.form-card { max-width: 480px; }
 .doc-view .doc-lines tfoot th { border-top: 2px solid #111; }
 .doc-view .num { text-align: right !important; white-space: nowrap; }
 .doc-view .qr-bill { margin-top: 6mm; }
+
+/* ── Monatsabschluss, filters, KPIs ─────────────────────────────────────── */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.month-panel h2 { margin-bottom: 10px; }
+.month-next { font-size: 1.05rem; padding: 12px 18px; }
+.month-done { color: #15803d; font-weight: 600; }
+.month-steps { list-style: none; margin: 14px 0 0; padding: 0; }
+.month-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid #eef0f4; }
+.month-step .month-text { flex: 1; }
+.month-icon { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center;
+              justify-content: center; font-size: .8rem; flex: none; background: #e5e7eb; color: #374151; }
+.state-done .month-icon { background: #dcfce7; color: #15803d; }
+.state-todo .month-icon { background: #dbeafe; color: #1d4ed8; }
+.state-blocked .month-icon { background: #fee2e2; color: #b91c1c; font-weight: 700; }
+.state-waiting .month-text, .state-idle .month-text { color: #6b7280; }
+.month-totals { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 12px; padding-top: 10px;
+                border-top: 1px solid #eef0f4; font-size: .9rem; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
+.filter-row label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.kpi { background: #f6f7fb; border-radius: 8px; padding: 8px 10px; }
+.kpi-value { font-size: 1.15rem; font-weight: 700; }
+.kpi-label { font-size: .75rem; color: #6b7280; }
+.info-box { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; padding: 8px 10px; border-radius: 6px; margin: 8px 0; }
+.doc-details { border: 1px solid #e5e7eb; border-radius: 8px; margin: 8px 0; background: #fff; }
+.doc-details > summary { padding: 10px 12px; cursor: pointer; }
+.doc-details[open] > summary { border-bottom: 1px solid #e5e7eb; }
+.doc-details .doc-view { border: none; }
+.glossary dt { font-weight: 700; margin-top: 8px; }
+.glossary dd { margin: 2px 0 0 0; color: #374151; }
+abbr[title] { text-decoration: underline dotted; cursor: help; }
+.nav-toggle-input, .nav-toggle { display: none; }
+
+@media (max-width: 720px) {
+  /* Collapsible menu: logo + "☰ Menü · <current page>"; the links only after tapping. */
+  .nav-toggle { display: block; margin: 0 12px 6px; padding: 10px 12px; border-radius: 8px;
+                background: rgba(255,255,255,.1); color: #fff; cursor: pointer; }
+  .nav-body { display: none; }
+  .nav-toggle-input:checked ~ .nav-body { display: block; }
+
+  /* Tables marked .cards become one card per row: label left, value right, no sideways scrolling. */
+  table.cards thead { display: none; }
+  table.cards, table.cards tbody, table.cards tr, table.cards td { display: block; width: 100%; }
+  table.cards tr { border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 10px; padding: 6px 10px;
+                   background: #fff; }
+  table.cards td { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+                   border: none; padding: 5px 0; font-size: .92rem; text-align: right; }
+  table.cards td::before { content: attr(data-label); color: #6b7280; font-size: .8rem; text-align: left; }
+  table.cards td[data-label=""]::before { content: none; }
+  table.cards td[data-label=""] { justify-content: flex-end; }
+  .table-wrap:has(table.cards) { overflow-x: visible; }
+  .month-step { flex-wrap: wrap; }
+  .month-step .btn { margin-left: 34px; }
+  .doc-view { font-size: 9.5pt; padding: .6rem; }
+  .doc-view .doc-head { flex-direction: column; gap: .5rem; }
+  .doc-view .doc-recipient { margin-top: .5rem; min-width: 0; }
+  .doc-view .qr-bill { transform-origin: top left; }
+}

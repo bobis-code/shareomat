@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Belege versenden{% endblock %}
+{% block heading %}Belege versenden – {{ label }}{% endblock %}
+{% block content %}
+<div class="card">
+  {% if rows %}
+  <p><strong>So geht's:</strong> 1. Alle Belege als PDF öffnen (Sammeldruck) und drucken bzw. als PDF speichern.
+    2. Per Post/Briefkasten übergeben oder das PDF selbst per E-Mail senden.
+    3. Unten bestätigen, was tatsächlich versendet wurde.</p>
+  <div class="actions-row" style="margin-top:0">
+    <a class="btn" href="{{ url_for('invoices', suffix='/runs/' + run_id|string + '/print-all') }}" target="_blank">Alle {{ rows|length }} Belege drucken / als PDF</a>
+  </div>
+  <p class="ts">Shareomat versendet selbst (noch) keine E-Mails. «Versendet» heisst hier: Sie haben den Beleg
+    übergeben oder selbst gesendet.</p>
+  {% if without_email %}
+  <div class="info-box">Ohne E-Mail-Adresse, also Papier: {{ without_email|join(', ') }}</div>
+  {% endif %}
+  {% else %}
+  <p class="month-done">✓ Alle Belege dieser Abrechnung sind versendet.</p>
+  {% endif %}
+</div>
+
+{% if rows %}
+<form method="post" action="{{ url_for('invoices', suffix='/dispatch') }}" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="run_id" value="{{ run_id }}">
+  <div class="table-wrap"><table class="cards">
+    <thead><tr><th>Versendet</th><th>Beleg</th><th>Empfänger</th><th>Betrag CHF</th><th>Zustellweg</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+    <tr>
+      <td data-label="Versendet"><input type="checkbox" name="pick_{{ r.key }}" checked aria-label="{{ r.title }} versendet"></td>
+      <td data-label="Beleg"><strong>{{ r.title }}</strong></td>
+      <td data-label="Empfänger">{{ r.doc.recipient_label }}</td>
+      <td data-label="Betrag CHF">{{ '%.2f'|format(r.doc.amount_chf) if r.item == 'document' else '–' }}</td>
+      <td data-label="Zustellweg">
+        <select name="method_{{ r.key }}">
+          <option value="paper" {{ 'selected' if not r.doc.recipient_email }}>Papier / Post</option>
+          <option value="email" {{ 'selected' if r.doc.recipient_email }} {{ 'disabled' if not r.doc.recipient_email }}>E-Mail{{ ' an ' + r.doc.recipient_email if r.doc.recipient_email }}</option>
+        </select></td>
+      <td data-label=""><a class="btn btn-muted btn-small" href="{{ r.print_url }}" target="_blank">PDF</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <label style="display:block;margin-top:10px"><input type="checkbox" name="confirm" required> Ich habe die
+    angekreuzten Belege tatsächlich übergeben bzw. gesendet.</label>
+  <div class="actions-row"><button type="submit">Versand bestätigen</button>
+    <a class="btn btn-muted" href="{{ url_for('invoices') }}?period={{ run_id }}">Später</a></div>
+</form>
+{% endif %}
+{% endblock %}

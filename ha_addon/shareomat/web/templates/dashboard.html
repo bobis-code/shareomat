@@ -24,6 +24,8 @@
   <div class="ts" style="margin-top:12px">Letzter Lauf: {{ last_run }}</div>
 </div>
 
+{% if month %}{% include "invoices/month_panel.html" %}{% endif %}
+
 <div class="card">
   <h2>Offene Aufgaben</h2>
   {% if open_tasks %}
