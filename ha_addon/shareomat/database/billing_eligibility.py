@@ -40,7 +40,7 @@ from shareomat.database.contract_versions import get_contract_version_for_date, 
 from shareomat.database.meters import list_meters
 from shareomat.database.participant_contract import list_assignments_for_version
 from shareomat.database.participants import list_participants
-from shareomat.leg_const import CONTRACT_STATUS_PUBLISHED
+from shareomat.leg_const import CONTRACT_STATUS_PUBLISHED, CONTRACT_STATUS_WITHDRAWN
 from shareomat.models.meter import Meter
 
 
@@ -70,7 +70,12 @@ class EligibilityResolver:
         self._db_path = db_path
         self._meters = list_meters(db_path)
         self._active_participants = {p.participant_id for p in list_participants(db_path, include_inactive=False)}
-        self.contract_mode = any(v.status == CONTRACT_STATUS_PUBLISHED for v in list_contract_versions(db_path))
+        # Sticky: once a version was ever published (also if later withdrawn), the
+        # community stays in contract mode — withdrawing must not fall back to
+        # "every active participant is billed".
+        self.contract_mode = any(
+            v.status in (CONTRACT_STATUS_PUBLISHED, CONTRACT_STATUS_WITHDRAWN) for v in list_contract_versions(db_path)
+        )
         community = get_community(db_path)
         self.community_confirmed_start = community.vnb_confirmed_start if community else None
         self._cache: dict[date, DayEligibility] = {}

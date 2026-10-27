@@ -2,13 +2,13 @@
 {% block title %}Abrechnung – Vorschau{% endblock %}
 {% block heading %}Vorschau: {{ preview.period_start }} – {{ preview.period_end }}{% endblock %}
 {% block content %}
-{% set issues = preview.availability.blocking_issues %}
+{% set issues = preview.availability.blocking_issues %}{% set hard_issues = preview.availability.hard_issues %}
 {% if issues %}
 <div class="card">
   <div class="error-box" style="margin-top:0"><strong>Freigabe gesperrt — offene Prüfpunkte:</strong>
-    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in issues %}<li>{{ i }}</li>{% endfor %}</ul>
-    <div class="ts" style="margin-top:6px">Daten ergänzen und neu berechnen. Eine Freigabe trotzdem ist nur mit
-      schriftlicher Begründung möglich und wird protokolliert.</div>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in issues %}<li>{{ '⛔ ' if i in hard_issues }}{{ i }}</li>{% endfor %}</ul>
+    <div class="ts" style="margin-top:6px">Daten ergänzen und neu berechnen. Mit ⛔ markierte Punkte verhindern
+      die Freigabe immer; bei den übrigen ist eine Freigabe nur mit schriftlicher Begründung möglich (protokolliert).</div>
   </div>
 </div>
 {% endif %}

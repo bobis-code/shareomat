@@ -32,7 +32,7 @@ from shareomat.database.participant_contract import (
     get_assignment,
     has_any_assignment,
     list_assignments_for_version,
-    mark_accepted,
+    mark_accepted as _mark_accepted_raw,
     mark_declaration_issued,
     mark_notified,
     mark_vnb_confirmed,
@@ -47,6 +47,13 @@ from shareomat.models.community import Community
 from shareomat.models.contract import ContractSettings, ContractVersion
 from shareomat.models.participant import Participant
 
+
+
+def mark_accepted(*args, **kwargs):
+    """Signatures need evidence since the 3rd review — tests record a paper original unless told otherwise."""
+    if "document_sha256" not in kwargs:
+        kwargs.setdefault("paper_location", "Ordner LEG-ONE")
+    return _mark_accepted_raw(*args, **kwargs)
 
 @pytest.fixture
 def db_path(tmp_path):
@@ -749,3 +756,12 @@ def test_withdraw_deletes_carried_forward_participant_assignments(db_path, monke
     v1_assignments = list_assignments_for_version(db_path, v1_published.id)
     assert len(v1_assignments) == 1
     assert v1_assignments[0].accepted_at == date(2026, 1, 1)
+
+
+
+def test_signature_without_any_evidence_is_refused_in_the_db_layer(db_path):
+    create_participant(db_path, Participant("p1", "Haus 1"))
+    v = save_draft_version(db_path, _draft())
+    a = assign_contract(db_path, "p1", v.id)
+    with pytest.raises(ParticipantContractError, match="Nachweis fehlt"):
+        _mark_accepted_raw(db_path, a.id, date(2026, 10, 1), method="paper", signed_by="Haus 1")

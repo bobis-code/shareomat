@@ -293,6 +293,7 @@ class _Handler(BaseHTTPRequestHandler):
         except FormError as exc:
             get_state().set_flash(str(exc), ok=False)
             redirect_to = None
+            self._discard_unreferenced_upload(form.get("_uploaded_location", ""))
         except Redirect as exc:
             redirect_to = exc.location
         except Exception:
@@ -337,6 +338,21 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _discard_unreferenced_upload(self, location: str) -> None:
+        """Delete a just-stored signed document when the form it came with was rejected."""
+        if not location:
+            return
+        from shareomat.database.sqlite import connect
+        from shareomat.web.pages.contract import documents_dir
+
+        db_path = get_state().db_path
+        with connect(db_path) as conn:
+            used = conn.execute(
+                "SELECT 1 FROM participant_contract WHERE signed_document_location = ? LIMIT 1", (location,),
+            ).fetchone()
+        if not used:
+            (documents_dir(db_path) / Path(location).name).unlink(missing_ok=True)
+
     def _receive_signed_document(self, assignment_id_raw: str, content_type: str) -> dict[str, str] | None:
         """Parse the multipart signature form; store an attached document under its SHA-256.
 
@@ -364,6 +380,13 @@ class _Handler(BaseHTTPRequestHandler):
             return None
         if fields is None:
             get_state().set_flash("Upload fehlgeschlagen: ungültige Formulardaten.", ok=False)
+            return None
+        if fields.get("csrf_token") != get_state().csrf_token:
+            if saved is not None:
+                saved[1].unlink(missing_ok=True)
+            get_state().set_flash(
+                "Ungültige Anfrage (Sicherheits-Token fehlt oder ist abgelaufen). Bitte die Seite neu laden.", ok=False,
+            )
             return None
         if saved is not None:
             _name, path, _size = saved

@@ -306,6 +306,10 @@ def mark_accepted(
     """
     if accepted_at > date.today():
         raise ParticipantContractError("Das Unterschriftsdatum darf nicht in der Zukunft liegen.")
+    if not document_sha256 and not paper_location.strip():
+        raise ParticipantContractError(
+            "Nachweis fehlt: unterschriebenes Dokument (Prüfsumme) oder Ablageort des Papieroriginals angeben."
+        )
     if method and method not in ACCEPTANCE_METHODS:
         raise ParticipantContractError(f"Unbekannte Zustimmungsart '{method}'.")
     with connect(db_path) as conn:
