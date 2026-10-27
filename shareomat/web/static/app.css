@@ -252,3 +252,17 @@ form.form-card { max-width: 480px; }
   .actions-row { flex-wrap: wrap; }
   form.form-card { max-width: 100%; }
 }
+
+/* Frozen invoice / credit / reminder shown inside the app (same look as the print page). */
+.doc-view { border: 1px solid #ddd; padding: 1rem 1.2rem; background: #fff; color: #111; overflow-x: auto;
+            font-family: Arial, Helvetica, sans-serif; font-size: 10.5pt; line-height: 1.4; }
+.doc-view h2 { font-size: 1.3rem; text-transform: none; letter-spacing: 0; color: #111; margin: 1rem 0 .5rem; }
+.doc-view p { margin: .5rem 0; }
+.doc-view .doc-head { display: flex; justify-content: space-between; gap: 2rem; }
+.doc-view .doc-recipient { margin-top: 2.2rem; min-width: 16rem; }
+.doc-view .doc-date { margin-top: 1.2rem; }
+.doc-view table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+.doc-view .doc-lines th, .doc-view .doc-lines td { border-bottom: 1px solid #ccc; padding: .3rem .4rem; text-align: left; background: none; }
+.doc-view .doc-lines tfoot th { border-top: 2px solid #111; }
+.doc-view .num { text-align: right !important; white-space: nowrap; }
+.doc-view .qr-bill { margin-top: 6mm; }
