@@ -8,7 +8,8 @@
    shareomat/web/pages/contract.py for how this template is invoked.
    Deliberate, minimal deviations from the Mustervertrag (review 26.10.2026):
    §1 allocation among several producers + Herkunftsnachweise (what the
-   settlement actually does), §3.4 prosumer netting, §5 exclusion vs. grid-
+   settlement actually does), §3.4 prosumer netting and producer credits paid
+   only from received consumer payments (decision 27.10.2026), §5 exclusion vs. grid-
    operator deregistration and temporary production outage, §7 "mit
    Viertelstundenauflösung periodisch" instead of "viertelstündlich"
    (3rd review), §3.1/3.2 "inklusive Mehrwertsteuer" made
@@ -168,8 +169,13 @@ und Lieferung mit Mengen und Beträgen getrennt ausgewiesen und anschliessend
 miteinander verrechnet; der Saldo wird in Rechnung gestellt bzw.
 gutgeschrieben.</p>
 <p>Rechnungen sind innerhalb von {{ payment_term_days }} Tagen ab
-Rechnungsdatum zu bezahlen. Gutschriften werden innerhalb derselben Frist ab
-Abrechnungsdatum ausbezahlt.</p>
+Rechnungsdatum zu bezahlen.</p>
+<p>Gutschriften werden ausbezahlt, sobald und soweit die Zahlungen der
+LEG-Bezüger für dieselbe Abrechnungsperiode eingegangen sind; die
+eingegangenen Beträge werden im Verhältnis der Gutschriften auf die
+LEG-Produzenten verteilt. Bleibt eine Zahlung eines LEG-Bezügers aus, tragen
+die LEG-Produzenten diesen Ausfall anteilig. Der LEG-Vertreter ist nicht
+verpflichtet, Gutschriften vorzufinanzieren.</p>
 <p>Korrigiert der VNB Messdaten nachträglich, wird die Abrechnung mit einer
 Korrekturabrechnung berichtigt. Beanstandungen einer Abrechnung sind
 möglichst innerhalb von {{ payment_term_days }} Tagen ab Rechnungsdatum

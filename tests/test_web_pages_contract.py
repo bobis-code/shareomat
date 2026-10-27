@@ -595,6 +595,9 @@ def test_contract_text_follows_the_mustervertrag(db_path, monkeypatch) -> None:
     assert "(Zahlungsfrist gemäss Ziffer 5)" not in text
     assert "Gesetzliche Ansprüche bleiben vorbehalten." in text
     assert "dürfen nicht zusätzlich anderweitig veräussert werden" in text
+    # §3.4: producer credits only from received consumer payments, no pre-financing (decision 27.10.2026).
+    assert "sobald und soweit die Zahlungen der LEG-Bezüger für dieselbe Abrechnungsperiode eingegangen sind" in text
+    assert "nicht verpflichtet, Gutschriften vorzufinanzieren" in text
 
 
 def test_declaration_package_and_snapshot_refer_to_the_same_published_text(db_path, monkeypatch) -> None:

@@ -251,3 +251,7 @@ deploy_local_addon.bat
 # Private LEG-ONE project notes and third-party source files (kept locally only)
 docs/Energieversorgungsunternehmen/**/*.json
 docs/Energieversorgungsunternehmen/**/*LEG_ONE*.md
+
+# Temporary working notes/demos (not versioned)
+docs/temp/
+docs/Temp/
