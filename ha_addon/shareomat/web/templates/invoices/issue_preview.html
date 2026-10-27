@@ -54,7 +54,7 @@
 {% for p in planned %}
 <div class="card">
   <h2>{{ p.number }} — {{ p.recipient.label }}</h2>
-  <div style="border:1px solid #ddd;padding:1rem;background:#fff;color:#111;overflow-x:auto">{{ p.html | safe }}</div>
+  <div class="doc-view">{{ p.html | safe }}</div>
 </div>
 {% endfor %}
 {% endif %}

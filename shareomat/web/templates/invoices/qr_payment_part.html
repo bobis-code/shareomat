@@ -6,7 +6,7 @@
    never a QR code that isn't a valid payment. #}
 {% if qr %}
 {% set p = qr.payload %}
-{% macro corners(w, h) %}<svg width="{{ w }}mm" height="{{ h }}mm" viewBox="0 0 {{ w }} {{ h }}" style="display:block;margin-top:1mm"><path d="M0 3V0H3M{{ w - 3 }} 0H{{ w }}V3M{{ w }} {{ h - 3 }}V{{ h }}H{{ w - 3 }}M3 {{ h }}H0V{{ h - 3 }}" fill="none" stroke="#000" stroke-width="0.26"/></svg>{% endmacro %}
+{% macro corners(w, h) %}{% set a, b = 0.2, w - 0.2 %}{% set c = h - 0.2 %}<svg width="{{ w }}mm" height="{{ h }}mm" viewBox="0 0 {{ w }} {{ h }}" style="display:block;margin-top:1mm"><path d="M{{ a }} 3V{{ a }}H3M{{ b - 2.8 }} {{ a }}H{{ b }}V3M{{ b }} {{ c - 2.8 }}V{{ c }}H{{ b - 2.8 }}M3 {{ c }}H{{ a }}V{{ c - 2.8 }}" fill="none" stroke="#000" stroke-width="0.26"/></svg>{% endmacro %}
 {% macro addr(a) %}{{ a.name }}<br>{% if a.street %}{{ a.street }}{% if a.building %} {{ a.building }}{% endif %}<br>{% endif %}{{ a.postal_code }} {{ a.city }}{% endmacro %}
 <div class="qr-bill" style="width:210mm;height:105mm;box-sizing:border-box;display:flex;font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;border-top:0.2mm dashed #000;position:relative;page-break-inside:avoid;break-inside:avoid;line-height:1.15;overflow-wrap:anywhere;word-break:break-word;overflow:hidden">
   <span style="position:absolute;top:-2.6mm;left:3mm;font-size:9pt">&#9986;</span>
