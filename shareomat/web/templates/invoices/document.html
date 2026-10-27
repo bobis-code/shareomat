@@ -11,7 +11,7 @@
     {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
   </div>
   <div class="doc-recipient">
-    {{ participant.label }}<br>{{ participant.address_line }}<br>{{ participant.postal_code }} {{ participant.city }}
+    {{ recipient.label }}<br>{{ recipient.address_line }}<br>{{ recipient.postal_code }} {{ recipient.city }}
   </div>
 </div>
 
@@ -19,8 +19,12 @@
 
 <h2>{{ 'Rechnung' if is_invoice else 'Gutschrift' }} {{ number }}</h2>
 <p>LEG «{{ community_name }}» · Abrechnungsperiode {{ run.period_start.strftime('%d.%m.%Y') }} –
-  {{ run.period_end.strftime('%d.%m.%Y') }}{% if creditor.contract_version %} · Gesellschaftsvertrag
-  Version {{ creditor.contract_version }}{% endif %}</p>
+  {{ run.period_end.strftime('%d.%m.%Y') }}{% if creditor.contract_versions %} · Gesellschaftsvertrag
+  Version {{ creditor.contract_versions }}{% endif %}</p>
+{% if replaces %}
+<p><strong>Ersetzt {{ 'Rechnung' if is_invoice else 'Beleg' }} {{ replaces[1] }}</strong>{% if replaces[2] %}
+  (storniert mit Stornobeleg {{ replaces[2] }}){% else %} (storniert, nicht zugestellt){% endif %}.</p>
+{% endif %}
 
 <table class="doc-lines">
   <thead><tr><th>Position</th><th class="num">Menge kWh</th><th class="num">Betrag CHF</th></tr></thead>

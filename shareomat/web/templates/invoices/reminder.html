@@ -1,4 +1,5 @@
 {# Body of a payment reminder, frozen at creation (document_reminders.snapshot_html).
+   Debtor and address are those of the invoice snapshot (the original contract party).
    A reminder refers to the original invoice — it is not a new claim, and no
    fees are charged (the contract has no basis for them). #}
 <div class="doc-head">
@@ -7,7 +8,8 @@
     {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
   </div>
   <div class="doc-recipient">
-    {{ doc.recipient_label }}{% if participant %}<br>{{ participant.address_line }}<br>{{ participant.postal_code }} {{ participant.city }}{% endif %}
+    {{ doc.recipient_label }}{% for line in doc.recipient_address.split('
+') %}<br>{{ line }}{% endfor %}
   </div>
 </div>
 

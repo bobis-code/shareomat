@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Belege freigeben{% endblock %}
+{% block heading %}Rechnungen &amp; Gutschriften freigeben{% endblock %}
+{% block content %}
+{% if problems %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Belege können noch nicht erstellt werden:</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for i in problems %}<li>{{ i }}</li>{% endfor %}</ul></div>
+  <div class="actions-row"><a class="btn btn-muted" href="{{ url_for('invoices') }}">Zurück</a></div>
+</div>
+{% else %}
+<div class="card">
+  <div class="grid">
+    <div class="tile"><div class="tile-value">{{ planned|length }}</div><div class="tile-label">Belege</div></div>
+    <div class="tile"><div class="tile-value">{{ '%.2f'|format(total_invoices) }}</div><div class="tile-label">Rechnungen CHF</div></div>
+    <div class="tile"><div class="tile-value">{{ '%.2f'|format(total_credits) }}</div><div class="tile-label">Gutschriften CHF</div></div>
+  </div>
+  <div class="table-wrap" style="margin-top:12px"><table>
+    <thead><tr><th>Nr. (vorläufig)</th><th>Art</th><th>Empfänger</th><th>Adresse</th><th>E-Mail</th><th>Betrag CHF</th></tr></thead>
+    <tbody>
+    {% for p in planned %}
+    <tr><td>{{ p.number }}</td><td>{{ 'Rechnung' if p.doc_type == 'invoice' else 'Gutschrift' }}</td>
+      <td>{{ p.recipient.label }}</td><td>{{ p.address | replace('\n', ', ') }}</td>
+      <td>{{ p.recipient.email or '– (Papier)' }}</td><td>{{ '%.2f'|format(p.amount) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <form method="post" action="{{ url_for('invoices', suffix='/issue') }}" class="actions-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    <label style="margin:0"><input type="checkbox" name="confirm" required> Empfänger, Adressen, Beträge und Belegtexte
+      geprüft</label>
+    <button type="submit">Freigeben &amp; Belege erstellen</button>
+    <a class="btn btn-muted" href="{{ url_for('invoices') }}">Abbrechen</a>
+  </form>
+  <div class="ts">Nach der Freigabe sind die Belege unveränderlich (Prüfsumme). Die Nummern werden erst beim Erstellen
+    endgültig vergeben. Der Versand ist ein eigener Schritt.</div>
+</div>
+{% for p in planned %}
+<div class="card">
+  <h2>{{ p.number }} — {{ p.recipient.label }}</h2>
+  <div style="border:1px solid #ddd;padding:1rem;background:#fff;color:#111">{{ p.html | safe }}</div>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

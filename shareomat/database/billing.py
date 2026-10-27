@@ -567,14 +567,19 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
             run_id = cursor.lastrowid
 
             for item in preview.line_items:
+                person = conn.execute(
+                    "SELECT label, email, address_line, postal_code, city FROM participants WHERE participant_id = ?",
+                    (item.participant_id,),
+                ).fetchone()
+                recipient = json.dumps(dict(person), ensure_ascii=False) if person else ""
                 conn.execute(
                     """
                     INSERT INTO billing_records
                         (billing_run_id, participant_id, participant_label, meter_ids,
                          local_received_kwh, local_amount_chf, grid_import_kwh, grid_amount_chf,
                          local_supplied_kwh, grid_export_kwh, producer_credit_chf, charge_chf, credit_chf,
-                         net_amount_chf, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         net_amount_chf, recipient_snapshot, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id, item.participant_id, item.participant_label, ",".join(item.meter_ids),
@@ -582,7 +587,7 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
                         str(item.grid_import_kwh), str(item.grid_amount_chf),
                         str(item.local_supplied_kwh), str(item.grid_export_kwh),
                         str(item.producer_credit_chf), str(item.charge_chf), str(item.credit_chf),
-                        str(item.net_amount_chf), now,
+                        str(item.net_amount_chf), recipient, now,
                     ),
                 )
 

@@ -17,8 +17,17 @@
     Belegdatum {{ doc.issue_date.strftime('%d.%m.%Y') }}{% if doc.due_date %} · fällig {{ doc.due_date.strftime('%d.%m.%Y') }}{% endif %} ·
     <a href="{{ url_for('billing', suffix='/' + doc.billing_run_id|string) }}">Abrechnung</a>
   </div>
+  {% if not doc.integrity_ok %}
+  <div class="error-box"><strong>Prüfsumme stimmt nicht:</strong> der gespeicherte Beleg wurde nachträglich verändert.
+    Nicht mehr verwenden; Datenbank aus der Sicherung prüfen.</div>
+  {% endif %}
+  {% if doc.replaces_number %}<div class="ts" style="margin-top:6px">Ersetzt {{ doc.replaces_number }}.</div>{% endif %}
   {% if doc.status == 'cancelled' %}
-  <div class="error-box">Storniert am {{ doc.cancelled_at.strftime('%d.%m.%Y') }}: {{ doc.cancel_reason }}</div>
+  <div class="error-box">Storniert am {{ doc.cancelled_at.strftime('%d.%m.%Y') }}: {{ doc.cancel_reason }}
+    {% if doc.cancel_number %}<br>Stornobeleg {{ doc.cancel_number }} —
+      {{ 'zugestellt am ' + doc.cancellation_sent_at.strftime('%d.%m.%Y') if doc.cancellation_sent_at else 'noch nicht zugestellt (Pflicht vor dem Ersatzbeleg)' }}
+      · <a href="{{ url_for('invoices', suffix='/' + doc.id|string + '/print/cancellation') }}" target="_blank">Stornobeleg drucken</a>{% endif %}
+  </div>
   {% endif %}
   {% if payout %}
   <div class="ts" style="margin-top:6px">Anteil an den eingegangenen Bezüger-Zahlungen: CHF {{ '%.2f'|format(payout.entitled_chf) }}
@@ -40,9 +49,23 @@
     <input type="date" name="booked_on" value="{{ today.isoformat() }}">
     <input type="text" name="reference" placeholder="{{ 'Referenz (optional)' if doc.is_invoice else 'Bankreferenz (Pflicht)' }}" {{ '' if doc.is_invoice else 'required' }}>
     <input type="text" name="note" placeholder="Notiz (Pflicht bei Korrektur mit Minusbetrag)" style="min-width:260px">
+    <label style="margin:0"><input type="checkbox" name="confirm_duplicate"> Zweite Buchung bestätigt</label>
     <button type="submit">Buchen</button>
   </form>
-  {% if not doc.is_invoice %}<div class="ts">Nur Auszahlungen erfassen, die im E-Banking bereits ausgeführt wurden.</div>{% endif %}
+  <div class="ts">Manuell erfasst (kein Bankabgleich). {% if not doc.is_invoice %}Nur Auszahlungen erfassen, die im
+    E-Banking bereits ausgeführt wurden.{% else %}Referenz = Bankbuchung bzw. Quittung; eine Fehlbuchung mit Minusbetrag
+    und Begründung korrigieren.{% endif %}</div>
+  {% if doc.is_invoice and doc.booked_chf > doc.amount_chf %}
+  <h2 style="margin-top:14px">Überzahlung zurückerstatten</h2>
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/refund') }}" class="actions-row" style="margin-top:0;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="amount" required style="width:110px" value="{{ '%.2f'|format(doc.booked_chf - doc.amount_chf) }}">
+    <input type="date" name="booked_on" value="{{ today.isoformat() }}">
+    <input type="text" name="reference" placeholder="Bankreferenz (Pflicht)" required>
+    <input type="text" name="note" placeholder="Notiz">
+    <button type="submit">Rückerstattung erfassen</button>
+  </form>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -53,38 +76,49 @@
     <tbody>
       <tr><td>{{ doc.issue_date.strftime('%d.%m.%Y') }}</td><td>Beleg erstellt</td><td>{{ '%.2f'|format(doc.amount_chf) }}</td><td class="ts">SHA-256 {{ doc.snapshot_sha256[:16] }}…</td></tr>
       {% for p in doc.payments %}
-      <tr><td>{{ p.booked_on.strftime('%d.%m.%Y') }}</td><td>{{ 'Zahlungseingang' if p.kind == 'payment' else 'Auszahlung' }}{{ ' (Korrektur)' if p.amount_chf < 0 }}</td>
+      <tr><td>{{ p.booked_on.strftime('%d.%m.%Y') }}</td><td>{{ {'payment': 'Zahlungseingang', 'payout': 'Auszahlung', 'refund': 'Rückerstattung'}[p.kind] }}{{ ' (Korrektur)' if p.amount_chf < 0 and p.kind != 'refund' }} · manuell erfasst</td>
         <td>{{ '%.2f'|format(p.amount_chf) }}</td><td>{{ p.reference }} {{ p.note }}</td></tr>
       {% endfor %}
       {% for d in doc.deliveries %}
       <tr><td>{{ d.recorded_at.strftime('%d.%m.%Y') }}</td>
-        <td>{{ 'Zustellung' if d.status == 'sent' else 'Zustellung fehlgeschlagen' }} ({{ delivery_methods[d.method] }}){% if d.reminder_id %} — Mahnung{% endif %}</td>
+        <td>{{ 'Zustellung' if d.status == 'sent' else 'Zustellung fehlgeschlagen' }} ({{ delivery_methods[d.method] }}){{ {'reminder': ' — Mahnung', 'cancellation': ' — Stornobeleg'}.get(d.item, '') }} · manuell erfasst</td>
         <td></td><td>{{ d.detail }}</td></tr>
       {% endfor %}
       {% for r in doc.reminders %}
       <tr><td>{{ r.issue_date.strftime('%d.%m.%Y') }}</td><td>{{ r.label }} erstellt</td><td>{{ '%.2f'|format(r.open_amount_chf) }}</td>
         <td><a href="{{ url_for('invoices', suffix='/reminders/' + r.id|string + '/print') }}" target="_blank">Drucken</a>
-          {{ '· versendet ' + r.sent_at.strftime('%d.%m.%Y') if r.sent_at else '· noch nicht versendet' }}</td></tr>
+          {% if r.discarded_at %}· verworfen{% elif r.sent_at %}· versendet {{ r.sent_at.strftime('%d.%m.%Y') }}{% else %}· noch nicht versendet
+          <form method="post" action="{{ url_for('invoices', suffix='/reminders/' + r.id|string + '/discard') }}" style="display:inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="text" name="reason" placeholder="Grund" required style="width:140px">
+            <button type="submit" class="btn-muted btn-small">Verwerfen</button>
+          </form>{% endif %}
+          {% if r.new_due_date %}· neue Frist {{ r.new_due_date.strftime('%d.%m.%Y') }}{% endif %}</td></tr>
       {% endfor %}
     </tbody>
   </table></div>
 </div>
 
-{% if doc.status != 'cancelled' %}
+{% if doc.status != 'cancelled' or (doc.cancel_number and not doc.cancellation_sent_at) %}
 <div class="card">
   <h2>Zustellung protokollieren</h2>
   <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/delivery') }}" class="actions-row" style="margin-top:0;flex-wrap:wrap">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <select name="method">{% for k, label in delivery_methods.items() %}<option value="{{ k }}" {{ 'disabled' if k == 'email' and not doc.recipient_email }}>{{ label }}</option>{% endfor %}</select>
-    <select name="reminder_id"><option value="">{{ 'Rechnung' if doc.is_invoice else 'Gutschrift' }}</option>
-      {% for r in doc.reminders %}<option value="{{ r.id }}">{{ r.label }}</option>{% endfor %}</select>
+    <select name="target">
+      {% if doc.status == 'cancelled' %}<option value="cancellation">Stornobeleg {{ doc.cancel_number }}</option>
+      {% else %}<option value="document">{{ 'Rechnung' if doc.is_invoice else 'Gutschrift' }} {{ doc.number }}</option>
+      {% for r in doc.active_reminders if not r.sent_at %}<option value="reminder:{{ r.id }}">{{ r.label }}</option>{% endfor %}{% endif %}
+    </select>
     <select name="status"><option value="sent">zugestellt / versendet</option><option value="failed">fehlgeschlagen</option></select>
     <input type="text" name="detail" placeholder="Bemerkung (z. B. per Post, persönlich übergeben)" style="min-width:260px">
     <button type="submit">Erfassen</button>
   </form>
   <div class="ts">Ein erneuter Versand erzeugt nur einen weiteren Protokolleintrag, nie eine neue Forderung.</div>
 </div>
+{% endif %}
 
+{% if doc.status != 'cancelled' %}
 {% if doc.is_invoice %}
 <div class="card">
   <h2>Mahnwesen</h2>
@@ -112,8 +146,9 @@
     <input type="text" name="reason" placeholder="Stornogrund (Pflicht)" required style="min-width:320px">
     <button type="submit" class="btn-danger">Beleg stornieren</button>
   </form>
-  <div class="ts">Nur möglich, solange nichts gebucht ist. Die Nummer wird nicht wiederverwendet; danach kann der
-    Beleg unter Rechnungen neu erstellt werden.</div>
+  <div class="ts">Nur möglich, solange nichts gebucht ist. Die Nummer wird nicht wiederverwendet.
+    {% if doc.sent_at %}Der Beleg wurde bereits zugestellt: es entsteht ein Stornobeleg, der zugestellt werden muss,
+    bevor der Ersatzbeleg erstellt werden kann.{% else %}Danach kann der Beleg unter Rechnungen neu erstellt werden.{% endif %}</div>
 </div>
 {% endif %}
 {% endif %}
