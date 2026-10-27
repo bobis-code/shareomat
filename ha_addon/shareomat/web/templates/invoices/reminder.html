@@ -1,0 +1,43 @@
+{# Body of a payment reminder, frozen at creation (document_reminders.snapshot_html).
+   A reminder refers to the original invoice — it is not a new claim, and no
+   fees are charged (the contract has no basis for them). #}
+<div class="doc-head">
+  <div class="doc-sender">
+    {{ creditor.name }}<br>{{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
+    {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
+  </div>
+  <div class="doc-recipient">
+    {{ doc.recipient_label }}{% if participant %}<br>{{ participant.address_line }}<br>{{ participant.postal_code }} {{ participant.city }}{% endif %}
+  </div>
+</div>
+
+<p class="doc-date">{{ creditor.city }}, {{ issue_date.strftime('%d.%m.%Y') }}</p>
+
+<h2>{{ label }} zu Rechnung {{ doc.number }}</h2>
+{% if level == 1 %}
+<p>Möglicherweise ist es Ihrer Aufmerksamkeit entgangen: Die Rechnung {{ doc.number }} vom
+  {{ doc.issue_date.strftime('%d.%m.%Y') }} für die Abrechnungsperiode {{ doc.period_start.strftime('%d.%m.%Y') }} –
+  {{ doc.period_end.strftime('%d.%m.%Y') }} war am {{ doc.due_date.strftime('%d.%m.%Y') }} fällig und ist noch
+  nicht vollständig bezahlt.</p>
+{% else %}
+<p>Trotz unserer Erinnerung ist die Rechnung {{ doc.number }} vom {{ doc.issue_date.strftime('%d.%m.%Y') }}
+  (fällig am {{ doc.due_date.strftime('%d.%m.%Y') }}) noch nicht vollständig bezahlt.</p>
+{% endif %}
+
+<table class="doc-lines">
+  <tr><td>Rechnungsbetrag</td><td class="num">CHF {{ '%.2f'|format(doc.amount_chf) }}</td></tr>
+  <tr><td>Bereits bezahlt</td><td class="num">CHF {{ '%.2f'|format(doc.booked_chf) }}</td></tr>
+  <tr><th>Offener Betrag</th><th class="num">CHF {{ '%.2f'|format(open_amount) }}</th></tr>
+</table>
+
+<p>Wir bitten Sie, den offenen Betrag bis <strong>{{ new_due_date.strftime('%d.%m.%Y') }}</strong> zu überweisen.
+  Falls Sie inzwischen bezahlt haben, betrachten Sie dieses Schreiben bitte als gegenstandslos.</p>
+<table class="doc-pay">
+  <tr><td>Zahlungsempfänger</td><td>{{ payee }}</td></tr>
+  <tr><td>IBAN</td><td>{{ iban }}</td></tr>
+  <tr><td>Zahlungszweck</td><td>{{ doc.number }}</td></tr>
+</table>
+{% if level >= 3 %}
+<p>Bleibt die Zahlung weiterhin aus, behält sich der LEG-Vertreter die weiteren Schritte gemäss
+  Gesellschaftsvertrag vor.</p>
+{% endif %}

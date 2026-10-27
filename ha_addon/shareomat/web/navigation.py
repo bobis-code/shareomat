@@ -70,7 +70,7 @@ NAV_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
 
 # route names whose page is a placeholder in this phase — used to render the
 # "in Vorbereitung" badge in the sidebar and to short-circuit their GET handler.
-PLACEHOLDER_ROUTES = {"invoices"}
+PLACEHOLDER_ROUTES: set[str] = set()
 
 
 def url_for(ingress_path: str, route_name: str, *, suffix: str = "") -> str:

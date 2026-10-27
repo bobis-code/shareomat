@@ -1,0 +1,33 @@
+{# Standalone printable page for an issued document or reminder — "Drucken ->
+   als PDF speichern". The body is the stored snapshot, byte-identical to what
+   snapshot_sha256 was computed from. #}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; max-width: 44rem; margin: 2rem auto; line-height: 1.4; color: #111; font-size: 10.5pt; }
+    h2 { font-size: 1.3rem; margin-top: 1.6rem; }
+    .doc-head { display: flex; justify-content: space-between; gap: 2rem; }
+    .doc-recipient { margin-top: 3.5rem; min-width: 16rem; }
+    .doc-date { margin-top: 2rem; }
+    table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+    .doc-lines th, .doc-lines td { border-bottom: 1px solid #ccc; padding: .3rem .4rem; text-align: left; }
+    .doc-lines tfoot th { border-top: 2px solid #111; }
+    .doc-pay { width: auto; } .doc-pay td { padding: .15rem 1.2rem .15rem 0; }
+    .num { text-align: right !important; white-space: nowrap; }
+    .ts { color: #444; font-size: .85rem; }
+    .meta { border-top: 1px solid #999; margin-top: 2rem; padding-top: .5rem; font-size: .75rem; color: #555; }
+    .stamp { border: 2px solid #b91c1c; color: #b91c1c; padding: .4rem .6rem; margin-bottom: 1rem; font-weight: bold; }
+    .noprint { margin-bottom: 1rem; }
+    @media print { .noprint { display: none; } body { margin: 0 auto; } }
+  </style>
+</head>
+<body>
+  <div class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></div>
+  {% if stamp %}<div class="stamp">{{ stamp }}</div>{% endif %}
+  {{ body | safe }}
+  <div class="meta">SHA-256 des Belegs (eingefrorene Fassung): <span style="font-family:monospace;word-break:break-all">{{ sha256 }}</span></div>
+</body>
+</html>

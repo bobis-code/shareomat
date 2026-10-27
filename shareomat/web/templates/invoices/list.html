@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Rechnungen{% endblock %}
+{% block heading %}Rechnungen &amp; Gutschriften{% endblock %}
+{% block content %}
+{% set tab_labels = {'invoices': 'Rechnungen', 'credits': 'Gutschriften', 'reminders': 'Mahnungen', 'settings': 'Zahlungsangaben & Regeln'} %}
+<div class="actions-row" style="margin-top:0;margin-bottom:12px">
+  {% for key, label in tab_labels.items() %}
+  <a class="btn {{ '' if tab == key else 'btn-muted' }}" href="{{ url_for('invoices') }}?tab={{ key }}">{{ label }}{% if key == 'reminders' and proposals %} ({{ proposals|length }}){% endif %}</a>
+  {% endfor %}
+</div>
+
+{% if pending and tab in ('invoices', 'credits') %}
+<div class="card">
+  <h2>Freigegebene Abrechnungen ohne Belege</h2>
+  {% for p in pending %}
+  <div style="margin-bottom:10px">
+    <strong>{{ p.run.period_start.strftime('%d.%m.%Y') }} – {{ p.run.period_end.strftime('%d.%m.%Y') }}</strong>
+    (Version {{ p.run.version }}) · {{ p.missing }} Beleg(e) fehlen{% if p.issued %}, {{ p.issued }} bereits erstellt{% endif %}
+    {% if p.problems %}
+    <div class="error-box"><ul style="margin:0 0 0 1rem;padding:0">{% for i in p.problems %}<li>{{ i }}</li>{% endfor %}</ul></div>
+    {% else %}
+    <form method="post" action="{{ url_for('invoices', suffix='/issue') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="run_id" value="{{ p.run.id }}">
+      <button type="submit">Rechnungen &amp; Gutschriften erstellen</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <div class="ts">Erstellte Belege werden unveränderlich gespeichert (mit Prüfsumme). Fehler korrigieren: Beleg
+    stornieren (nur ohne gebuchte Zahlung), Daten berichtigen, Beleg neu erstellen.</div>
+</div>
+{% endif %}
+
+{% if tab in ('invoices', 'credits') %}
+<div class="card">
+  {% if docs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th>Nummer</th><th>Teilnehmer</th><th>Periode</th><th>LEG-kWh</th><th>Betrag CHF</th>
+        <th>{{ 'Bezahlt' if tab == 'invoices' else 'Ausbezahlt' }} CHF</th>
+        {% if tab == 'credits' %}<th>Jetzt auszahlbar CHF</th>{% else %}<th>Fällig</th>{% endif %}
+        <th>Status</th><th>Versand</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for d in docs %}{% set st = d.state(today) %}
+      <tr>
+        <td>{{ d.number }}</td>
+        <td>{{ d.recipient_label }}</td>
+        <td>{{ d.period_start.strftime('%m.%Y') if d.period_start }}</td>
+        <td>{{ '%.3f'|format(d.local_kwh) }}</td>
+        <td>{{ '%.2f'|format(d.amount_chf) }}</td>
+        <td>{{ '%.2f'|format(d.booked_chf) }}</td>
+        {% if tab == 'credits' %}<td>{{ '%.2f'|format(payouts[d.id].available_chf) if d.id in payouts else '–' }}</td>
+        {% else %}<td>{{ d.due_date.strftime('%d.%m.%Y') if d.due_date }}</td>{% endif %}
+        <td><span class="status-pill {{ 'status-pill-active' if st in ('paid', 'payout_done') else 'status-pill-inactive' }}">{{ state_labels[st] }}</span>
+          {% if d.reminder_block_reason %}<span class="ts">Mahnsperre</span>{% endif %}</td>
+        <td>{{ d.sent_at.strftime('%d.%m.%Y') if d.sent_at else ('–' if d.status == 'cancelled' else 'offen') }}</td>
+        <td><a class="btn btn-muted btn-small" href="{{ url_for('invoices', suffix='/' + d.id|string) }}">Ansehen</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine {{ 'Rechnungen' if tab == 'invoices' else 'Gutschriften' }}. Belege entstehen aus einer
+    freigegebenen <a href="{{ url_for('billing') }}">Abrechnung</a>.</p>
+  {% endif %}
+  {% if tab == 'credits' %}
+  <div class="ts" style="margin-top:8px">Auszahlbar ist der Anteil an den eingegangenen Zahlungen der LEG-Bezüger
+    derselben Abrechnung, im Verhältnis der Gutschriften (Vertrag Ziff. 3.4). Shareomat führt keine Bankaufträge aus —
+    Auszahlungen werden im E-Banking gemacht und hier mit Bankreferenz erfasst.</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if tab == 'reminders' %}
+<div class="card">
+  <h2>Fällige Mahnvorschläge</h2>
+  {% if proposals %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Rechnung</th><th>Teilnehmer</th><th>Fällig seit</th><th>Offen CHF</th><th>Vorschlag</th><th></th></tr></thead>
+    <tbody>
+    {% for p in proposals %}
+    <tr>
+      <td>{{ p.document.number }}</td><td>{{ p.document.recipient_label }}</td>
+      <td>{{ p.document.due_date.strftime('%d.%m.%Y') }}</td><td>{{ '%.2f'|format(p.document.open_chf) }}</td>
+      <td>{{ p.label }}</td>
+      <td><a class="btn btn-muted btn-small" href="{{ url_for('invoices', suffix='/' + p.document.id|string) }}">Prüfen</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="ts">Keine Mahnung fällig.</p>
+  {% endif %}
+  <div class="ts" style="margin-top:8px">Vorschläge entstehen {{ offsets|join(' / ') }} Tage nach Fälligkeit, nur für
+    versendete, nicht bezahlte Rechnungen ohne Mahnsperre und erst, wenn die vorherige Mahnung versendet ist. Keine
+    Mahngebühren. Nach der letzten Stufe entscheidet der LEG-Vertreter über das weitere Vorgehen (Ausschluss gemäss
+    Ziff. 5, Fristen des VNB beachten).</div>
+</div>
+{% endif %}
+
+{% if tab == 'settings' %}
+<form class="form-card" method="post" action="{{ url_for('invoices', suffix='/settings') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2>Zahlungsangaben auf Rechnungen</h2>
+  <div class="field">
+    <label for="payee">Kontoinhaber (Zahlungsempfänger)</label>
+    <input type="text" id="payee" name="payee" value="{{ payee }}" required>
+  </div>
+  <div class="field">
+    <label for="iban">IBAN</label>
+    <input type="text" id="iban" name="iban" value="{{ iban }}" required>
+    <div class="field-hint">Konto des LEG-Vertreters für die Zahlungen der LEG-Bezüger. Gilt für neu erstellte
+      Belege; bereits erstellte bleiben unverändert. QR-Zahlteil folgt später.</div>
+  </div>
+  <button type="submit">Speichern</button>
+</form>
+<div class="card">
+  <h2>Regeln</h2>
+  <ul>
+    <li>Ein Beleg pro Teilnehmer und Abrechnung; Prosumer erhalten den Saldo (Ziff. 3.4).</li>
+    <li>Zahlungsfrist gemäss Vertrag, ab Rechnungsdatum.</li>
+    <li>Mahnvorschläge {{ offsets|join(' / ') }} Tage nach Fälligkeit, ohne Gebühren; Erstellen und Versand nur von Hand.</li>
+    <li>Gutschriften: Auszahlung nur aus eingegangenen Bezüger-Zahlungen, anteilig; nie automatisch.</li>
+    <li>Versand: Papier/PDF (Drucken) oder E-Mail; jede Zustellung wird protokolliert, ein erneuter Versand erzeugt
+      keine neue Forderung. Direkter E-Mail-Versand aus Shareomat folgt.</li>
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

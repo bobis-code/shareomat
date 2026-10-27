@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Rechnung' if doc.is_invoice else 'Gutschrift' }} {{ doc.number }}{% endblock %}
+{% block heading %}{{ 'Rechnung' if doc.is_invoice else 'Gutschrift' }} {{ doc.number }}{% endblock %}
+{% block content %}
+{% set st = doc.state(today) %}
+<div class="card">
+  <div class="grid">
+    <div class="tile"><div class="tile-value"><span class="status-pill {{ 'status-pill-active' if st in ('paid', 'payout_done') else 'status-pill-inactive' }}">{{ state_labels[st] }}</span></div><div class="tile-label">Status</div></div>
+    <div class="tile"><div class="tile-value">{{ '%.2f'|format(doc.amount_chf) }}</div><div class="tile-label">Betrag CHF</div></div>
+    <div class="tile"><div class="tile-value">{{ '%.2f'|format(doc.booked_chf) }}</div><div class="tile-label">{{ 'Bezahlt' if doc.is_invoice else 'Ausbezahlt' }} CHF</div></div>
+    <div class="tile"><div class="tile-value">{{ '%.2f'|format(doc.open_chf) }}</div><div class="tile-label">Offen CHF</div></div>
+    {% if payout %}<div class="tile"><div class="tile-value">{{ '%.2f'|format(payout.available_chf) }}</div><div class="tile-label">Jetzt auszahlbar CHF</div></div>{% endif %}
+  </div>
+  <div class="ts" style="margin-top:12px">
+    {{ doc.recipient_label }}{% if doc.recipient_email %} ({{ doc.recipient_email }}){% else %} (keine E-Mail — Papierzustellung){% endif %} ·
+    Periode {{ doc.period_start.strftime('%d.%m.%Y') }} – {{ doc.period_end.strftime('%d.%m.%Y') }} ·
+    Belegdatum {{ doc.issue_date.strftime('%d.%m.%Y') }}{% if doc.due_date %} · fällig {{ doc.due_date.strftime('%d.%m.%Y') }}{% endif %} ·
+    <a href="{{ url_for('billing', suffix='/' + doc.billing_run_id|string) }}">Abrechnung</a>
+  </div>
+  {% if doc.status == 'cancelled' %}
+  <div class="error-box">Storniert am {{ doc.cancelled_at.strftime('%d.%m.%Y') }}: {{ doc.cancel_reason }}</div>
+  {% endif %}
+  {% if payout %}
+  <div class="ts" style="margin-top:6px">Anteil an den eingegangenen Bezüger-Zahlungen: CHF {{ '%.2f'|format(payout.entitled_chf) }}
+    von CHF {{ '%.2f'|format(payout.amount_chf) }} (Vertrag Ziff. 3.4).</div>
+  {% endif %}
+  <div class="actions-row">
+    <a class="btn" href="{{ url_for('invoices', suffix='/' + doc.id|string + '/print') }}" target="_blank">Drucken / PDF</a>
+    <a class="btn btn-muted" href="{{ url_for('invoices') }}?tab={{ 'invoices' if doc.is_invoice else 'credits' }}">Zur Liste</a>
+  </div>
+</div>
+
+{% if doc.status != 'cancelled' %}
+<div class="card">
+  <h2>{{ 'Zahlung erfassen' if doc.is_invoice else 'Auszahlung erfassen' }}</h2>
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + ('/payment' if doc.is_invoice else '/payout')) }}" class="actions-row" style="margin-top:0;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="amount" placeholder="Betrag CHF" required style="width:110px"
+      value="{{ '%.2f'|format(doc.open_chf if doc.is_invoice else (payout.available_chf if payout else 0)) }}">
+    <input type="date" name="booked_on" value="{{ today.isoformat() }}">
+    <input type="text" name="reference" placeholder="{{ 'Referenz (optional)' if doc.is_invoice else 'Bankreferenz (Pflicht)' }}" {{ '' if doc.is_invoice else 'required' }}>
+    <input type="text" name="note" placeholder="Notiz (Pflicht bei Korrektur mit Minusbetrag)" style="min-width:260px">
+    <button type="submit">Buchen</button>
+  </form>
+  {% if not doc.is_invoice %}<div class="ts">Nur Auszahlungen erfassen, die im E-Banking bereits ausgeführt wurden.</div>{% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Verlauf</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Datum</th><th>Vorgang</th><th>Betrag CHF</th><th>Details</th></tr></thead>
+    <tbody>
+      <tr><td>{{ doc.issue_date.strftime('%d.%m.%Y') }}</td><td>Beleg erstellt</td><td>{{ '%.2f'|format(doc.amount_chf) }}</td><td class="ts">SHA-256 {{ doc.snapshot_sha256[:16] }}…</td></tr>
+      {% for p in doc.payments %}
+      <tr><td>{{ p.booked_on.strftime('%d.%m.%Y') }}</td><td>{{ 'Zahlungseingang' if p.kind == 'payment' else 'Auszahlung' }}{{ ' (Korrektur)' if p.amount_chf < 0 }}</td>
+        <td>{{ '%.2f'|format(p.amount_chf) }}</td><td>{{ p.reference }} {{ p.note }}</td></tr>
+      {% endfor %}
+      {% for d in doc.deliveries %}
+      <tr><td>{{ d.recorded_at.strftime('%d.%m.%Y') }}</td>
+        <td>{{ 'Zustellung' if d.status == 'sent' else 'Zustellung fehlgeschlagen' }} ({{ delivery_methods[d.method] }}){% if d.reminder_id %} — Mahnung{% endif %}</td>
+        <td></td><td>{{ d.detail }}</td></tr>
+      {% endfor %}
+      {% for r in doc.reminders %}
+      <tr><td>{{ r.issue_date.strftime('%d.%m.%Y') }}</td><td>{{ r.label }} erstellt</td><td>{{ '%.2f'|format(r.open_amount_chf) }}</td>
+        <td><a href="{{ url_for('invoices', suffix='/reminders/' + r.id|string + '/print') }}" target="_blank">Drucken</a>
+          {{ '· versendet ' + r.sent_at.strftime('%d.%m.%Y') if r.sent_at else '· noch nicht versendet' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if doc.status != 'cancelled' %}
+<div class="card">
+  <h2>Zustellung protokollieren</h2>
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/delivery') }}" class="actions-row" style="margin-top:0;flex-wrap:wrap">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <select name="method">{% for k, label in delivery_methods.items() %}<option value="{{ k }}" {{ 'disabled' if k == 'email' and not doc.recipient_email }}>{{ label }}</option>{% endfor %}</select>
+    <select name="reminder_id"><option value="">{{ 'Rechnung' if doc.is_invoice else 'Gutschrift' }}</option>
+      {% for r in doc.reminders %}<option value="{{ r.id }}">{{ r.label }}</option>{% endfor %}</select>
+    <select name="status"><option value="sent">zugestellt / versendet</option><option value="failed">fehlgeschlagen</option></select>
+    <input type="text" name="detail" placeholder="Bemerkung (z. B. per Post, persönlich übergeben)" style="min-width:260px">
+    <button type="submit">Erfassen</button>
+  </form>
+  <div class="ts">Ein erneuter Versand erzeugt nur einen weiteren Protokolleintrag, nie eine neue Forderung.</div>
+</div>
+
+{% if doc.is_invoice %}
+<div class="card">
+  <h2>Mahnwesen</h2>
+  {% if proposal %}
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/reminder') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">{{ proposal.label }} erstellen (offen CHF {{ '%.2f'|format(doc.open_chf) }})</button>
+  </form>
+  {% else %}
+  <p class="ts">Keine Mahnung fällig.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/reminder-block') }}" class="actions-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="reason" value="{{ doc.reminder_block_reason }}" placeholder="Grund der Mahnsperre (leer = aufheben)" style="min-width:320px">
+    <button type="submit" class="btn-muted">Mahnsperre speichern</button>
+  </form>
+</div>
+{% endif %}
+
+{% if not doc.payments %}
+<div class="card">
+  <h2>Stornieren</h2>
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/cancel') }}" class="actions-row" style="margin-top:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="reason" placeholder="Stornogrund (Pflicht)" required style="min-width:320px">
+    <button type="submit" class="btn-danger">Beleg stornieren</button>
+  </form>
+  <div class="ts">Nur möglich, solange nichts gebucht ist. Die Nummer wird nicht wiederverwendet; danach kann der
+    Beleg unter Rechnungen neu erstellt werden.</div>
+</div>
+{% endif %}
+{% endif %}
+
+<div class="card">
+  <h2>Beleg (eingefrorene Fassung)</h2>
+  <div style="border:1px solid #ddd;padding:1rem;background:#fff;color:#111">{{ doc.snapshot_html | safe }}</div>
+</div>
+{% endblock %}

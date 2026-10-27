@@ -56,6 +56,7 @@
   </div>
   {% elif detail.run.status == 'released' %}
   <div class="actions-row">
+    <a class="btn" href="{{ url_for('invoices') }}">Rechnungen &amp; Gutschriften</a>
     <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/cancel') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit" class="btn-danger">Stornieren</button>

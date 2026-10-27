@@ -666,6 +666,14 @@ def cancel_billing_run(db_path: Path, run_id: int) -> BillingRun:
                 raise BillingWorkflowError(f"Abrechnung {run_id} wurde nicht gefunden.")
             if row["status"] == BILLING_STATUS_CANCELLED:
                 raise BillingWorkflowError("Abrechnung ist bereits storniert.")
+            issued = conn.execute(
+                "SELECT COUNT(*) FROM billing_documents WHERE billing_run_id = ? AND status != 'cancelled'", (run_id,)
+            ).fetchone()[0]
+            if issued:
+                raise BillingWorkflowError(
+                    f"Zu dieser Abrechnung sind {issued} Rechnung(en)/Gutschrift(en) erstellt — "
+                    "zuerst die Belege stornieren (nur ohne gebuchte Zahlungen möglich)."
+                )
             now = now_iso()
             conn.execute(
                 "UPDATE billing_runs SET status = ?, updated_at = ? WHERE id = ?",
