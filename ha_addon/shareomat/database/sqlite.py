@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 12
+_SCHEMA_VERSION = 13
 
 _SCHEMA_STATEMENTS = [
     """
@@ -368,6 +368,71 @@ _SCHEMA_STATEMENTS = [
         entity_id TEXT NOT NULL,
         action TEXT NOT NULL,
         detail TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    # Rechnungen & Gutschriften (shareomat.database.invoicing): one document per
+    # participant and released billing run; the rendered document is frozen in
+    # snapshot_html at issue time. Payments, payouts, deliveries and reminders
+    # are append-only logs referring to it.
+    """
+    CREATE TABLE IF NOT EXISTS billing_documents (
+        id INTEGER PRIMARY KEY,
+        billing_run_id INTEGER NOT NULL REFERENCES billing_runs(id),
+        participant_id TEXT NOT NULL,
+        doc_type TEXT NOT NULL,
+        number TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL DEFAULT 'issued',
+        amount_chf TEXT NOT NULL,
+        issue_date TEXT NOT NULL,
+        due_date TEXT,
+        recipient_label TEXT NOT NULL,
+        recipient_email TEXT NOT NULL DEFAULT '',
+        snapshot_html TEXT NOT NULL,
+        snapshot_sha256 TEXT NOT NULL,
+        reminder_block_reason TEXT NOT NULL DEFAULT '',
+        cancel_reason TEXT NOT NULL DEFAULT '',
+        cancelled_at TEXT,
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_documents_active
+        ON billing_documents(billing_run_id, participant_id) WHERE status != 'cancelled'
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS document_payments (
+        id INTEGER PRIMARY KEY,
+        document_id INTEGER NOT NULL REFERENCES billing_documents(id),
+        kind TEXT NOT NULL,
+        amount_chf TEXT NOT NULL,
+        booked_on TEXT NOT NULL,
+        reference TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        recorded_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS document_deliveries (
+        id INTEGER PRIMARY KEY,
+        document_id INTEGER NOT NULL REFERENCES billing_documents(id),
+        reminder_id INTEGER REFERENCES document_reminders(id),
+        method TEXT NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        recorded_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS document_reminders (
+        id INTEGER PRIMARY KEY,
+        document_id INTEGER NOT NULL REFERENCES billing_documents(id),
+        level INTEGER NOT NULL,
+        issue_date TEXT NOT NULL,
+        open_amount_chf TEXT NOT NULL,
+        snapshot_html TEXT NOT NULL,
+        snapshot_sha256 TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(document_id, level)
     )
     """,
     """

@@ -1,0 +1,60 @@
+{# Body of an invoice (Rechnung) or credit note (Gutschrift). Rendered ONCE at
+   issue time and stored frozen in billing_documents.snapshot_html — changing
+   this template only affects documents issued afterwards.
+   Contract §3.4: prosumers get one document; supply and offtake are shown
+   separately, then netted. No VAT line: the price is a gross price
+   "einschliesslich einer allfällig geschuldeten Mehrwertsteuer" (§3.1/3.2). #}
+{% set is_invoice = doc_type == 'invoice' %}
+<div class="doc-head">
+  <div class="doc-sender">
+    {{ creditor.name }}<br>{{ creditor.address_line }}<br>{{ creditor.postal_code }} {{ creditor.city }}
+    {% if creditor.email %}<br>{{ creditor.email }}{% endif %}
+  </div>
+  <div class="doc-recipient">
+    {{ participant.label }}<br>{{ participant.address_line }}<br>{{ participant.postal_code }} {{ participant.city }}
+  </div>
+</div>
+
+<p class="doc-date">{{ creditor.city }}, {{ issue_date.strftime('%d.%m.%Y') }}</p>
+
+<h2>{{ 'Rechnung' if is_invoice else 'Gutschrift' }} {{ number }}</h2>
+<p>LEG «{{ community_name }}» · Abrechnungsperiode {{ run.period_start.strftime('%d.%m.%Y') }} –
+  {{ run.period_end.strftime('%d.%m.%Y') }}{% if creditor.contract_version %} · Gesellschaftsvertrag
+  Version {{ creditor.contract_version }}{% endif %}</p>
+
+<table class="doc-lines">
+  <thead><tr><th>Position</th><th class="num">Menge kWh</th><th class="num">Betrag CHF</th></tr></thead>
+  <tbody>
+    {% if item.local_received_kwh > 0 %}
+    <tr><td>Bezug LEG-Strom (Preis gemäss Ziff. 3.2 Gesellschaftsvertrag)</td>
+      <td class="num">{{ '%.3f'|format(item.local_received_kwh) }}</td><td class="num">{{ '%.2f'|format(item.charge_chf) }}</td></tr>
+    {% endif %}
+    {% if item.local_supplied_kwh > 0 %}
+    <tr><td>Lieferung LEG-Strom (Preis gemäss Ziff. 3.1 Gesellschaftsvertrag)</td>
+      <td class="num">{{ '%.3f'|format(item.local_supplied_kwh) }}</td><td class="num">−{{ '%.2f'|format(item.credit_chf) }}</td></tr>
+    {% endif %}
+  </tbody>
+  <tfoot>
+    <tr><th>{{ 'Zu bezahlen' if is_invoice else 'Gutschrift zu Ihren Gunsten' }}</th><th></th>
+      <th class="num">CHF {{ '%.2f'|format(amount) }}</th></tr>
+  </tfoot>
+</table>
+<p class="ts">Tarif: {{ run.tariff_name }}. Die Mengen sind die vom Verteilnetzbetreiber gemessenen und der LEG
+  zugeordneten Viertelstundenwerte. Netznutzung, Abgaben und Strom aus dem Netz stellt der Verteilnetzbetreiber
+  separat in Rechnung.</p>
+
+{% if is_invoice %}
+<p><strong>Zahlbar bis {{ due_date.strftime('%d.%m.%Y') }}</strong> (innert
+  {{ creditor.payment_term_days }} Tagen ab Rechnungsdatum, Ziff. 3.4).</p>
+<table class="doc-pay">
+  <tr><td>Zahlungsempfänger</td><td>{{ payee }}</td></tr>
+  <tr><td>IBAN</td><td>{{ iban }}</td></tr>
+  <tr><td>Zahlungszweck</td><td>{{ number }}</td></tr>
+</table>
+{% else %}
+<p>Die Gutschrift wird gemäss Ziff. 3.4 des Gesellschaftsvertrags ausbezahlt, sobald und soweit die Zahlungen
+  der LEG-Bezüger für diese Abrechnungsperiode eingegangen sind.</p>
+{% endif %}
+
+<p class="ts">Beanstandungen sind möglichst innerhalb von {{ creditor.payment_term_days }} Tagen ab Rechnungsdatum
+  schriftlich an den LEG-Vertreter zu richten (Ziff. 3.4).</p>
