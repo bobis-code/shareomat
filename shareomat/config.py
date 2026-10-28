@@ -137,6 +137,13 @@ class WebConfig:
 
     enabled: bool = True
     port: int = 8099
+    # Proxies whose X-Forwarded-Proto/-Host headers are believed (e.g. a local
+    # HTTPS reverse proxy). The Home Assistant supervisor (172.30.32.2) is
+    # always trusted for these. Never used to authenticate anybody.
+    trusted_proxies: list[str] = field(default_factory=list)
+    # Add-on option "reset_login": a fresh one-time code in the log allows
+    # setting a new password (forgotten password). Harmless if left on.
+    reset_login: bool = False
 
 
 @dataclass
@@ -278,9 +285,14 @@ def _parse_web(raw: dict[str, Any]) -> WebConfig:
     w = raw.get("web") or raw.get("ingress") or {}
     if not w:
         return WebConfig()
+    proxies = w.get("trusted_proxies", [])
+    if isinstance(proxies, str):
+        proxies = [p.strip() for p in proxies.split(",") if p.strip()]
     return WebConfig(
         enabled=bool(w.get("enabled", True)),
         port=int(w.get("port", 8099)),
+        trusted_proxies=[str(p) for p in proxies],
+        reset_login=bool(w.get("reset_login", False)),
     )
 
 

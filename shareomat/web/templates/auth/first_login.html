@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ 'Neues Passwort' if reset else 'Ersteinrichtung' }} — Shareomat</title>
+  <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <img class="auth-logo" src="{{ url_for('banner') }}" alt="Shareomat">
+    <h1>{{ 'Neues Passwort festlegen' if reset else 'Willkommen – Zugang einrichten' }}</h1>
+    <ol class="auth-steps">
+      <li>Den <strong>Einmal-Code</strong> holen: Home Assistant → Einstellungen → Add-ons → Shareomat →
+        <em>Protokoll</em> (Zeile «Shareomat Ersteinrichtung: Einmal-Code …»).</li>
+      <li>Code eintragen, Benutzername und Passwort wählen.</li>
+    </ol>
+    {% if error %}<div class="error-box" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('first_login') }}" autocomplete="off">
+      <input type="hidden" name="login_csrf" value="{{ login_csrf }}">
+      <label for="code">Einmal-Code</label>
+      <input type="text" id="code" name="code" placeholder="XXXX-XXXX-XXXX" autocapitalize="characters"
+             spellcheck="false" required autofocus>
+      <label for="username">Benutzername</label>
+      <input type="text" id="username" name="username" value="{{ username }}" autocomplete="username"
+             autocapitalize="none" spellcheck="false" required>
+      <label for="password">Passwort (mindestens 12 Zeichen)</label>
+      <input type="password" id="password" name="password" autocomplete="new-password" minlength="12" required>
+      <label for="password_repeat">Passwort wiederholen</label>
+      <input type="password" id="password_repeat" name="password_repeat" autocomplete="new-password" minlength="12" required>
+      <p class="ts" style="margin:0 0 10px">Tipp: ein Satz aus mehreren Wörtern ist sicher und gut zu merken,
+        z. B. «Sonne scheint auf unser Dach 2026».</p>
+      <label class="auth-check"><input type="checkbox" name="remember"> Auf diesem Gerät {{ remember_days }} Tage angemeldet bleiben</label>
+      <button type="submit" class="auth-submit">{{ 'Passwort speichern' if reset else 'Zugang einrichten' }}</button>
+    </form>
+    {% if reset %}<p class="ts auth-note">Das bisherige Passwort gilt, bis hier ein neues gespeichert ist. Danach die
+      Add-on-Option «Login zurücksetzen» wieder ausschalten.</p>{% endif %}
+  </main>
+</body>
+</html>

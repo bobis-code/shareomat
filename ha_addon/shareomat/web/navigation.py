@@ -21,6 +21,10 @@ from __future__ import annotations
 # route name -> URL path (without the Ingress prefix, which url_for() adds).
 ROUTE_PATHS: dict[str, str] = {
     "dashboard": "/",
+    "login": "/login",
+    "first_login": "/first-login",
+    "logout": "/logout",
+    "account": "/account",
     "setup": "/setup",
     "community": "/community",
     "participants": "/participants",

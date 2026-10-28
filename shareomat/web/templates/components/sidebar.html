@@ -4,7 +4,7 @@
   </a>
   {# On phones the menu is collapsed behind this toggle (pure CSS, no JavaScript — works in the HA app webview). #}
   {% set ns = namespace(active='Menü') %}
-  {% for section_title, items in nav_sections %}{% for route_name, label in items %}{% if route_name == active_route %}{% set ns.active = label %}{% endif %}{% endfor %}{% endfor %}
+  {% for section_title, items in nav_sections %}{% for route_name, label in items %}{% if route_name == active_route %}{% set ns.active = label %}{% endif %}{% if active_route == 'account' %}{% set ns.active = 'Mein Konto' %}{% endif %}{% endfor %}{% endfor %}
   <input type="checkbox" id="nav-toggle" class="nav-toggle-input">
   <label for="nav-toggle" class="nav-toggle">☰ Menü · <strong>{{ ns.active }}</strong></label>
   <div class="nav-body">
@@ -22,6 +22,17 @@
       {% endfor %}
     </ul>
   {% endfor %}
+  {% if current_user %}
+    <div class="nav-section-title">KONTO</div>
+    <div class="nav-account">
+      <span class="ts">Angemeldet als <strong>{{ current_user.label }}</strong></span>
+      <a href="{{ url_for('account') }}" class="nav-link{% if active_route == 'account' %} active{% endif %}"><span>Mein Konto</span></a>
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="nav-logout">Abmelden</button>
+      </form>
+    </div>
+  {% endif %}
   </div>
   {% if community_name %}
     <div class="sidebar-footer">{{ community_name }}</div>

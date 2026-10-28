@@ -4,7 +4,8 @@ File: shareomat/web/state.py
 
 Purpose:
     Shared state between the engine and the web server: dashboard
-    status/counters, a one-shot flash message, the CSRF token, and the
+    status/counters, a one-shot flash message and the CSRF token (both per
+    login session inside a web request), and the
     filesystem/database paths request handlers need. Replaces the old
     shareomat/ha/web_state.py.
 
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import Callable
 
 from shareomat.config import RuntimeConfig
+from shareomat.security.context import current_principal
 
 
 class WebState:
@@ -49,9 +51,16 @@ class WebState:
         self._flash_ok: bool = True
         self._run_active: bool = False
 
-        # One CSRF token per process lifetime; embedded as a hidden field in
-        # every admin form and checked on every POST in web/server.py.
-        self.csrf_token: str = secrets.token_urlsafe(32)
+        # Fallback token for code running outside a logged-in web request
+        # (unit tests calling page handlers directly). Inside a request the
+        # session's own token is used — see csrf_token below.
+        self._process_csrf_token: str = secrets.token_urlsafe(32)
+
+    @property
+    def csrf_token(self) -> str:
+        """The CSRF token of the current login session (each session has its own)."""
+        principal = current_principal()
+        return principal.csrf_token if principal is not None else self._process_csrf_token
 
     @property
     def db_path(self) -> Path | None:
@@ -124,13 +133,26 @@ class WebState:
         return True
 
     def set_flash(self, message: str, *, ok: bool = True) -> None:
-        """Store a one-shot flash message shown on the next page load (redirect-after-POST)."""
+        """Store a one-shot flash message shown on the next page load (redirect-after-POST).
+
+        Inside a logged-in request it belongs to that session only, so one
+        user never sees another user's message.
+        """
+        principal = current_principal()
+        if principal is not None and self.db_path is not None:
+            from shareomat.database.auth import set_session_flash
+            set_session_flash(self.db_path, principal.session_id, message, ok)
+            return
         with self._lock:
             self._flash_msg = message
             self._flash_ok = ok
 
     def pop_flash(self) -> tuple[str, bool]:
-        """Return and clear the pending flash message."""
+        """Return and clear the pending flash message (of the current session)."""
+        principal = current_principal()
+        if principal is not None and self.db_path is not None:
+            from shareomat.database.auth import pop_session_flash
+            return pop_session_flash(self.db_path, principal.session_id)
         with self._lock:
             msg, ok = self._flash_msg, self._flash_ok
             self._flash_msg = ""

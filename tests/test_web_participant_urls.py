@@ -17,6 +17,15 @@ from shareomat.web.server import _Handler
 from shareomat.web.state import get_state
 
 
+def _let_through_gate(handler):
+    """These tests check URL routing, not access control (that is tests/test_auth.py): the
+    simulated handler passes the login gate."""
+    handler._gate = lambda *args, **kwargs: True
+    handler._check_recent_auth = lambda *args, **kwargs: None
+    handler._do_get = lambda: _Handler._do_get(handler)
+    handler._do_post = lambda: _Handler._do_post(handler)
+
+
 @pytest.mark.parametrize("participant_id", ["Prüfperson_01", "Wohnung 2", "Haus/2?#", "Literal%2F"])
 @pytest.mark.parametrize("ingress_path", ["", "/api/hassio_ingress/test"])
 def test_participant_links_and_actions_round_trip(tmp_path, participant_id, ingress_path):
@@ -47,6 +56,7 @@ def test_participant_links_and_actions_round_trip(tmp_path, participant_id, ingr
             "active": "on",
         },
     )
+    _let_through_gate(handler)
     _Handler.do_GET(handler)
     assert "Teilnehmer bearbeiten" in rendered[0]
     assert f'{ingress_path}/participants/{encoded_id}/edit' in rendered[0]
@@ -104,6 +114,7 @@ def test_meter_links_and_actions_round_trip(tmp_path, meter_id, ingress_path):
             "active": "on",
         },
     )
+    _let_through_gate(handler)
     _Handler.do_GET(handler)
     assert "Messpunkt bearbeiten" in rendered[0]
     assert f'{ingress_path}/meters/{encoded_id}/edit' in rendered[0]

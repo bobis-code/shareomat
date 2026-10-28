@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 13
+_SCHEMA_VERSION = 14
 
 _SCHEMA_STATEMENTS = [
     """
@@ -436,6 +436,58 @@ _SCHEMA_STATEMENTS = [
         created_at TEXT NOT NULL
     )
     """,
+    # Login (shareomat.database.auth). One administrator for now; the role
+    # column and the users table are ready for more users/roles later.
+    # Sessions store only the SHA-256 of the random cookie token.
+    """
+    CREATE TABLE IF NOT EXISTS auth_users (
+        id INTEGER PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        display_name TEXT NOT NULL DEFAULT '',
+        role TEXT NOT NULL DEFAULT 'admin',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        password_hash TEXT NOT NULL,
+        password_changed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+        id INTEGER PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        user_id INTEGER NOT NULL REFERENCES auth_users(id),
+        csrf_token TEXT NOT NULL,
+        remember INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        auth_at TEXT NOT NULL,
+        revoked_at TEXT,
+        user_agent TEXT NOT NULL DEFAULT '',
+        flash_msg TEXT NOT NULL DEFAULT '',
+        flash_ok INTEGER NOT NULL DEFAULT 1
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_attempts (
+        id INTEGER PRIMARY KEY,
+        attempted_at TEXT NOT NULL,
+        username TEXT NOT NULL DEFAULT '',
+        client TEXT NOT NULL DEFAULT '',
+        kind TEXT NOT NULL DEFAULT 'login',
+        success INTEGER NOT NULL DEFAULT 0
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_auth_attempts_time ON auth_attempts(attempted_at)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS auth_state (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -534,6 +586,10 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "charge_chf": "TEXT NOT NULL DEFAULT '0'",
         "credit_chf": "TEXT NOT NULL DEFAULT '0'",
         "net_amount_chf": "TEXT NOT NULL DEFAULT '0'",
+    },
+    "audit_events": {
+        # Who did it: "user:<id>:<username>" from the logged-in session, "system" for machine runs.
+        "actor": "TEXT NOT NULL DEFAULT ''",
     },
     "billing_documents": {
         "recipient_address": "TEXT NOT NULL DEFAULT ''",

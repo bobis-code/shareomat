@@ -2,7 +2,9 @@ services:
   shareomat:
     build: .
     ports:
-      - "8099:8099"
+      # Only reachable from this computer. For access from other devices put an
+      # HTTPS reverse proxy (or Tailscale HTTPS) in front — never expose 8099 directly.
+      - "127.0.0.1:8099:8099"
     volumes:
       - ./data:/app/data:Z
       - ./config:/app/config:Z

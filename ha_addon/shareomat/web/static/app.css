@@ -324,3 +324,25 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
   .doc-view .doc-recipient { margin-top: .5rem; min-width: 0; }
   .doc-view .qr-bill { transform-origin: top left; }
 }
+
+/* ── Login pages and account block ───────────────────────────────────── */
+.auth-body { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center;
+             padding: 6vh 14px 24px; background: #f3f4f8; box-sizing: border-box; }
+.auth-card { width: 100%; max-width: 400px; background: #fff; border-radius: 14px; padding: 22px 20px;
+             box-shadow: 0 4px 18px rgba(15, 23, 42, .08); }
+.auth-card h1 { font-size: 1.3rem; margin: 10px 0 14px; }
+.auth-logo { max-height: 52px; display: block; }
+.auth-card label { display: block; font-size: .9rem; margin: 10px 0 4px; }
+.auth-card input[type=text], .auth-card input[type=password] { width: 100%; box-sizing: border-box;
+             font-size: 1.05rem; padding: 12px; border: 1px solid #cbd5e1; border-radius: 8px; }
+.auth-card .auth-check { display: flex; gap: 8px; align-items: center; margin: 12px 0 4px; }
+.auth-card .auth-check input { width: 20px; height: 20px; }
+.auth-submit { display: block; width: 100%; text-align: center; font-size: 1.05rem; padding: 13px; margin-top: 10px; }
+.auth-note { margin-top: 14px; }
+.auth-steps { padding-left: 18px; margin: 0 0 10px; font-size: .92rem; }
+.nav-account { padding: 4px 16px 10px; display: flex; flex-direction: column; gap: 6px; }
+.nav-account .ts { color: rgba(255,255,255,.7); }
+.nav-account .nav-link { padding-left: 0; }
+.nav-logout { background: transparent; border: 1px solid rgba(255,255,255,.3); color: #fff; padding: 6px 12px;
+              border-radius: 8px; cursor: pointer; width: fit-content; }
+.nav-logout:hover { background: rgba(255,255,255,.1); }

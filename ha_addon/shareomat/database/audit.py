@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 from shareomat.database.sqlite import connect, now_iso
+from shareomat.security.context import current_actor
 
 
 @dataclass
@@ -34,14 +35,15 @@ class AuditEvent:
     entity_id: str
     action: str
     detail: str
+    actor: str = ""
     id: int | None = None
 
 
 def record_event(conn: sqlite3.Connection, entity: str, entity_id, action: str, detail: str = "") -> None:
-    """Append one event inside the caller's transaction."""
+    """Append one event inside the caller's transaction, with the acting user (or "system")."""
     conn.execute(
-        "INSERT INTO audit_events (occurred_at, entity, entity_id, action, detail) VALUES (?, ?, ?, ?, ?)",
-        (now_iso(), entity, str(entity_id), action, detail),
+        "INSERT INTO audit_events (occurred_at, entity, entity_id, action, detail, actor) VALUES (?, ?, ?, ?, ?, ?)",
+        (now_iso(), entity, str(entity_id), action, detail, current_actor()),
     )
 
 
@@ -67,6 +69,7 @@ def list_events(db_path: Path, *, entity: str | None = None, entity_id=None, lim
     with connect(db_path) as conn:
         rows = conn.execute(query, params).fetchall()
     return [
-        AuditEvent(datetime.fromisoformat(r["occurred_at"]), r["entity"], r["entity_id"], r["action"], r["detail"], r["id"])
+        AuditEvent(occurred_at=datetime.fromisoformat(r["occurred_at"]), entity=r["entity"], entity_id=r["entity_id"],
+                   action=r["action"], detail=r["detail"], actor=r["actor"], id=r["id"])
         for r in rows
     ]
