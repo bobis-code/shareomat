@@ -64,8 +64,21 @@ kann nichts ändern.
   werden abgelehnt.
 - Sitzungen:
   - Das Cookie enthält einen zufälligen 256-Bit-Token; in der Datenbank steht nur dessen SHA-256.
-  - Das Cookie ist `HttpOnly`, `SameSite=Lax` und `Path=/`. Unter HTTPS ist es `Secure`; HTTPS gilt nur, wenn
-    `X-Forwarded-Proto` vom HA-Supervisor oder einem konfigurierten Proxy kommt.
+  - Das Cookie ist `HttpOnly` und `SameSite=Lax`. Sein `Path` ist `/`, hinter dem HA-Supervisor nur der
+    Ingress-Pfad des Add-ons. Unter HTTPS ist es `Secure`; HTTPS gilt nur, wenn `X-Forwarded-Proto` vom
+    HA-Supervisor oder einem konfigurierten Proxy kommt.
+- Begrenzung falscher Versuche gilt pro Gerät (Client-Adresse); das Konto selbst wird nie gesperrt, nur
+  verlangsamt.
+  - Client-Adresse: die TCP-Gegenstelle. Nur wenn diese der HA-Supervisor (`172.30.32.2`) oder ein Eintrag in
+    `web.trusted_proxies` ist, gilt der erste Eintrag aus `X-Forwarded-For`.
+  - Das ist nur sicher, wenn dieser Proxy ein vom Client mitgeschicktes `X-Forwarded-For` überschreibt.
+    Sonst kann ein Angreifer seine Adresse wechseln und die Begrenzung pro Gerät umgehen; die
+    Verlangsamung des Kontos bleibt dann der Schutz. Einen eigenen Proxy nur in `web.trusted_proxies`
+    eintragen, wenn er den Header so setzt.
+  - Needs verification: wie der HA-Supervisor `X-Forwarded-For` unter Ingress setzt, ist noch nicht am echten
+    System geprüft. Das ist Teil des ersten Praxistests.
+- Uploads überschreiben nie eine vorhandene Datei. Der freie Name (`name-2.csv`, …) wird beim Ablegen atomar
+  belegt (`os.link`), sodass auch gleichzeitige Uploads gleichen Namens beide erhalten bleiben.
   - Jede Anmeldung erzeugt einen neuen Token.
 - Zentrale Prüfung (`shareomat/web/login.py::gate`):
   - Jede Anfrage ausser statischen Dateien und Login-Seiten braucht eine gültige Sitzung und die Berechtigung
