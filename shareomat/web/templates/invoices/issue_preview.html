@@ -65,8 +65,11 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="run_id" value="{{ run_id }}">
   <input type="hidden" name="fingerprint" value="{{ fingerprint }}">
+  <div class="notice-warn"><strong>Bitte jeden Beleg selbst prüfen.</strong> Shareomat ist ein Hilfsmittel und
+    übernimmt keine Gewähr für Mengen, Preise, Beträge oder Empfänger. Massgebend sind die Messdaten des
+    Netzbetreibers und der LEG-Vertrag.</div>
   <label style="display:block"><input type="checkbox" name="confirm" required {{ 'disabled' if payment_blocked }}>
-    Ich habe Empfänger, Adressen, Beträge und Belege geprüft.</label>
+    Ich habe Empfänger, Adressen, Beträge und Belege geprüft und bin für ihre Richtigkeit verantwortlich.</label>
   <div class="actions-row">
     <button type="submit" {{ 'disabled' if payment_blocked }}>{{ planned|length }} Belege erstellen</button>
     <a class="btn btn-muted" href="{{ url_for('invoices') }}">Abbrechen</a>

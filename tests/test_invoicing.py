@@ -467,6 +467,7 @@ def test_invoices_page_workflow(db_path, runtime):
                                                       segments=["runs", str(run_id), "preview"]))
     assert "Bankdaten fehlen – nicht versandbereit" in preview and "disabled" in preview
     assert "<svg" not in preview                                   # no QR code at all without bank data
+    assert "keine Gewähr" in preview and "für ihre Richtigkeit verantwortlich" in preview   # user checks every document
 
     settings = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": "settings"}))
     assert "nicht eingerichtet" in settings and "Bankdaten fehlen" in settings and "<svg" not in settings
