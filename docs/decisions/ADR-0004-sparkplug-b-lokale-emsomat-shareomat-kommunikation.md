@@ -2,7 +2,8 @@
 
 ## Status
 
-Angenommen
+Angenommen. MQTT-Version ersetzt durch [ADR-0006](ADR-0006-mqtt-3-1-1-fuer-sparkplug.md):
+MQTT 3.1.1 statt 5.0. Alle anderen Punkte gelten unverändert.
 
 ## Kontext
 
@@ -30,7 +31,8 @@ gemeinsamen Broker kommunizieren.
 ## Entscheidung
 
 Die lokale Kommunikation zwischen Emsomat und Shareomat läuft ausschliesslich
-über **MQTT 5.0 + Eclipse Sparkplug Specification 3.0**. Shareomat nimmt
+über **MQTT 5.0 + Eclipse Sparkplug Specification 3.0** (MQTT-Version
+ersetzt durch ADR-0006: MQTT 3.1.1). Shareomat nimmt
 zwei getrennte Sparkplug-Rollen mit zwei getrennten MQTT-Sessions ein:
 
 * **Primary Host Application** (`shareomat/sparkplug/host.py::SparkplugHost`)

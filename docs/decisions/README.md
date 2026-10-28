@@ -73,8 +73,11 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
   guess" bei unverifizierten externen Datenformaten
 * [ADR-0004](ADR-0004-sparkplug-b-lokale-emsomat-shareomat-kommunikation.md)
   — MQTT 5.0 + Sparkplug B 3.0 für die lokale Emsomat↔Shareomat-Kommunikation
+  (MQTT-Version ersetzt durch ADR-0006)
 * [ADR-0005](ADR-0005-cross-house-sparkplug-b-zentraler-relay.md) —
   Cross-House-Kommunikation über zentralen Sparkplug-B-Relay
+* [ADR-0006](ADR-0006-mqtt-3-1-1-fuer-sparkplug.md) — MQTT 3.1.1 statt 5.0
+  für die Sparkplug-B-Kommunikation
 
 ## Verbindlichkeit
 

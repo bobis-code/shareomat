@@ -2049,7 +2049,7 @@ Folgende Punkte sind **noch nicht entschieden** und dürfen nicht als bereits fe
 
 ## Kommunikation
 
-- MQTT 3.1.1 oder MQTT 5
+- MQTT 3.1.1 oder MQTT 5 (inzwischen entschieden: MQTT 3.1.1, ADR-0006)
 - exakte Topic-Struktur
 - Payload-Format
 - JSON, MessagePack oder anderes Format
@@ -2122,7 +2122,8 @@ der Geräte-Ebene, nicht auf der LEG-Ebene.
 
 **Update 2026-08-22 — lokale Ebene (Emsomat ↔ Shareomat, ein Haus) entschieden:**
 Für die lokale Strecke (nicht die LEG-/WAN-Ebene oben) gilt jetzt MQTT 5.0 + Eclipse
-Sparkplug 3.0 als verbindliche Entscheidung, siehe
+Sparkplug 3.0 als verbindliche Entscheidung (MQTT-Version später durch ADR-0006 auf
+3.1.1 geändert), siehe
 `docs/Architektur/Emsomat_Shareomat_MQTT_Vertrag.md`. Der frühere eigene
 JSON-über-MQTT-Entwurf für diese lokale Strecke ist damit obsolet.
 
