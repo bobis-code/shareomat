@@ -4,7 +4,7 @@
 
 Hallo
 
-Dieses Repository ist mein Versuch, ein einfaches und möglichst offenes Abrechnungssystem für Schweizer LEG- und ZEV-Gemeinschaften zu entwickeln.
+Dieses Repository ist mein Versuch, ein einfaches und nachvollziehbares Abrechnungssystem für Schweizer LEG- und ZEV-Gemeinschaften zu entwickeln.
 
 Die Idee entstand, weil ich bisher keine wirklich schlanke Lösung gefunden habe, die sich auf das Wesentliche konzentriert: Messdaten des Netzbetreibers möglichst automatisch zu importieren, den Verbrauch der LEG-Gemeinschaft korrekt zwischen lokal erzeugter Energie und Netzbezug aufzuteilen und daraus nachvollziehbare Abrechnungen zu erstellen.
 
@@ -42,6 +42,37 @@ Ausführliche Beschreibung: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 4. Set up the login (see **Erstes Login** below).
 5. Open it from the sidebar (Ingress panel) and complete the setup wizard
    (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag).
+
+Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, and automation settings are
+managed entirely through this web interface — not through `leg_config.yaml`
+— and are stored in a SQLite database. Add-on options cover only technical
+runtime settings (MQTT, e-mail import).
+
+Prices are set on the **Vertrag** page, not the Tarife page: publishing a
+contract version there creates the tariff that governs billing for its
+validity period, with the notice periods from the LEG-Mustervertrag enforced
+before publishing. The Tarife page still exists, but only as a manual
+fallback for first-time setup or emergencies — see its own warning banner.
+
+Once set up, drop CSV or S-DAT files into the inbox (or upload them through
+the "Messdaten" page) and trigger a run from the web interface. Reports are
+written to the reports folder; processed files move to the archive.
+
+The canonical Python source lives in `shareomat/` and `main.py`. The
+`ha_addon/` directory contains a synced build copy so Home Assistant can
+build the add-on from `ha_addon/` as its Docker context — it is not a
+separate codebase, just a mirror. There is no automatic hook: after changing
+application code, refresh the add-on copy before committing:
+
+```bash
+./prepare_addon.sh
+```
+
+To verify that the add-on copy is current:
+
+```bash
+python tools/prepare_addon.py --check
+```
 
 ### Erstes Login (ab Version 0.6.0)
 
@@ -93,49 +124,18 @@ weit Zahlungen eingegangen sind). Rechnungen enthalten einen Schweizer
 QR-Zahlteil. Mahnungen werden ab 5 Tagen nach Fälligkeit vorgeschlagen.
 E-Mail-Versand (SMTP) und Bankdatei-Import folgen später.
 
-Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, and automation settings are
-managed entirely through this web interface — not through `leg_config.yaml`
-— and are stored in a SQLite database. Add-on options cover only technical
-runtime settings (MQTT, e-mail import).
-
-Prices are set on the **Vertrag** page, not the Tarife page: publishing a
-contract version there creates the tariff that governs billing for its
-validity period, with the notice periods from the LEG-Mustervertrag enforced
-before publishing. The Tarife page still exists, but only as a manual
-fallback for first-time setup or emergencies — see its own warning banner.
-
-Once set up, drop CSV or S-DAT files into the inbox (or upload them through
-the "Messdaten" page) and trigger a run from the web interface. Reports are
-written to the reports folder; processed files move to the archive.
-
-The canonical Python source lives in `shareomat/` and `main.py`. The
-`ha_addon/` directory contains a synced build copy so Home Assistant can
-build the add-on from `ha_addon/` as its Docker context — it is not a
-separate codebase, just a mirror kept in sync by a git pre-commit hook.
-
-After changing application code, refresh the add-on copy manually if needed:
-
-```bash
-./prepare_addon.sh
-```
-
-To verify that the add-on copy is current:
-
-```bash
-python tools/prepare_addon.py --check
-```
-
 ## Input formats
 
 ### CSV
 
 ```
-timestamp,mpid,value_kwh,direction[,quality]
+timestamp,meter_id,value_kwh,direction[,quality]
 2024-06-01T12:00:00+00:00,CH001...,0.125,export
 2024-06-01T12:00:00+00:00,CH002...,0.080,import
 ```
 
-`quality` defaults to `valid`. Use `invalid` to exclude a reading.
+`quality` defaults to `valid`. Use `invalid` to exclude a reading. Older files
+with the column name `mpid` instead of `meter_id` are still accepted.
 
 ### S-DAT XML
 
@@ -288,15 +288,18 @@ Docker, sample test data, and troubleshooting), see
 
 ## Related: Emsomat (optional)
 
-Shareomat can optionally publish LEG reference prices, recent local/grid
-history, and a short-term consumption forecast over MQTT (see
-[`docs/emsomat-integration.md`](docs/emsomat-integration.md)). One consumer
-of this is [Emsomat](https://github.com/bobis-code/Emsomat), a separate
-Home Assistant integration for local battery/heat-pump/EV optimization —
-it uses the feed as extra context, but works fully on its own without
-Shareomat too. Neither project requires the other. Note: unlike Shareomat,
-Emsomat is a Home Assistant *integration* and is installed via HACS, not
-the Add-on Store — see its own README.
+Shareomat can optionally exchange data with
+[Emsomat](https://github.com/bobis-code/Emsomat), a separate Home Assistant
+integration for local battery/heat-pump/EV optimization, over the local MQTT
+broker using **Eclipse Sparkplug B** (ADR-0004, ADR-0006). Shareomat sends
+LEG prices and a demand forecast (`LEG/ExportPrice`, `LEG/FeedInPrice`,
+`LEG/DemandForecast`); Emsomat confirms what it took over. This is live
+information only — billing never uses it. Contract:
+[`docs/Architektur/Emsomat_Shareomat_MQTT_Vertrag.md`](docs/Architektur/Emsomat_Shareomat_MQTT_Vertrag.md).
+
+Neither project requires the other. Note: unlike Shareomat, Emsomat is a
+Home Assistant *integration* and is installed via HACS, not the Add-on
+Store — see its own README.
 
 ## Project layout
 
@@ -311,6 +314,7 @@ shareomat/                    Python package
     leg_runner.py            Pipeline orchestration — run(config: LegConfig)
     collector/                Data intake
       leg_import.py            Inbox scan & archive
+      leg_email_importer.py    IMAP mailbox → inbox importer
       leg_scheduler.py         Cron-based run scheduler
       leg_watcher.py           Inbox file watcher
       leg_share_importer.py    Share folder → inbox importer
@@ -322,6 +326,7 @@ shareomat/                    Python package
       leg_billing.py           Period aggregation & cost calculation
       raw/
         ebl_xlsx.py            EBL Excel format parser
+        sdat_ch.py             SDAT-CH (E31/E66) parser — raises until the real structure is verified
     report/
       leg_report.py            CSV + JSON report writers
     payments/
@@ -344,6 +349,7 @@ shareomat/                    Python package
     contract.py                  ContractVersion / ContractSettings
     meter_data.py               IntervalReading / EnergySlot / ImportFile
     billing.py                  MatchResult / BillingRecord
+    invoicing.py                Invoices, payments, payouts, payment profile
   web/                        Admin web interface (standalone or behind HA Ingress)
     server.py                  HTTP server, routing, upload/download, CSRF
     login.py                   Central login gate, cookies, client address
@@ -353,10 +359,12 @@ shareomat/                    Python package
     pages/                      One module per page (dashboard, participants, meters, ...)
     templates/                  Jinja2 templates
     static/                     app.css, banner.png
+  external_data/              ElCom, BFE, EBL, market forecast (ENTSO-E/SNB) fetchers
   ha/
     mqtt_runtime.py          MQTT client lifecycle
     mqtt_discovery.py        Home Assistant MQTT Discovery
-    mqtt_entities.py         HA entity definitions
+    entities/                HA entity definitions (sensors, buttons, numbers, switches)
+  sparkplug/                  Sparkplug B: host, participant relay, WAN up/downlink (Emsomat, Cross-House)
 ha_addon/                    Home Assistant Add-on
   config.yaml                 Add-on manifest (technical options only)
   Dockerfile                  Multi-arch container image
@@ -369,3 +377,12 @@ data/reports/                billing_*.csv/json, match_detail_*.csv
 data/state/                  processed_files.json
 data/shareomat.db            Admin database (Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife)
 ```
+
+## Lizenz
+
+Shareomat steht derzeit unter einer **Closed-Beta-Lizenz**: Nutzung für eine
+eigene Installation zu Test- und Evaluationszwecken, keine Weitergabe und
+keine kommerzielle Nutzung ohne schriftliche Erlaubnis. Details:
+[`LICENSE`](LICENSE). Versionen bis einschliesslich Commit `8fe12cb`
+(06.09.2026) bleiben unter der MIT-Lizenz, siehe
+[`LICENSE-MIT-HISTORICAL.md`](LICENSE-MIT-HISTORICAL.md).
