@@ -76,6 +76,8 @@ _MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 _SOCKET_TIMEOUT_SECONDS = 30
 _UPLOAD_CHUNK_SIZE = 64 * 1024  # 64 KB chunks for binary streaming
 _MAX_UPLOAD_SECONDS = 120  # Total time budget per upload
+_MAX_FORM_BYTES = 2 * 1024 * 1024        # normal admin forms (logged in)
+_MAX_PUBLIC_FORM_BYTES = 16 * 1024       # login / first-login / logout (reachable without a session)
 
 _PAGE_MODULES = {
     "": dashboard,
@@ -95,6 +97,20 @@ _PAGE_MODULES = {
     "settings": settings_page,
     "external_data": external_data,
 }
+
+
+class _CsrfRejected(Exception):
+    """Multipart upload with a wrong/missing CSRF token — refused before anything is stored."""
+
+
+def _free_name(directory: Path, filename: str) -> Path:
+    """`filename` in `directory`, or `name-2.ext`, `name-3.ext`, ... if taken (uploads never overwrite)."""
+    target = directory / filename
+    stem, suffix, n = target.stem, target.suffix, 2
+    while target.exists():
+        target = directory / f"{stem}-{n}{suffix}"
+        n += 1
+    return target
 
 
 def _flatten_qs(query: str) -> dict[str, str]:
@@ -273,9 +289,19 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── POST ─────────────────────────────────────────────────────────────
 
-    def _parse_urlencoded_form(self) -> dict[str, str]:
-        length = int(self.headers.get("Content-Length", 0))
-        if length <= 0:
+    def _parse_urlencoded_form(self, max_bytes: int = _MAX_FORM_BYTES) -> dict[str, str] | None:
+        """The form fields, or None (after a 413 response) when the body is larger than max_bytes."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            length = -1
+        if length > max_bytes or length < 0:
+            self.send_response(413)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            self.close_connection = True
+            return None
+        if length == 0:
             return {}
         body = self.rfile.read(length).decode("utf-8", errors="replace")
         return _flatten_qs(body)
@@ -297,10 +323,14 @@ class _Handler(BaseHTTPRequestHandler):
         content_type = self.headers.get("Content-Type", "")
 
         if path in login.PUBLIC_PATHS:
-            login.handle_public(self, "POST", path, ingress_path, self._parse_urlencoded_form(), {})
+            form = self._parse_urlencoded_form(_MAX_PUBLIC_FORM_BYTES)
+            if form is not None:
+                login.handle_public(self, "POST", path, ingress_path, form, {})
             return
         if path == "/logout":
-            login.handle_logout(self, ingress_path, self._parse_urlencoded_form())
+            form = self._parse_urlencoded_form(_MAX_PUBLIC_FORM_BYTES)
+            if form is not None:
+                login.handle_logout(self, ingress_path, form)
             return
 
         gate_segments = [unquote(s) for s in path.split("/") if s]
@@ -310,6 +340,8 @@ class _Handler(BaseHTTPRequestHandler):
 
         if path == "/actions/run":
             form = self._parse_urlencoded_form()
+            if form is None:
+                return
             ctx = RequestContext(method="POST", ingress_path=ingress_path, form=form)
             try:
                 check_csrf(ctx)
@@ -346,6 +378,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return
         else:
             form = self._parse_urlencoded_form()
+            if form is None:
+                return
         ctx = RequestContext(method="POST", ingress_path=ingress_path, segments=segments[1:], form=form)
 
         try:
@@ -446,6 +480,12 @@ class _Handler(BaseHTTPRequestHandler):
             fields, saved = self._read_multipart(
                 target, content_type, allowed_ext=_ALLOWED_DOCUMENT_EXT, max_bytes=_MAX_DOCUMENT_BYTES,
             )
+        except _CsrfRejected:
+            self.close_connection = True      # the rest of the body was not read
+            get_state().set_flash(
+                "Ungültige Anfrage (Sicherheits-Token fehlt oder ist abgelaufen). Bitte die Seite neu laden.", ok=False,
+            )
+            return None
         except Exception as exc:
             logger.error("Signed document upload failed: %s", exc)
             get_state().set_flash(f"Upload fehlgeschlagen: {_html_escape(str(exc))}", ok=False)
@@ -487,7 +527,11 @@ class _Handler(BaseHTTPRequestHandler):
         inbox = runtime.paths.inbox
         try:
             inbox.mkdir(parents=True, exist_ok=True)
-            result = self._save_file_upload(inbox, content_type)
+            try:
+                result = self._save_file_upload(inbox, content_type)
+            except _CsrfRejected:
+                self.close_connection = True  # the rest of the body was not read
+                result = ("", "", 0)          # handled right below as a token mismatch, nothing was stored
 
             if result is None:
                 get_state().set_flash("Upload fehlgeschlagen: keine gültige Datei erhalten.", ok=False)
@@ -495,7 +539,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return
 
             csrf_token_received, filename, size = result
-            if csrf_token_received != get_state().csrf_token:
+            if not csrf_token_received or csrf_token_received != get_state().csrf_token:
                 get_state().set_flash(
                     "Ungültige Anfrage (Sicherheits-Token fehlt oder ist abgelaufen). "
                     "Bitte die Seite neu laden und erneut versuchen.", ok=False,
@@ -622,6 +666,10 @@ class _Handler(BaseHTTPRequestHandler):
 
             if part_filename:
                 filename = part_filename
+                # The CSRF token comes before the file part (forms put the file input last). Check it NOW,
+                # before a single byte is written: a refused upload must never touch the inbox.
+                if fields.get("csrf_token") != get_state().csrf_token:
+                    raise _CsrfRejected()
                 break
 
             # Plain field (or an empty file input): read its value, then go on with the next part.
@@ -648,7 +696,7 @@ class _Handler(BaseHTTPRequestHandler):
             logger.warning("Upload: rejected file type '%s'", ext)
             raise ValueError(f"Dateityp '{ext}' nicht erlaubt ({', '.join(sorted(allowed_ext))}).")
 
-        dest = dest_dir / filename if keep_name else dest_dir / f".upload-{uuid.uuid4().hex}{ext}"
+        dest = _free_name(dest_dir, filename) if keep_name else dest_dir / f".upload-{uuid.uuid4().hex}{ext}"
         temp_dest = dest_dir / f".{filename}.upload-{uuid.uuid4().hex}.tmp"
         total = 0
         overlap = len(body_boundary)

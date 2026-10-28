@@ -164,6 +164,7 @@ def test_dashboard_shows_the_monthly_closing(db_path, runtime):
 def test_bulk_dispatch_prints_and_records_without_opening_each_document(db_path, runtime, issued):
     page = _get(invoices_page, ["dispatch"], {"period": str(issued)})
     assert page.count('name="pick_') == 3 and "Ohne E-Mail-Adresse" in page and "Consumer B" in page
+    assert " checked" not in page.split("<tbody>")[1].split("</tbody>")[0]      # round 6 P1-04: nothing pre-ticked
     printed = _get(invoices_page, ["runs", str(issued), "print-all"])
     assert printed.count('class="page') == 3 and printed.count("Empfangsschein") == 2     # 2 invoices, 1 credit
     docs = _by_participant(db_path)

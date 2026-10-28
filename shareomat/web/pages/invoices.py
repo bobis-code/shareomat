@@ -386,7 +386,8 @@ def _handle_post(ctx: RequestContext) -> str | None:
             record_delivery(ctx.db_path, row["doc"].id, ctx.form.get(f"method_{key}", "paper"),
                             detail="Sammelversand", item=row["item"])
             done += 1
-        get_state().set_flash(f"Versand von {done} Beleg(en) erfasst.", ok=True)
+        names = ", ".join(rows[k]["title"] for k in sorted(picks) if k in rows)
+        get_state().set_flash(f"Zustellung von {done} Beleg(en) erfasst: {names}.", ok=True)
         raise Redirect(url_for(ctx.ingress_path, "invoices", suffix="/dispatch") + f"?period={run_id}")
 
     if len(ctx.segments) == 3 and ctx.segments[0] == "reminders" and ctx.segments[2] == "discard":

@@ -25,11 +25,12 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="run_id" value="{{ run_id }}">
   <div class="table-wrap"><table class="cards">
-    <thead><tr><th>Versendet</th><th>Beleg</th><th>Empfänger</th><th>Betrag CHF</th><th>Zustellweg</th><th></th></tr></thead>
+    <thead><tr><th>Verschickt?</th><th>Beleg</th><th>Empfänger</th><th>Betrag CHF</th><th>Zustellweg</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}
     <tr>
-      <td data-label="Versendet"><input type="checkbox" name="pick_{{ r.key }}" checked aria-label="{{ r.title }} versendet"></td>
+      <td data-label="Verschickt?"><label style="margin:0;display:flex;gap:6px;align-items:center">
+        <input type="checkbox" name="pick_{{ r.key }}" aria-label="{{ r.title }} habe ich verschickt"> habe ich verschickt</label></td>
       <td data-label="Beleg"><strong>{{ r.title }}</strong></td>
       <td data-label="Empfänger">{{ r.doc.recipient_label }}</td>
       <td data-label="Betrag CHF">{{ '%.2f'|format(r.doc.amount_chf) if r.item == 'document' else '–' }}</td>
@@ -43,8 +44,10 @@
     {% endfor %}
     </tbody>
   </table></div>
-  <label style="display:block;margin-top:10px"><input type="checkbox" name="confirm" required> Ich habe die
-    angekreuzten Belege tatsächlich übergeben bzw. gesendet.</label>
+  <p class="ts" style="margin-top:10px">Nur ankreuzen, was wirklich schon übergeben oder gesendet ist — Drucken allein
+    ist noch kein Versand. Den Rest später erfassen.</p>
+  <label style="display:block"><input type="checkbox" name="confirm" required> Ich habe die angekreuzten Belege
+    tatsächlich übergeben bzw. gesendet.</label>
   <div class="actions-row"><button type="submit">Versand bestätigen</button>
     <a class="btn btn-muted" href="{{ url_for('invoices') }}?period={{ run_id }}">Später</a></div>
 </form>
