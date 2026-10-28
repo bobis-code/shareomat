@@ -508,6 +508,49 @@ def test_publish_upload_fallback_leaves_no_empty_file_if_replace_fails(tmp_path,
     assert not (tmp_path / "readings.csv").exists()
 
 
+# ── live HA test 0.6.0: "Die Seite war zu lange offen" ──────────────────────
+
+
+def test_a_malformed_foreign_cookie_does_not_hide_the_login_cookie(server):
+    """Another service on the HA host may set odd cookies; SimpleCookie used to drop all cookies then."""
+    b = Browser(server["port"])
+    token = b.login_csrf("/first-login")
+    login_cookie = "; ".join(f"{k}={v}" for k, v in b.cookies.items())
+    raw = f'weird cookie=x; lonelyflag; other={{"a":1}}; {login_cookie}'
+    b.cookies = {}
+    code = issue_setup_code(server["db"])
+    status, headers, _ = b.post("/first-login", {"login_csrf": token, "code": code, "username": "admin",
+                                                 "password": PASSWORD, "password_repeat": PASSWORD},
+                                headers={"Cookie": raw})
+    assert status == 303 and headers["Location"] == "/"
+
+
+def test_login_answers_with_exactly_one_set_cookie(server):
+    """HA Ingress keeps only one Set-Cookie per response; it must be the session cookie."""
+    _setup_admin(server)
+    b = Browser(server["port"])
+    status, _, _ = b.login()
+    assert status == 303
+    assert len(b.last_set_cookie) == 1 and b.last_set_cookie[0].startswith("shareomat_session=")
+    assert b.get("/account")[0] == 200
+
+
+def test_origin_differing_from_forwarded_host_behind_ha_is_accepted(server, monkeypatch):
+    """Own reverse proxy / external URL in front of HA: the token protects, the host may differ."""
+    monkeypatch.setattr(login, "HA_SUPERVISOR_IP", "127.0.0.1")
+    b = Browser(server["port"])
+    token = b.login_csrf("/first-login")
+    code = issue_setup_code(server["db"])
+    status, _, _ = b.post("/first-login", {"login_csrf": token, "code": code, "username": "admin",
+                                           "password": PASSWORD, "password_repeat": PASSWORD},
+                          headers={"Origin": "https://ha.example.ch", "X-Forwarded-Host": "192.168.1.5:8123"})
+    assert status == 303
+    b2 = Browser(server["port"])
+    status, _, html = b2.post("/login", {"login_csrf": "forged", "username": "admin", "password": PASSWORD},
+                              headers={"Origin": "https://evil.example"})
+    assert status == 400 and "zu lange offen" in html                 # the token is still required
+
+
 def test_cookie_path_is_the_ingress_path_only_behind_the_supervisor(server):
     """Round 6 P1-03: behind HA Ingress the session cookie must not reach other add-ons' paths."""
     _setup_admin(server)
