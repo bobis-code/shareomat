@@ -40,6 +40,7 @@ def server(tmp_path, monkeypatch):
     runs = []
     state.register_on_run(lambda: runs.append(1))
     monkeypatch.setattr(login, "FAILED_LOGIN_DELAY_SECONDS", 0)
+    monkeypatch.setattr(login, "ACCOUNT_DELAY_FACTOR", 0)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -189,13 +190,53 @@ def test_secure_cookie_behind_a_trusted_https_proxy(server):
     server["runtime"].web.trusted_proxies.clear()
 
 
-def test_too_many_failures_throttle_even_the_right_password(server):
+def test_failures_slow_the_account_down_but_never_lock_the_owner_out(server):
+    """Round 6 P1-02: 5+ wrong passwords must not let anybody lock the only account."""
     _setup_admin(server)
     b = Browser(server["port"])
-    for _ in range(5):
+    for _ in range(6):
         assert b.login(password="falsches Passwort 123")[0] == 401
-    status, _, html = b.login()
-    assert status == 429 and "Zu viele Fehlversuche" in html
+    from shareomat.database.auth import account_delay_seconds
+    assert account_delay_seconds(server["db"], "admin") > 0                   # slowed down ...
+    assert Browser(server["port"]).login()[0] == 303                        # ... but the owner still gets in
+
+
+def test_a_client_that_keeps_guessing_is_refused_but_others_are_not(server):
+    _setup_admin(server)
+    server["runtime"].web.trusted_proxies.append("127.0.0.1")              # like the HA supervisor
+    try:
+        attacker, owner = {"X-Forwarded-For": "10.0.0.66"}, {"X-Forwarded-For": "10.0.0.5"}
+        b = Browser(server["port"])
+        for _ in range(20):
+            b.post("/login", {"login_csrf": b.login_csrf(), "username": "admin", "password": "falsch falsch 123"},
+                   headers=attacker)
+        status, _, html = b.post("/login", {"login_csrf": b.login_csrf(), "username": "admin", "password": PASSWORD},
+                                 headers=attacker)
+        assert status == 429 and "von diesem Gerät" in html
+        o = Browser(server["port"])
+        assert o.post("/login", {"login_csrf": o.login_csrf(), "username": "admin", "password": PASSWORD},
+                      headers=owner)[0] == 303
+    finally:
+        server["runtime"].web.trusted_proxies.clear()
+
+
+def test_wrong_setup_codes_from_one_client_dont_block_the_owner(server):
+    """Round 6 P1-02 reproduced: wrong one-time codes used to block the setup globally for 15 minutes."""
+    server["runtime"].web.trusted_proxies.append("127.0.0.1")
+    try:
+        code = issue_setup_code(server["db"])
+        evil = Browser(server["port"])
+        for _ in range(12):
+            evil.post("/first-login", {"login_csrf": evil.login_csrf("/first-login"), "code": "AAAA-BBBB-CCCC",
+                                       "username": "x", "password": PASSWORD, "password_repeat": PASSWORD},
+                      headers={"X-Forwarded-For": "10.0.0.66"})
+        owner = Browser(server["port"])
+        status, _, _ = owner.post("/first-login", {"login_csrf": owner.login_csrf("/first-login"), "code": code,
+                                                   "username": "admin", "password": PASSWORD,
+                                                   "password_repeat": PASSWORD}, headers={"X-Forwarded-For": "10.0.0.5"})
+        assert status == 303
+    finally:
+        server["runtime"].web.trusted_proxies.clear()
 
 
 # ── every route needs a session ─────────────────────────────────────────────
@@ -369,3 +410,63 @@ def test_unknown_post_routes_and_downloads_stay_closed_after_login_check(server)
     b = Browser(server["port"])
     form = {"login_csrf": b.login_csrf(), "username": "admin", "password": PASSWORD, "next": "//evil.example/x"}
     assert b.post("/login", form)[1]["Location"] == "/"
+
+
+# ── round 6 ─────────────────────────────────────────────────────────────────
+
+
+def _multipart(fields: dict, filename: str, content: bytes, boundary: str = "B0undary") -> tuple[bytes, dict]:
+    crlf = chr(13) + chr(10)
+    parts = b"".join((f"--{boundary}{crlf}Content-Disposition: form-data; name=\"{k}\"{crlf}{crlf}{v}{crlf}").encode()
+                     for k, v in fields.items())
+    parts += (f"--{boundary}{crlf}Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"{crlf}"
+              f"Content-Type: text/csv{crlf}{crlf}").encode() + content + f"{crlf}--{boundary}--{crlf}".encode()
+    return parts, {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+
+
+def test_upload_with_a_wrong_csrf_token_never_touches_the_inbox(server):
+    """Round 6 P1-01 reproduced: a refused upload used to overwrite an existing inbox file."""
+    a = _setup_admin(server)
+    inbox = server["runtime"].paths.inbox
+    (inbox / "readings.csv").write_text("ORIGINAL_VALID_CONTENT", encoding="utf-8")
+    body, headers = _multipart({"csrf_token": "wrong"}, "readings.csv", b"ATTACKER_REPLACEMENT")
+    status, _, _ = a.request("POST", "/meter-data/upload", body=body, headers=headers)
+    assert status == 303
+    assert sorted(p.name for p in inbox.iterdir()) == ["readings.csv"]
+    assert (inbox / "readings.csv").read_text(encoding="utf-8") == "ORIGINAL_VALID_CONTENT"
+    assert "Sicherheits-Token" in a.get("/meter-data")[2]
+    body, headers = _multipart({"csrf_token": a.page_csrf()}, "readings.csv", b"SECOND_FILE")
+    a.request("POST", "/meter-data/upload", body=body, headers=headers)
+    assert (inbox / "readings.csv").read_text(encoding="utf-8") == "ORIGINAL_VALID_CONTENT"   # never overwritten
+    assert (inbox / "readings-2.csv").read_text(encoding="utf-8") == "SECOND_FILE"
+
+
+def test_cookie_path_is_the_ingress_path_only_behind_the_supervisor(server):
+    """Round 6 P1-03: behind HA Ingress the session cookie must not reach other add-ons' paths."""
+    _setup_admin(server)
+    ingress = {"X-Ingress-Path": "/api/hassio_ingress/shareomat-secret"}
+    b = Browser(server["port"])
+    b.get("/login", headers=ingress)                                  # untrusted peer: header ignored
+    assert all("Path=/;" in c for c in b.last_set_cookie)
+    server["runtime"].web.trusted_proxies.append("127.0.0.1")
+    try:
+        b = Browser(server["port"])
+        csrf = re.search(r'name="login_csrf" value="([^"]+)"', b.get("/login", headers=ingress)[2]).group(1)
+        assert all("Path=/api/hassio_ingress/shareomat-secret/;" in c for c in b.last_set_cookie)
+        b.post("/login", {"login_csrf": csrf, "username": "admin", "password": PASSWORD}, headers=ingress)
+        session = next(c for c in b.last_set_cookie if c.startswith(login.SESSION_COOKIE))
+        assert "Path=/api/hassio_ingress/shareomat-secret/;" in session
+        token = re.search(r'name="csrf_token" value="([^"]+)"', b.get("/account", headers=ingress)[2]).group(1)
+        b.post("/logout", {"csrf_token": token}, headers=ingress)
+        cleared = next(c for c in b.last_set_cookie if c.startswith(login.SESSION_COOKIE))
+        assert "Max-Age=0" in cleared and "Path=/api/hassio_ingress/shareomat-secret/;" in cleared
+    finally:
+        server["runtime"].web.trusted_proxies.clear()
+
+
+def test_public_forms_are_size_limited(server):
+    """Round 6 P2-04: /login and /first-login refuse oversized bodies with 413 before reading them."""
+    b = Browser(server["port"])
+    status, _, _ = b.request("POST", "/login", body=b"x" * 20000,
+                             headers={"Content-Type": "application/x-www-form-urlencoded"})
+    assert status == 413

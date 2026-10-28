@@ -36,6 +36,7 @@ from urllib.parse import quote, urlparse
 
 from shareomat.database.auth import (
     RECENT_AUTH_MINUTES,
+    account_delay_seconds,
     REMEMBER_DAYS,
     AuthError,
     authenticate_password,
@@ -63,6 +64,7 @@ SESSION_COOKIE = "shareomat_session"
 LOGIN_CSRF_COOKIE = "shareomat_login_csrf"
 HA_SUPERVISOR_IP = "172.30.32.2"
 FAILED_LOGIN_DELAY_SECONDS = 0.5     # slows guessing down; tests set it to 0
+ACCOUNT_DELAY_FACTOR = 1.0           # tests set it to 0 (the growing per-account delay)
 
 PUBLIC_PATHS = {"/login", "/first-login"}
 
@@ -71,14 +73,27 @@ PUBLIC_PATHS = {"/login", "/first-login"}
 
 
 def client_ip(handler) -> str:
+    """The real client: the socket peer, or — only behind the HA supervisor or a configured trusted
+    proxy — the first X-Forwarded-For entry (so all phones behind Ingress don't count as one client)."""
+    peer = str(handler.client_address[0]) if getattr(handler, "client_address", None) else ""
+    if peer and _peer_trusted(peer):
+        forwarded = handler.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+    return peer
+
+
+def _peer_trusted(peer: str) -> bool:
+    runtime = get_state().runtime
+    return peer in {HA_SUPERVISOR_IP, *(runtime.web.trusted_proxies if runtime else [])}
+
+
+def _peer(handler) -> str:
     return str(handler.client_address[0]) if getattr(handler, "client_address", None) else ""
 
 
 def _trusted_proxy(handler) -> bool:
-    ip = client_ip(handler)
-    runtime = get_state().runtime
-    trusted = {HA_SUPERVISOR_IP, *(runtime.web.trusted_proxies if runtime else [])}
-    return ip in trusted
+    return _peer_trusted(_peer(handler))
 
 
 def is_https(handler) -> bool:
@@ -101,8 +116,19 @@ def cookie_value(handler, name: str) -> str:
     return morsel.value if morsel else ""
 
 
+def cookie_path(handler) -> str:
+    """Behind Home Assistant Ingress the cookie is limited to Shareomat's own ingress path, so the
+    browser never sends it to other add-ons on the same HA site. X-Ingress-Path only counts when the
+    request really came from the supervisor/trusted proxy; standalone it is "/"."""
+    ingress = handler.headers.get("X-Ingress-Path", "").rstrip("/")
+    if ingress and _trusted_proxy(handler) and ingress.startswith("/") and ";" not in ingress \
+            and all(c.isprintable() and not c.isspace() for c in ingress):
+        return ingress + "/"
+    return "/"
+
+
 def set_cookie(handler, name: str, value: str, *, max_age: int | None = None, same_site: str = "Lax") -> None:
-    parts = [f"{name}={value}", "Path=/", "HttpOnly", f"SameSite={same_site}"]
+    parts = [f"{name}={value}", f"Path={cookie_path(handler)}", "HttpOnly", f"SameSite={same_site}"]
     if max_age is not None:
         parts.append(f"Max-Age={max_age}")
     if is_https(handler):
@@ -123,7 +149,7 @@ def same_origin(handler) -> bool:
     expected = {handler.headers.get("Host", "").lower()}
     if _trusted_proxy(handler):
         forwarded = handler.headers.get("X-Forwarded-Host", "").split(",")[0].strip().lower()
-        if not forwarded and client_ip(handler) == HA_SUPERVISOR_IP:
+        if not forwarded and _peer(handler) == HA_SUPERVISOR_IP:
             return True          # HA rewrites Host; the per-session CSRF token is the protection there
         expected.add(forwarded)
     return origin_host in expected
@@ -230,10 +256,11 @@ def handle_public(handler, method: str, path: str, ingress_path: str, form: dict
         _login_form(handler, ingress_path, error="Die Anmeldeseite war zu lange offen. Bitte erneut anmelden.",
                     username=username, next_path=next_path, status=400)
         return
-    if throttled(db_path, username, client_ip(handler)):
-        _login_form(handler, ingress_path, error="Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.",
-                    username=username, next_path=next_path, status=429)
+    if throttled(db_path, client_ip(handler)):
+        _login_form(handler, ingress_path, error="Zu viele Fehlversuche von diesem Gerät. Bitte in 15 Minuten "
+                    "erneut versuchen.", username=username, next_path=next_path, status=429)
         return
+    time.sleep(account_delay_seconds(db_path, username) * ACCOUNT_DELAY_FACTOR)
     user = authenticate_password(db_path, username, form.get("password", ""), client_ip(handler))
     if user is None:
         time.sleep(FAILED_LOGIN_DELAY_SECONDS)

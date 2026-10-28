@@ -15,8 +15,11 @@ Notes:
       inactivity (unless "angemeldet bleiben"), on logout, or when revoked
       (password change, "andere Geräte abmelden", account disabled).
     - Each session has its own CSRF token and its own flash message.
-    - Throttling: per username and per client within a sliding window; no
-      permanent lockout (that would let anyone lock the owner out).
+    - Throttling (sliding window, never a permanent lock): a CLIENT that
+      fails too often is refused for a while; the ACCOUNT itself is never
+      blocked — repeated failures only make each further attempt slower.
+      So nobody can lock the owner out by guessing wrong on purpose, and
+      the one-time setup code can't be blocked globally either.
     - Setup code: while no account exists (or a login reset was requested
       in the add-on options), a short-lived one-time code is written to the
       log. Only its hash is stored. Without it nobody can create the first
@@ -44,8 +47,10 @@ SESSION_IDLE_MINUTES = 30       # normal login: ends after this much inactivity
 REMEMBER_DAYS = 30              # "Auf diesem Gerät angemeldet bleiben"
 RECENT_AUTH_MINUTES = 10        # bank-account changes need a password entered this recently
 ATTEMPT_WINDOW_MINUTES = 15
-MAX_FAILURES_PER_USER = 5
-MAX_FAILURES_PER_CLIENT = 20
+SLOWDOWN_AFTER_USER_FAILURES = 5     # account: from here on every attempt waits a little longer
+MAX_USER_DELAY_SECONDS = 10
+MAX_FAILURES_PER_CLIENT = 20         # login: this client is refused for the rest of the window
+MAX_SETUP_FAILURES_PER_CLIENT = 10   # one-time code
 SETUP_CODE_HOURS = 24
 _TOUCH_SECONDS = 60             # last_seen is written at most once a minute
 
@@ -170,17 +175,25 @@ def _record_attempt(conn, username: str, client: str, kind: str, success: bool) 
                  (now_iso(), username.lower()[:80], client[:80], kind, int(success)))
 
 
-def throttled(db_path: Path, username: str, client: str, *, kind: str = "login") -> bool:
-    """Too many recent failures for this account or this client (sliding window, no permanent lock)."""
+def _recent_failures(db_path: Path, kind: str, column: str, value: str) -> int:
     since = (_now() - timedelta(minutes=ATTEMPT_WINDOW_MINUTES)).isoformat()
     with connect(db_path) as conn:
-        per_user = conn.execute(
-            "SELECT COUNT(*) FROM auth_attempts WHERE kind = ? AND success = 0 AND attempted_at >= ? AND username = ?",
-            (kind, since, username.lower()[:80])).fetchone()[0]
-        per_client = conn.execute(
-            "SELECT COUNT(*) FROM auth_attempts WHERE kind = ? AND success = 0 AND attempted_at >= ? AND client = ?",
-            (kind, since, client[:80])).fetchone()[0]
-    return per_user >= MAX_FAILURES_PER_USER or per_client >= MAX_FAILURES_PER_CLIENT
+        return conn.execute(
+            f"SELECT COUNT(*) FROM auth_attempts WHERE kind = ? AND success = 0 AND attempted_at >= ? AND {column} = ?",
+            (kind, since, value[:80])).fetchone()[0]
+
+
+def throttled(db_path: Path, client: str, *, kind: str = "login") -> bool:
+    """This client failed too often recently (sliding window). Other clients are not affected."""
+    limit = MAX_SETUP_FAILURES_PER_CLIENT if kind == "setup" else MAX_FAILURES_PER_CLIENT
+    return _recent_failures(db_path, kind, "client", client) >= limit
+
+
+def account_delay_seconds(db_path: Path, username: str) -> float:
+    """Slow-down for an account under attack: grows with recent failures, capped; never a lock."""
+    failures = _recent_failures(db_path, "login", "username", username.lower())
+    extra = failures - SLOWDOWN_AFTER_USER_FAILURES + 1
+    return float(min(2 * extra, MAX_USER_DELAY_SECONDS)) if extra > 0 else 0.0
 
 
 def authenticate_password(db_path: Path, username: str, password: str, client: str) -> User | None:
@@ -376,7 +389,7 @@ def setup_code_valid(db_path: Path, code: str) -> bool:
 
 def complete_setup(db_path: Path, code: str, username: str, password: str, client: str) -> User:
     """Use the one-time code: create the administrator, or (login reset) set a new password for it."""
-    if throttled(db_path, "__setup__", client, kind="setup"):
+    if throttled(db_path, client, kind="setup"):
         raise AuthError("Zu viele Versuche. Bitte in 15 Minuten erneut versuchen.")
     if not setup_needed(db_path) or not setup_code_valid(db_path, code):
         with connect(db_path) as conn:
