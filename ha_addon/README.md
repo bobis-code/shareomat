@@ -1,6 +1,7 @@
 # Shareomat — Home Assistant Add-on
 
-Swiss LEG/ZEV settlement engine running as a standalone Home Assistant Add-on.
+Swiss LEG settlement engine running as a standalone Home Assistant Add-on
+(ZEV/vZEV planned, not yet supported).
 
 Imports smart meter interval data, calculates local energy sharing between
 producers and participants, and publishes billing results to Home Assistant

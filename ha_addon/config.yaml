@@ -1,7 +1,7 @@
 name: Shareomat
 version: "0.6.4"
 slug: shareomat
-description: LEG/ZEV — calculates local energy sharing.
+description: Swiss LEG billing — local energy sharing, invoices and credit notes.
 url: https://github.com/bobis-code/shareomat
 startup: application
 boot: auto
