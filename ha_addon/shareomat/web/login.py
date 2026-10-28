@@ -147,8 +147,12 @@ def clear_cookie(handler, name: str) -> None:
 def same_origin(handler) -> bool:
     """POSTs from another site are refused (in addition to the CSRF token)."""
     origin = handler.headers.get("Origin", "")
-    if not origin or origin == "null":
-        return origin != "null"
+    if not origin:
+        return True
+    if origin == "null":
+        # Home Assistant answers with "Referrer-Policy: no-referrer", so browsers send "Origin: null" on form
+        # posts inside Ingress (live test 0.6.1). There the CSRF tokens protect; elsewhere "null" is refused.
+        return _peer(handler) == HA_SUPERVISOR_IP
     origin_host = urlparse(origin).netloc.lower()
     expected = {handler.headers.get("Host", "").lower()}
     if _trusted_proxy(handler):

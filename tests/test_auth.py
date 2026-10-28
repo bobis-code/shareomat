@@ -551,6 +551,23 @@ def test_origin_differing_from_forwarded_host_behind_ha_is_accepted(server, monk
     assert status == 400 and "zu lange offen" in html                 # the token is still required
 
 
+def test_origin_null_is_accepted_only_behind_ha(server, monkeypatch):
+    """Live test 0.6.1: HA sends Referrer-Policy no-referrer, so Ingress form posts carry Origin: null."""
+    _setup_admin(server)
+    null = {"Origin": "null"}
+    b = Browser(server["port"])
+    token = b.login_csrf()
+    assert b.post("/login", {"login_csrf": token, "username": "admin", "password": PASSWORD},
+                  headers=null)[0] == 400                               # standalone: refused
+    monkeypatch.setattr(login, "HA_SUPERVISOR_IP", "127.0.0.1")
+    token = b.login_csrf()
+    assert b.post("/login", {"login_csrf": token, "username": "admin", "password": PASSWORD},
+                  headers=null)[0] == 303
+    csrf = b.page_csrf()
+    assert b.post("/logout", {"csrf_token": csrf}, headers=null)[0] == 303
+    assert b.get("/account")[0] == 303                                  # logged out: the POST was accepted
+
+
 def test_cookie_path_is_the_ingress_path_only_behind_the_supervisor(server):
     """Round 6 P1-03: behind HA Ingress the session cookie must not reach other add-ons' paths."""
     _setup_admin(server)
