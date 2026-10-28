@@ -28,7 +28,7 @@
         <mxCell id="overview_redesign_10" parent="1" style="rounded=1;arcSize=45;html=1;whiteSpace=wrap;fillColor=#EEF5FB;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
           <mxGeometry height="55" width="332" x="2168" y="44" as="geometry" />
         </mxCell>
-        <mxCell id="overview_redesign_11" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=20;fontColor=#1D719B;fontStyle=1;align=center;verticalAlign=middle;spacing=0;" value="ENGINEERING · 01" vertex="1">
+        <mxCell id="overview_redesign_11" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=20;fontColor=#1D719B;fontStyle=1;align=center;verticalAlign=middle;spacing=0;" value="Version · 01" vertex="1">
           <mxGeometry height="35" width="296" x="2185" y="55" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_12" parent="1" style="rounded=0;arcSize=1;html=1;whiteSpace=wrap;fillColor=#C9D5DF;strokeColor=none;strokeWidth=1.4;" value="" vertex="1">
@@ -79,11 +79,8 @@
         <mxCell id="overview_redesign_22" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" value="STATUS / AUDIT" vertex="1">
           <mxGeometry height="34" width="350" x="2102" y="1305" as="geometry" />
         </mxCell>
-        <mxCell id="overview_redesign_23" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" value="SHAREOMAT  |  LEG-ONE  |  Stand: 28.10.2026  |  Kernsystem, Sparkplug B und Finanzprozesse · Stand je Integration separat" vertex="1">
+        <mxCell id="overview_redesign_23" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" value="SHAREOMAT  |  LEG |  Stand: 28.10.2026" vertex="1">
           <mxGeometry height="32" width="2210" x="68" y="1380" as="geometry" />
-        </mxCell>
-        <mxCell id="overview_redesign_24" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" value="SEITE 01 / 07" vertex="1">
-          <mxGeometry height="32" width="166" x="2350" y="1380" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_25" parent="1" style="rounded=1;arcSize=3;html=1;whiteSpace=wrap;fillColor=#F8FAFC;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
           <mxGeometry height="704" width="2456" x="52" y="190" as="geometry" />
@@ -110,10 +107,10 @@
           <mxGeometry height="31" width="1600" x="416" y="951" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_33" parent="1" style="rounded=1;arcSize=3;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
-          <mxGeometry height="565" width="462" x="80" y="278" as="geometry" />
+          <mxGeometry height="586" width="462" x="80" y="257" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_34" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=25;fontColor=#1D719B;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" value="01 / VERBINDLICHE QUELLEN" vertex="1">
-          <mxGeometry height="48" width="406" x="114" y="294" as="geometry" />
+          <mxGeometry height="48" width="406" x="110" y="286" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_35" parent="1" style="rounded=1;arcSize=9;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
           <mxGeometry height="121" width="402" x="110" y="370" as="geometry" />
@@ -245,31 +242,28 @@
           <mxGeometry height="38" width="305" x="701" y="693" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_76" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#3F5A70;fontStyle=0;align=left;verticalAlign=top;spacing=0;" value="Herkunft + Prüfstatus" vertex="1">
-          <mxGeometry height="30" width="305" x="702" y="735" as="geometry" />
+          <mxGeometry height="30" width="305" x="701.5" y="731" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_77" parent="1" style="rounded=1;arcSize=14;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
-          <mxGeometry height="85" width="348" x="1080" y="681" as="geometry" />
+          <mxGeometry height="85" width="391" x="1067" y="681" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_78" parent="1" style="rounded=1;arcSize=50;html=1;whiteSpace=wrap;fillColor=#18877F;strokeColor=none;strokeWidth=1.4;" value="" vertex="1">
-          <mxGeometry height="85" width="8" x="1080" y="681" as="geometry" />
+          <mxGeometry height="85" width="8" x="1068" y="681" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_79" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=21;fontColor=#183247;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" value="Freigegebener Lauf" vertex="1">
           <mxGeometry height="38" width="305" x="1101" y="693" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_80" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#3F5A70;fontStyle=0;align=left;verticalAlign=top;spacing=0;" value="Tarif- und Zeitbezug" vertex="1">
-          <mxGeometry height="30" width="305" x="1102" y="735" as="geometry" />
+          <mxGeometry height="30" width="305" x="1100.5" y="731" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_81" parent="1" style="rounded=1;arcSize=14;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
-          <mxGeometry height="85" width="348" x="1480" y="681" as="geometry" />
+          <mxGeometry height="85" width="359" x="1491" y="682" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_82" parent="1" style="rounded=1;arcSize=50;html=1;whiteSpace=wrap;fillColor=#C2812E;strokeColor=none;strokeWidth=1.4;" value="" vertex="1">
-          <mxGeometry height="85" width="8" x="1480" y="681" as="geometry" />
+          <mxGeometry height="85" width="8" x="1492" y="682" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_83" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=21;fontColor=#183247;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" value="Dokument-Snapshot" vertex="1">
-          <mxGeometry height="38" width="305" x="1501" y="693" as="geometry" />
-        </mxCell>
-        <mxCell id="overview_redesign_84" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#3F5A70;fontStyle=0;align=left;verticalAlign=top;spacing=0;" value="Betrag + Referenz + Hash" vertex="1">
-          <mxGeometry height="30" width="305" x="1502" y="735" as="geometry" />
+          <mxGeometry height="38" width="305" x="1514" y="693" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_85" edge="1" parent="1" style="edgeStyle=none;rounded=0;html=1;strokeColor=#5C7389;strokeWidth=3;endArrow=block;endFill=1;">
           <mxGeometry relative="1" as="geometry">
@@ -277,10 +271,10 @@
             <mxPoint x="1072" y="725" as="targetPoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="overview_redesign_86" edge="1" parent="1" style="edgeStyle=none;rounded=0;html=1;strokeColor=#5C7389;strokeWidth=3;endArrow=block;endFill=1;">
+        <mxCell id="overview_redesign_86" edge="1" parent="1" source="overview_redesign_77" style="edgeStyle=none;rounded=0;html=1;strokeColor=#5C7389;strokeWidth=3;endArrow=block;endFill=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="1428" y="725" as="sourcePoint" />
-            <mxPoint x="1472" y="725" as="targetPoint" />
+            <mxPoint x="1450" y="725" as="sourcePoint" />
+            <mxPoint x="1494" y="725" as="targetPoint" />
           </mxGeometry>
         </mxCell>
         <mxCell id="overview_redesign_87" parent="1" style="rounded=1;arcSize=3;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#C9D5DF;strokeWidth=1.4;" value="" vertex="1">
@@ -327,14 +321,14 @@
         </mxCell>
         <mxCell id="overview_redesign_101" edge="1" parent="1" style="edgeStyle=none;rounded=0;html=1;strokeColor=#1D719B;strokeWidth=5;endArrow=block;endFill=1;">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="546" y="520" as="sourcePoint" />
-            <mxPoint x="594" y="520" as="targetPoint" />
+            <mxPoint x="546" y="502" as="sourcePoint" />
+            <mxPoint x="594" y="502" as="targetPoint" />
           </mxGeometry>
         </mxCell>
         <mxCell id="overview_redesign_102" edge="1" parent="1" style="edgeStyle=none;rounded=0;html=1;strokeColor=#C2812E;strokeWidth=5;endArrow=block;endFill=1;">
           <mxGeometry relative="1" as="geometry">
-            <mxPoint x="1923" y="520" as="sourcePoint" />
-            <mxPoint x="1970" y="520" as="targetPoint" />
+            <mxPoint x="1923" y="497" as="sourcePoint" />
+            <mxPoint x="1970" y="497" as="targetPoint" />
           </mxGeometry>
         </mxCell>
         <mxCell id="overview_redesign_103" parent="1" style="rounded=1;arcSize=7;html=1;whiteSpace=wrap;fillColor=#FFFFFF;strokeColor=#8CC8B9;strokeWidth=2;" value="" vertex="1">
@@ -446,7 +440,7 @@
           </mxGeometry>
         </mxCell>
         <mxCell id="overview_redesign_133" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#18877F;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" value="LIVE-STATUS · NICHT BILLING" vertex="1">
-          <mxGeometry height="32" width="450" x="1736" y="869" as="geometry" />
+          <mxGeometry height="32" width="450" x="1736" y="857" as="geometry" />
         </mxCell>
         <mxCell id="overview_redesign_134" parent="1" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=20;fontColor=#183247;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" value="KLARE TRENNUNG  ·  EMSOMAT optimiert live.  SHAREOMAT rechnet ausschliesslich auf Basis offizieller Messdaten ab.  Sparkplug ist kein Abrechnungsnachweis." vertex="1">
           <mxGeometry height="36" width="2260" x="123" y="1264" as="geometry" />
