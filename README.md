@@ -21,6 +21,27 @@ ist aber noch nicht im gleichen Umfang durchgespielt — es gibt dort einen
 echten, bisher ungetesteten Code-Pfad (kein Ingress-Pfad-Präfix, siehe
 "Standalone" weiter unten). Feedback dazu ist besonders willkommen.
 
+## Architektur
+
+![Shareomat Systemlandkarte](docs/Architektur/Diagramm/01_Systemlandschaft.png)
+
+Shareomat rechnet ausschliesslich mit offiziellen Messdaten des Netzbetreibers
+ab. Die lokale Sparkplug-Verbindung zu EMSOMAT liefert nur Live-Status und ist
+kein Abrechnungsnachweis.
+
+Weitere Seiten der Architektur:
+
+1. [Systemlandschaft](docs/Architektur/Diagramm/01_Systemlandschaft.png)
+2. [Messdaten und Zeitmodell](docs/Architektur/Diagramm/02_Messdaten_und_Zeitmodell.png)
+3. [LEG-Matching und Tarife](docs/Architektur/Diagramm/03_LEG-Matching_und_Tarife.png)
+4. [Rechnungen und Zahlungsfluss](docs/Architektur/Diagramm/04_Rechnungen_und_Zahlungsfluss.png)
+5. [Bedienung und Sicherheit](docs/Architektur/Diagramm/05_Bedienung_und_Sicherheit.png)
+6. [Modulmatrix und Reifegrad](docs/Architektur/Diagramm/06_Modulmatrix_und_Reifegrad.png)
+7. [EMSOMAT-Schnittstelle](docs/Architektur/Diagramm/07_EMSOMAT-Schnittstelle.png)
+
+Quelle (draw.io): [`Shareomat_Architecture_Whitepaper_light_v2.drawio`](docs/Architektur/Diagramm/Shareomat_Architecture_Whitepaper_light_v2.drawio).
+Ausführliche Beschreibung: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ---
 
 ## Quick start (Home Assistant add-on)
