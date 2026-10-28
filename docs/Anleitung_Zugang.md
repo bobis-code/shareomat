@@ -51,7 +51,8 @@ kann nichts ändern.
 
 - Für Änderungen am **Bankkonto** fragt Shareomat noch einmal nach dem Passwort, wenn die letzte Eingabe
   mehr als 10 Minuten her ist.
-- Nach 5 falschen Passwörtern ist die Anmeldung für 15 Minuten gesperrt. Danach geht es wieder.
+- Nach vielen falschen Passwörtern ist die Anmeldung **auf diesem Gerät** für 15 Minuten gesperrt. Das Konto
+  selbst wird nie gesperrt, andere Geräte können sich weiter anmelden.
 - Wer was gemacht hat, steht im internen Protokoll. Bei einem gemeinsamen Konto steht dort für alle derselbe
   Name. Getrennte Konten für mehrere Personen sind vorbereitet und kommen später.
 - **Zugriff von unterwegs:** nur über eine verschlüsselte Verbindung, also Home Assistant mit HTTPS
