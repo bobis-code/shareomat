@@ -1,6 +1,10 @@
 # Shareomat
 
 > **🚧 Work in Progress — under active development, not production-ready.**
+>
+> **Keine Gewähr für Rechnungen:** Jede Rechnung, Gutschrift und Zahlung ist
+> vor dem Versand bzw. der Auszahlung vom Benutzer selbst zu prüfen. Siehe
+> [Haftungsausschluss](#haftungsausschluss).
 
 Hallo
 
@@ -377,6 +381,28 @@ data/reports/                billing_*.csv/json, match_detail_*.csv
 data/state/                  processed_files.json
 data/shareomat.db            Admin database (Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife)
 ```
+
+## Haftungsausschluss
+
+Shareomat ist ein Hilfsmittel für die Abrechnung, **kein zertifiziertes
+Mess-, Abrechnungs- oder Buchhaltungssystem**.
+
+- **Jede Rechnung und Gutschrift ist vor dem Versand vom Benutzer zu prüfen:**
+  Mengen, Preise, Empfänger, Beträge, Bankverbindung und QR-Zahlteil.
+- **Jede Zahlung und Auszahlung ist mit dem Bankkonto abzugleichen.** Shareomat
+  führt keine Zahlungen aus; erfasste Zahlungen und Auszahlungen sind nur
+  Nachweise.
+- Massgebend sind die offiziellen Messdaten des Netzbetreibers und der
+  unterschriebene LEG-Vertrag, nicht die Berechnung von Shareomat.
+- Für die Einhaltung der LEG/ZEV-, Energie-, Steuer- und
+  Buchhaltungsvorschriften ist die Gemeinschaft bzw. ihre Verwaltung selbst
+  verantwortlich.
+- Shareomat wird ohne jede Gewähr bereitgestellt. Soweit gesetzlich zulässig,
+  wird **keine Haftung** übernommen, insbesondere nicht für falsche oder
+  fehlende Rechnungen, falsche Beträge, Zahlungsfehler, Datenverlust oder
+  daraus entstehende Folgeschäden.
+
+Verbindlich ist der Wortlaut in [`LICENSE`](LICENSE) (Punkte 4 und 5).
 
 ## Lizenz
 
