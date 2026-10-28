@@ -17,8 +17,12 @@ Notes:
     handles its own sub-routes (new/edit/toggle) via ctx.segments. See
     SHAREOMAT_UMBAU_STRUKTUR.md §10.
 
-    Data-changing requests only happen via POST, and every POST is
-    checked against the process's CSRF token (see web/rendering.py).
+    Access control (shareomat/web/login.py): apart from the static files and
+    the login pages, every request — pages, downloads, print views, uploads,
+    actions — first passes login.gate(), which needs a valid login session
+    and the permission for the action, BEFORE any body is read. Data-changing
+    requests only happen via POST, each checked against the session's own
+    CSRF token (see web/rendering.py) and a same-origin check.
 """
 
 from __future__ import annotations
@@ -33,8 +37,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
+from shareomat.security.context import current_principal, set_principal
+from shareomat.security.permissions import required_permission
+from shareomat.web import login
 from shareomat.web.navigation import url_for
 from shareomat.web.pages import (
+    account,
     analysis,
     automation,
     billing,
@@ -71,6 +79,7 @@ _MAX_UPLOAD_SECONDS = 120  # Total time budget per upload
 
 _PAGE_MODULES = {
     "": dashboard,
+    "account": account,
     "setup": setup,
     "community": community,
     "participants": participants,
@@ -97,15 +106,30 @@ def _flatten_qs(query: str) -> dict[str, str]:
 class _Handler(BaseHTTPRequestHandler):
     """HTTP request handler for the Shareomat admin web interface.
 
-    Home Assistant handles authentication before proxying to this handler
-    when running as an add-on; standalone deployments are expected to sit
-    behind their own network boundary (see README).
+    Every request needs a Shareomat login session (also behind Home
+    Assistant Ingress) — see shareomat/web/login.py.
     """
 
     def setup(self) -> None:
         """Apply the socket read/write timeout on top of the base handler's setup."""
         super().setup()
         self.connection.settimeout(_SOCKET_TIMEOUT_SECONDS)
+        self.pending_cookies: list[str] = []
+        self._static_response = False
+
+    def end_headers(self) -> None:
+        """Security headers on every response; login cookies set during this request."""
+        for cookie in getattr(self, "pending_cookies", []):
+            self.send_header("Set-Cookie", cookie)
+        self.pending_cookies = []
+        if not getattr(self, "_static_response", False):
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Pragma", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+        # Home Assistant shows the add-on in an iframe of its own (same) origin.
+        self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
+        super().end_headers()
 
     def log_message(self, fmt, *args) -> None:
         """Route BaseHTTPRequestHandler's access log through the module logger at debug level."""
@@ -134,6 +158,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         size = path.stat().st_size
+        self._static_response = True
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(size))
@@ -180,7 +205,13 @@ class _Handler(BaseHTTPRequestHandler):
     # ── GET ──────────────────────────────────────────────────────────────
 
     def do_GET(self) -> None:
-        """Serve static files/downloads directly, else dispatch to the routed page module."""
+        """Static files and login pages are public; everything else only behind the login gate."""
+        try:
+            self._do_get()
+        finally:
+            set_principal(None)
+
+    def _do_get(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         ingress_path = self._ingress_path()
@@ -191,6 +222,15 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/static/banner.png":
             self._serve_static_file(_STATIC_DIR / "banner.png", "image/png")
             return
+        if path in login.PUBLIC_PATHS:
+            login.handle_public(self, "GET", path, ingress_path, None, _flatten_qs(parsed.query))
+            return
+
+        gate_segments = [unquote(s) for s in path.split("/") if s]
+        gate_route = gate_segments[0].replace("-", "_") if gate_segments else ""
+        if not self._gate("GET", path, ingress_path, gate_route, gate_segments[1:]):
+            return
+
         if path == "/reports/download":
             self._serve_download(parsed.query)
             return
@@ -241,11 +281,32 @@ class _Handler(BaseHTTPRequestHandler):
         return _flatten_qs(body)
 
     def do_POST(self) -> None:
-        """Handle the run-trigger/upload special cases, else dispatch to the routed page module."""
+        """Login pages are public; every other POST only behind the gate, which runs before the body is read."""
+        try:
+            self._do_post()
+        finally:
+            set_principal(None)
+
+    def _gate(self, method: str, path: str, ingress_path: str, route: str, segments: list[str]) -> bool:
+        return login.gate(self, method, path, ingress_path, route, segments)
+
+    def _do_post(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
         ingress_path = self._ingress_path()
         content_type = self.headers.get("Content-Type", "")
+
+        if path in login.PUBLIC_PATHS:
+            login.handle_public(self, "POST", path, ingress_path, self._parse_urlencoded_form(), {})
+            return
+        if path == "/logout":
+            login.handle_logout(self, ingress_path, self._parse_urlencoded_form())
+            return
+
+        gate_segments = [unquote(s) for s in path.split("/") if s]
+        gate_route = gate_segments[0].replace("-", "_") if gate_segments else ""
+        if not self._gate("POST", path, ingress_path, gate_route, gate_segments[1:]):
+            return          # nothing read, nothing stored, nothing run
 
         if path == "/actions/run":
             form = self._parse_urlencoded_form()
@@ -289,6 +350,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         try:
             check_csrf(ctx)
+            self._check_recent_auth(route, segments[1:], form)
             redirect_to = page.handle_post(ctx)
         except FormError as exc:
             get_state().set_flash(str(exc), ok=False)
@@ -310,6 +372,16 @@ class _Handler(BaseHTTPRequestHandler):
         if redirect_to is None:
             redirect_to = url_for(ingress_path, route)
         self._redirect(redirect_to)
+
+    def _check_recent_auth(self, route: str, segments: list[str], form: dict) -> None:
+        """Changing the bank account needs the password again if the last entry is over 10 minutes old."""
+        principal = current_principal()
+        if principal is None or required_permission("POST", route, segments) != "payment_profile.change":
+            return
+        if not login.recent_auth_required(principal):
+            return
+        if not login.confirm_recent_auth(principal, form.get("confirm_password", "")):
+            raise FormError("Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben, um das Bankkonto zu ändern.")
 
     # ── Signed join declarations (stored next to the database) ─────────
 

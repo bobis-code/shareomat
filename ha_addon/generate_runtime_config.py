@@ -106,6 +106,8 @@ def main() -> None:
         "web": {
             "enabled": bool(opts.get("ingress_enabled", True)),
             "port": 8099,
+            # Forgotten password: a fresh one-time code in the log allows a new one.
+            "reset_login": bool(opts.get("reset_login", False)),
         },
     }
 

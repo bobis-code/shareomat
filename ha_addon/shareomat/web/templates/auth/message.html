@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} — Shareomat</title>
+  <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <img class="auth-logo" src="{{ url_for('banner') }}" alt="Shareomat">
+    <h1>{{ title }}</h1>
+    <p>{{ text }}</p>
+    {% if link %}<a class="btn auth-submit" href="{{ url_for(link[0]) }}">{{ link[1] }}</a>{% endif %}
+  </main>
+</body>
+</html>

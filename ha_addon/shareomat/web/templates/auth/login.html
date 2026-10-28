@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anmelden — Shareomat</title>
+  <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}">
+</head>
+<body class="auth-body">
+  <main class="auth-card">
+    <img class="auth-logo" src="{{ url_for('banner') }}" alt="Shareomat">
+    <h1>Anmelden</h1>
+    {% if error %}<div class="error-box" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('login') }}" autocomplete="on">
+      <input type="hidden" name="login_csrf" value="{{ login_csrf }}">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <label for="username">Benutzername</label>
+      <input type="text" id="username" name="username" value="{{ username }}" autocomplete="username"
+             autocapitalize="none" spellcheck="false" required {{ 'autofocus' if not username }}>
+      <label for="password">Passwort</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required {{ 'autofocus' if username }}>
+      <label class="auth-check"><input type="checkbox" onchange="document.getElementById('password').type = this.checked ? 'text' : 'password'"> Passwort anzeigen</label>
+      <label class="auth-check"><input type="checkbox" name="remember"> Auf diesem Gerät {{ remember_days }} Tage angemeldet bleiben</label>
+      <p class="ts" style="margin:0 0 12px">Nur auf dem eigenen Handy oder Computer ankreuzen.</p>
+      <button type="submit" class="auth-submit">Anmelden</button>
+    </form>
+    {% if insecure %}
+    <p class="ts auth-note">Hinweis: Diese Verbindung ist nicht verschlüsselt (kein HTTPS). Für den Zugriff von
+      unterwegs Home Assistant mit HTTPS, Tailscale oder einen HTTPS-Proxy verwenden.</p>
+    {% endif %}
+    <p class="ts auth-note">Passwort vergessen? In Home Assistant beim Shareomat-Add-on die Option
+      «Login zurücksetzen» einschalten und neu starten — der Einmal-Code steht danach im Protokoll.</p>
+  </main>
+</body>
+</html>

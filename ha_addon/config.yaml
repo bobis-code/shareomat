@@ -46,6 +46,9 @@ options:
   email_folder: "INBOX"
   email_allowed_senders: []
   email_poll_interval_seconds: 300
+  # Passwort vergessen: einschalten, Add-on neu starten, Einmal-Code im Protokoll,
+  # neues Passwort in Shareomat festlegen, danach wieder ausschalten.
+  reset_login: false
 
 schema:
   mqtt_host: str
@@ -70,3 +73,4 @@ schema:
   email_allowed_senders:
     - str
   email_poll_interval_seconds: int
+  reset_login: bool

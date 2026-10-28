@@ -25,6 +25,7 @@ from urllib.parse import quote
 import jinja2
 
 from shareomat.config import RuntimeConfig
+from shareomat.security.context import current_principal
 from shareomat.web.navigation import NAV_SECTIONS, PLACEHOLDER_ROUTES
 from shareomat.web.navigation import url_for as _url_for
 from shareomat.web.state import get_state
@@ -113,6 +114,13 @@ def form_required(ctx: RequestContext, field_name: str, *, label: str) -> str:
     return value
 
 
+def _needs_password_confirm() -> bool:
+    """True when a bank-account change would ask for the password again (see web/login.py)."""
+    from shareomat.web.login import recent_auth_required
+    principal = current_principal()
+    return principal is not None and recent_auth_required(principal)
+
+
 def render_page(template_name: str, ctx: RequestContext, active_route: str, **extra) -> str:
     """Render a Jinja2 template with the shared admin-UI context (nav, flash, CSRF, ...)."""
     state = get_state()
@@ -143,6 +151,8 @@ def render_page(template_name: str, ctx: RequestContext, active_route: str, **ex
         flash_ok=flash_ok,
         warnings=snapshot.get("warnings", []),
         csrf_token=state.csrf_token,
+        current_user=current_principal(),
+        needs_password_confirm=_needs_password_confirm(),
         ctx=ctx,
     )
     context.update(extra)

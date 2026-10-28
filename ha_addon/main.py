@@ -409,6 +409,14 @@ def _run_daemon(
         _stop_sparkplug(sparkplug_components)
 
 
+def _prepare_login(db_path, runtime) -> None:
+    """No account yet (or a reset was requested): write a fresh one-time setup code to the log."""
+    from shareomat.database.auth import issue_setup_code, request_login_reset
+    if runtime.web.reset_login:
+        request_login_reset(db_path)
+    issue_setup_code(db_path)
+
+
 def _serve_degraded(message: str, *, port: int = 8099) -> None:
     """Start the admin web server without a working runtime config, showing the fatal error.
 
@@ -481,6 +489,7 @@ def main() -> None:
         state = get_web_state()
         state.register_db(db_path)
         state.register_runtime(runtime)
+        _prepare_login(db_path, runtime)
         state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host))
         for warning in startup_warnings:
             state.add_warning(warning)

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Mein Konto{% endblock %}
+{% block heading %}Mein Konto{% endblock %}
+{% block content %}
+<div class="card">
+  <p>Angemeldet als <strong>{{ principal.label }}</strong> (Administrator).</p>
+  <form method="post" action="{{ url_for('logout') }}" class="actions-row" style="margin-top:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn-muted">Abmelden</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Angemeldete Geräte</h2>
+  <div class="table-wrap"><table class="cards">
+    <thead><tr><th>Gerät</th><th>Angemeldet seit</th><th>Zuletzt aktiv</th><th>Gültig bis</th></tr></thead>
+    <tbody>
+    {% for s in sessions %}
+    <tr>
+      <td data-label="Gerät"><strong>{{ s.device }}</strong>{% if s.current %} <span class="status-pill status-pill-active">dieses Gerät</span>{% endif %}</td>
+      <td data-label="Angemeldet seit">{{ s.session.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td data-label="Zuletzt aktiv">{{ s.session.last_seen_at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td data-label="Gültig bis">{{ s.session.expires_at.strftime('%d.%m.%Y') }}{{ ' (angemeldet bleiben)' if s.session.remember }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <form method="post" action="{{ url_for('account', suffix='/revoke-others') }}" class="actions-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn-danger" {{ 'disabled' if sessions|length < 2 }}>Alle anderen Geräte abmelden</button>
+  </form>
+  <p class="ts">Handy verloren? Hier alle anderen Geräte abmelden und danach das Passwort ändern.</p>
+</div>
+
+<form class="form-card" method="post" action="{{ url_for('account', suffix='/password') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2>Passwort ändern</h2>
+  <input type="text" name="username" value="{{ principal.username }}" autocomplete="username" hidden>
+  <div class="field"><label for="current_password">Bisheriges Passwort</label>
+    <input type="password" id="current_password" name="current_password" autocomplete="current-password" required></div>
+  <div class="field"><label for="new_password">Neues Passwort (mindestens 12 Zeichen)</label>
+    <input type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="12" required></div>
+  <div class="field"><label for="new_password_repeat">Neues Passwort wiederholen</label>
+    <input type="password" id="new_password_repeat" name="new_password_repeat" autocomplete="new-password" minlength="12" required></div>
+  <button type="submit">Passwort ändern</button>
+  <div class="field-hint">Danach sind alle anderen Geräte abgemeldet; dieses bleibt angemeldet.</div>
+</form>
+{% endblock %}
