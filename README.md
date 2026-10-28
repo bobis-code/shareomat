@@ -29,8 +29,59 @@ echten, bisher ungetesteten Code-Pfad (kein Ingress-Pfad-Präfix, siehe
 2. Add this repository as a custom repository:
    `https://github.com/bobis-code/shareomat`
 3. Install **Shareomat**, configure MQTT/e-mail if wanted, start it.
-4. Open it from the sidebar (Ingress panel) and complete the setup wizard
+4. Set up the login (see **Erstes Login** below).
+5. Open it from the sidebar (Ingress panel) and complete the setup wizard
    (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag).
+
+### Erstes Login (ab Version 0.6.0)
+
+Shareomat ist mit einem Passwort geschützt, weil darin Rechnungen, Bankdaten
+und Adressen stehen. Es gibt ein Administrator-Konto, das mehrere Personen
+gemeinsam verwenden können.
+
+1. Add-on starten und in Home Assistant unter **Einstellungen → Add-ons →
+   Shareomat → Protokoll** die Zeile suchen:
+
+   ```text
+   Shareomat Ersteinrichtung: Einmal-Code  ABCD-EFGH-JKLM  (gültig bis … UTC)
+   ```
+
+   Der Code gilt einmal und höchstens 24 Stunden. Nach einem Neustart steht
+   ein neuer Code im Protokoll, solange noch kein Zugang eingerichtet ist.
+2. Shareomat öffnen. Es erscheint **«Willkommen – Zugang einrichten»**.
+3. Code eintragen, Benutzername wählen (z. B. `admin`) und ein Passwort mit
+   **mindestens 12 Zeichen** zweimal eingeben. Am einfachsten ist ein Satz,
+   z. B. «Sonne scheint auf unser Dach 2026».
+4. Auf dem eigenen Handy **«Auf diesem Gerät 30 Tage angemeldet bleiben»**
+   ankreuzen. Ohne Häkchen endet die Anmeldung nach 30 Minuten ohne
+   Benutzung oder spätestens nach 12 Stunden.
+5. Weitere Handys melden sich mit demselben Benutzernamen und Passwort an.
+
+| Problem | Lösung |
+|---|---|
+| Einmal-Code «ungültig oder abgelaufen» | Den neuesten Code aus dem Protokoll nehmen, bei Bedarf Add-on neu starten. |
+| «Zu viele Fehlversuche von diesem Gerät» | 15 Minuten warten oder ein anderes Gerät nehmen. Das Konto selbst wird nie gesperrt. |
+| Passwort vergessen | Add-on → **Konfiguration** → `reset_login` einschalten → Add-on neu starten → neuen Code aus dem Protokoll verwenden und neues Passwort festlegen → `reset_login` wieder ausschalten. |
+| Handy verloren | Auf einem anderen Gerät **Mein Konto → «Alle anderen Geräte abmelden»**, danach Passwort ändern. |
+
+Hinweis: Innerhalb von Home Assistant fragt Shareomat in dieser Version
+zusätzlich nach dem eigenen Passwort (mit «angemeldet bleiben» nur alle 30
+Tage). Zugang aus dem Internet nur über HTTPS (z. B. Nabu Casa, Tailscale),
+Shareomat nie direkt freigeben.
+
+Ausführlich: [`docs/Erstes_Login.md`](docs/Erstes_Login.md) (Schritt für
+Schritt mit Live-Test) und [`docs/Anleitung_Zugang.md`](docs/Anleitung_Zugang.md)
+(Bedienung und Technik).
+
+### Rechnungen & Gutschriften
+
+Nach einer freigegebenen Monatsabrechnung führt die Übersicht
+(**Monatsabschluss**) durch die nächsten Schritte: Bankkonto einmalig
+einrichten → Belege prüfen und freigeben → drucken bzw. versenden
+(Sammeldruck) → Zahlungseingänge erfassen → Produzenten auszahlen (nur so
+weit Zahlungen eingegangen sind). Rechnungen enthalten einen Schweizer
+QR-Zahlteil. Mahnungen werden ab 5 Tagen nach Fälligkeit vorgeschlagen.
+E-Mail-Versand (SMTP) und Bankdatei-Import folgen später.
 
 Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, and automation settings are
 managed entirely through this web interface — not through `leg_config.yaml`
@@ -214,8 +265,12 @@ cp config/leg_config.example.yaml config/leg_config.yaml
 docker compose up --build
 ```
 
-Open the web interface at `http://localhost:8099` and complete the same
+Open the web interface at `http://localhost:8099`. The one-time setup code
+for the first login is printed in the container log
+(`docker compose logs shareomat | grep Einmal-Code`); then complete the same
 setup wizard as above (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag).
+Docker binds the port to `127.0.0.1` only — put an HTTPS reverse proxy in
+front for access from other devices.
 
 For a more detailed walkthrough (including a native Python setup without
 Docker, sample test data, and troubleshooting), see
@@ -259,6 +314,8 @@ shareomat/                    Python package
         ebl_xlsx.py            EBL Excel format parser
     report/
       leg_report.py            CSV + JSON report writers
+    payments/
+      swiss_qr.py              Swiss QR bill payload + payment part
   database/                   SQLite admin database (source of truth for master data)
     sqlite.py                  Connection, schema, migrations
     community.py / participants.py / meters.py / tariffs.py / settings.py
@@ -268,6 +325,10 @@ shareomat/                    Python package
     participant_contract.py    Which contract version/tariff a participant accepted
     config_builder.py          Combines RuntimeConfig + database into a LegConfig
     yaml_import.py             One-time import of a pre-existing leg_config.yaml
+    invoicing.py               Invoices/credit notes, payments, payouts, reminders, cancellations
+    auth.py                    Users, sessions, one-time setup code, throttling
+    audit.py                   Audit log (who did what)
+  security/                   Password hashing (Argon2id), request principal, permissions/roles
   models/                     Domain dataclasses
     community.py / participant.py / meter.py / tariff.py / settings.py
     contract.py                  ContractVersion / ContractSettings
@@ -275,6 +336,7 @@ shareomat/                    Python package
     billing.py                  MatchResult / BillingRecord
   web/                        Admin web interface (standalone or behind HA Ingress)
     server.py                  HTTP server, routing, upload/download, CSRF
+    login.py                   Central login gate, cookies, client address
     state.py                   Shared engine <-> web state
     navigation.py               Sidebar structure + URL generation
     reports.py                  Report discovery/rendering helpers
