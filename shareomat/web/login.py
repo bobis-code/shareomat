@@ -260,12 +260,15 @@ def handle_public(handler, method: str, path: str, ingress_path: str, form: dict
                     username=username, next_path=next_path, status=400)
         return
     if throttled(db_path, client_ip(handler)):
+        logger.warning("Login: client %s throttled", client_ip(handler))
         _login_form(handler, ingress_path, error="Zu viele Fehlversuche von diesem Gerät. Bitte in 15 Minuten "
                     "erneut versuchen.", username=username, next_path=next_path, status=429)
         return
     time.sleep(account_delay_seconds(db_path, username) * ACCOUNT_DELAY_FACTOR)
     user = authenticate_password(db_path, username, form.get("password", ""), client_ip(handler))
     if user is None:
+        # The client address in the log shows whether Ingress tells phones apart (X-Forwarded-For check)
+        logger.warning("Login: failed attempt from %s (peer %s)", client_ip(handler), handler.client_address[0])
         time.sleep(FAILED_LOGIN_DELAY_SECONDS)
         _login_form(handler, ingress_path, error="Benutzername oder Passwort ist falsch.", username=username,
                     next_path=next_path, status=401)
