@@ -407,9 +407,9 @@
             –
             {{ v.valid_until.strftime('%d.%m.%Y') if v.valid_until else 'offen' }}
           </td>
-          <td>
-            <details style="display:inline-block">
-              <summary class="btn-small btn-muted" style="display:inline-block;cursor:pointer">Anzeigen</summary>
+          <td><div class="row-actions">
+            <details>
+              <summary class="btn-small btn-muted">Anzeigen</summary>
               {% if v.text_sha256 %}<div class="ts" style="margin-top:6px">SHA-256: <span style="font-family:monospace;word-break:break-all">{{ v.text_sha256 }}</span></div>{% endif %}
               <div class="contract-text" style="margin-top:8px">{{ v.contract_text_snapshot | safe }}</div>
             </details>
@@ -421,8 +421,8 @@
             {% endif %}
             {% if is_draft %}
             <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?edit={{ v.id }}">Bearbeiten</a>
-            <details style="display:inline-block">
-              <summary class="btn-small" style="display:inline-block;cursor:pointer">Veröffentlichen</summary>
+            <details>
+              <summary class="btn-small">Veröffentlichen</summary>
               <form method="post" action="{{ url_for('contract', suffix='/publish') }}" style="margin-top:8px;max-width:360px">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="version_id" value="{{ v.id }}">
@@ -436,14 +436,14 @@
                 <button type="submit" class="btn-small">Jetzt veröffentlichen</button>
               </form>
             </details>
-            <form method="post" action="{{ url_for('contract', suffix='/draft/delete') }}" style="display:inline"
+            <form method="post" action="{{ url_for('contract', suffix='/draft/delete') }}"
                   onsubmit="return confirm('Entwurf wirklich löschen?')">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="version_id" value="{{ v.id }}">
               <button type="submit" class="btn-small btn-danger">Löschen</button>
             </form>
             {% elif is_scheduled %}
-            <form method="post" action="{{ url_for('contract', suffix='/withdraw') }}" style="display:inline"
+            <form method="post" action="{{ url_for('contract', suffix='/withdraw') }}"
                   onsubmit="return confirm('Veröffentlichung wirklich zurückziehen? Ohne Unterschriften wird die Version wieder zum Entwurf; mit Unterschriften wird sie samt Nachweisen archiviert und eine korrigierte Fassung kann neu veröffentlicht werden.')">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="version_id" value="{{ v.id }}">
@@ -451,8 +451,8 @@
             </form>
             {% elif is_active %}
             <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?copy_from={{ v.id }}">Bearbeiten</a>
-            <details style="display:inline-block">
-              <summary class="btn-small btn-danger" style="display:inline-block;cursor:pointer">Vertrag beenden</summary>
+            <details>
+              <summary class="btn-small btn-danger">Vertrag beenden</summary>
               <form method="post" action="{{ url_for('contract', suffix='/end') }}" style="margin-top:8px;max-width:320px">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="version_id" value="{{ v.id }}">
@@ -470,7 +470,7 @@
             {% else %}
             <a class="btn-small btn-secondary" href="{{ url_for('contract') }}?copy_from={{ v.id }}">Als neue Version übernehmen</a>
             {% endif %}
-          </td>
+          </div></td>
         </tr>
         {% endfor %}
       </tbody>

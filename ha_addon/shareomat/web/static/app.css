@@ -156,6 +156,13 @@ button, .btn {
   text-decoration: none;
 }
 button:hover, .btn:hover { background: var(--accent-dark); }
+/* Links and <summary> with .btn-small look like buttons too (:where keeps the colour classes below winning). */
+:where(a, summary).btn-small { display: inline-block; background: var(--accent); color: white; border-radius: 6px;
+  text-decoration: none; cursor: pointer; list-style: none; line-height: 1.6; }
+:where(summary).btn-small::-webkit-details-marker { display: none; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-start; }
+.row-actions > form { margin: 0; }
+.row-actions > details[open] { flex-basis: 100%; }
 .btn-secondary { background: #059669; }
 .btn-secondary:hover { background: #047857; }
 .btn-muted { background: #6b7280; }
