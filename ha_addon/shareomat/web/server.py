@@ -28,6 +28,7 @@ Notes:
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import threading
 import time
@@ -103,14 +104,37 @@ class _CsrfRejected(Exception):
     """Multipart upload with a wrong/missing CSRF token — refused before anything is stored."""
 
 
-def _free_name(directory: Path, filename: str) -> Path:
-    """`filename` in `directory`, or `name-2.ext`, `name-3.ext`, ... if taken (uploads never overwrite)."""
-    target = directory / filename
-    stem, suffix, n = target.stem, target.suffix, 2
-    while target.exists():
-        target = directory / f"{stem}-{n}{suffix}"
+def _candidate_names(directory: Path, filename: str):
+    """`filename`, then `name-2.ext`, `name-3.ext`, ... in `directory`."""
+    first = directory / filename
+    yield first
+    n = 2
+    while True:
+        yield directory / f"{first.stem}-{n}{first.suffix}"
         n += 1
-    return target
+
+
+def _publish_upload(temp: Path, directory: Path, filename: str) -> Path:
+    """Move the finished upload `temp` to the first free name — atomically, never replacing a file.
+
+    Claiming the name and publishing the content is one step (`os.link` fails if the name exists), so two
+    parallel uploads of the same name can't both pick it (audit round 7 P1-V7-01). On file systems without
+    hard links the name is reserved with O_EXCL first; that empty file is ours alone, so replacing it is safe.
+    """
+    for target in _candidate_names(directory, filename):
+        try:
+            os.link(temp, target)
+        except FileExistsError:
+            continue
+        except OSError:
+            try:
+                os.close(os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+            except FileExistsError:
+                continue
+            temp.replace(target)
+            return target
+        temp.unlink()
+        return target
 
 
 def _flatten_qs(query: str) -> dict[str, str]:
@@ -696,7 +720,7 @@ class _Handler(BaseHTTPRequestHandler):
             logger.warning("Upload: rejected file type '%s'", ext)
             raise ValueError(f"Dateityp '{ext}' nicht erlaubt ({', '.join(sorted(allowed_ext))}).")
 
-        dest = _free_name(dest_dir, filename) if keep_name else dest_dir / f".upload-{uuid.uuid4().hex}{ext}"
+        dest_name = filename if keep_name else f".upload-{uuid.uuid4().hex}{ext}"
         temp_dest = dest_dir / f".{filename}.upload-{uuid.uuid4().hex}.tmp"
         total = 0
         overlap = len(body_boundary)
@@ -726,7 +750,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not found_boundary:
                 return None, None
 
-            temp_dest.replace(dest)
+            dest = _publish_upload(temp_dest, dest_dir, dest_name)
             return fields, (filename, dest, total)
         finally:
             if temp_dest.exists():

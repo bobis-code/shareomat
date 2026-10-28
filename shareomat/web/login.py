@@ -74,7 +74,10 @@ PUBLIC_PATHS = {"/login", "/first-login"}
 
 def client_ip(handler) -> str:
     """The real client: the socket peer, or — only behind the HA supervisor or a configured trusted
-    proxy — the first X-Forwarded-For entry (so all phones behind Ingress don't count as one client)."""
+    proxy — the first X-Forwarded-For entry (so all phones behind Ingress don't count as one client).
+
+    Only safe if that proxy overwrites a client-supplied X-Forwarded-For; otherwise the per-client limit can
+    be dodged (the per-account delay still applies). Needs verification: the HA supervisor's header chain."""
     peer = str(handler.client_address[0]) if getattr(handler, "client_address", None) else ""
     if peer and _peer_trusted(peer):
         forwarded = handler.headers.get("X-Forwarded-For", "").split(",")[0].strip()

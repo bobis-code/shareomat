@@ -441,6 +441,53 @@ def test_upload_with_a_wrong_csrf_token_never_touches_the_inbox(server):
     assert (inbox / "readings-2.csv").read_text(encoding="utf-8") == "SECOND_FILE"
 
 
+def test_parallel_uploads_of_the_same_name_never_overwrite_each_other(server):
+    """Round 7 P1-V7-01: parallel uploads used to pick the same free name and replace each other."""
+    import threading
+    a = _setup_admin(server)
+    inbox = server["runtime"].paths.inbox
+    (inbox / "readings.csv").write_text("ORIGINAL", encoding="utf-8")
+    csrf = a.page_csrf()
+    count = 8
+    barrier = threading.Barrier(count)
+    statuses = []
+
+    def upload(i: int) -> None:
+        body, headers = _multipart({"csrf_token": csrf}, "readings.csv", f"DATA_{i}".encode())
+        barrier.wait()
+        statuses.append(a.request("POST", "/meter-data/upload", body=body, headers=headers)[0])
+
+    threads = [threading.Thread(target=upload, args=(i,)) for i in range(count)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert statuses == [303] * count
+    names = sorted(p.name for p in inbox.iterdir())
+    assert names == sorted(["readings.csv"] + [f"readings-{n}.csv" for n in range(2, count + 2)])   # no temp left
+    contents = {(inbox / n).read_text(encoding="utf-8") for n in names}
+    assert contents == {"ORIGINAL"} | {f"DATA_{i}" for i in range(count)}
+
+
+@pytest.mark.parametrize("hard_links", [True, False])
+def test_publish_upload_skips_a_name_taken_in_the_meantime(tmp_path, monkeypatch, hard_links):
+    """The name is claimed atomically; a file appearing between two tries is never replaced."""
+    import os
+    from shareomat.web import server as server_module
+    if not hard_links:
+        def no_link(*_args):
+            raise OSError("hard links not supported")
+        monkeypatch.setattr(server_module.os, "link", no_link)
+    (tmp_path / "readings.csv").write_text("FIRST", encoding="utf-8")
+    (tmp_path / "readings-2.csv").write_text("SECOND", encoding="utf-8")
+    temp = tmp_path / ".upload.tmp"
+    temp.write_text("THIRD", encoding="utf-8")
+    dest = server_module._publish_upload(temp, tmp_path, "readings.csv")
+    assert dest.name == "readings-3.csv" and dest.read_text(encoding="utf-8") == "THIRD"
+    assert not temp.exists() and len(os.listdir(tmp_path)) == 3
+    assert (tmp_path / "readings.csv").read_text(encoding="utf-8") == "FIRST"
+
+
 def test_cookie_path_is_the_ingress_path_only_behind_the_supervisor(server):
     """Round 6 P1-03: behind HA Ingress the session cookie must not reach other add-ons' paths."""
     _setup_admin(server)
