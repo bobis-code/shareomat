@@ -13,7 +13,7 @@ Part of:
 Notes:
     - Fail closed: no database, no account yet, no valid session or no
       permission -> no page, no download, no upload, no action.
-    - Cookies: HttpOnly, SameSite=Lax, Path=/, Secure when the request came
+    - Cookies: HttpOnly, SameSite=Lax, Path=/ (ingress path behind HA), Secure when the request came
       over HTTPS (X-Forwarded-Proto is only believed from the HA supervisor
       or a configured trusted proxy). The token is never in a URL.
     - X-Ingress-Path is only used to build links — it never authenticates.
@@ -31,7 +31,6 @@ import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
-from http.cookies import SimpleCookie
 from urllib.parse import quote, urlparse
 
 from shareomat.database.auth import (
@@ -105,18 +104,20 @@ def is_https(handler) -> bool:
     return False
 
 
-def _cookies(handler) -> SimpleCookie:
-    jar = SimpleCookie()
-    try:
-        jar.load(handler.headers.get("Cookie", ""))
-    except Exception:  # noqa: BLE001 — a malformed cookie header simply means "no cookies"
-        return SimpleCookie()
+def _cookies(handler) -> dict[str, str]:
+    """Plain `name=value; ...` parsing. SimpleCookie drops ALL cookies when a single foreign cookie on the
+    same host (another add-on, another service) is malformed — under HA Ingress that silently broke the login."""
+    jar: dict[str, str] = {}
+    for header in handler.headers.get_all("Cookie") or []:
+        for pair in header.split(";"):
+            name, sep, value = pair.strip().partition("=")
+            if sep and name and name not in jar:
+                jar[name] = value.strip().strip('"')
     return jar
 
 
 def cookie_value(handler, name: str) -> str:
-    morsel = _cookies(handler).get(name)
-    return morsel.value if morsel else ""
+    return _cookies(handler).get(name, "")
 
 
 def cookie_path(handler) -> str:
@@ -151,11 +152,16 @@ def same_origin(handler) -> bool:
     origin_host = urlparse(origin).netloc.lower()
     expected = {handler.headers.get("Host", "").lower()}
     if _trusted_proxy(handler):
-        forwarded = handler.headers.get("X-Forwarded-Host", "").split(",")[0].strip().lower()
-        if not forwarded and _peer(handler) == HA_SUPERVISOR_IP:
-            return True          # HA rewrites Host; the per-session CSRF token is the protection there
-        expected.add(forwarded)
-    return origin_host in expected
+        expected.add(handler.headers.get("X-Forwarded-Host", "").split(",")[0].strip().lower())
+    if origin_host in expected:
+        return True
+    if _peer(handler) == HA_SUPERVISOR_IP:
+        # Behind HA (own reverse proxy, external URL) the forwarded host may legitimately differ from what
+        # the browser shows. The CSRF tokens (and SameSite cookies) are the protection there.
+        logger.info("Login: origin %s differs from forwarded host %s behind HA, relying on the CSRF token",
+                    origin_host, sorted(expected))
+        return True
+    return False
 
 
 def _safe_next(raw: str) -> str:
@@ -200,7 +206,20 @@ def _setup_form(handler, ingress_path: str, *, error: str = "", username: str = 
 
 def _login_csrf_ok(handler, form: dict) -> bool:
     expected = cookie_value(handler, LOGIN_CSRF_COOKIE)
-    return bool(expected) and secrets.compare_digest(expected, form.get("login_csrf", "")) and same_origin(handler)
+    if not expected:
+        problem = "login cookie missing"
+    elif not secrets.compare_digest(expected, form.get("login_csrf", "")):
+        problem = "login token does not match the cookie"
+    elif not same_origin(handler):
+        problem = "foreign origin"
+    else:
+        return True
+    # Names only, never values — enough to see whether the browser/Ingress delivered the cookie
+    logger.warning("Login form refused: %s (cookies sent: %s, origin %s, host %s, forwarded host %s, "
+                   "cookie path %s, peer %s)", problem, sorted(_cookies(handler)) or "none",
+                   handler.headers.get("Origin", "-"), handler.headers.get("Host", "-"),
+                   handler.headers.get("X-Forwarded-Host", "-"), cookie_path(handler), _peer(handler))
+    return False
 
 
 def _start_session(handler, ingress_path: str, user_id: int, remember: bool, next_path: str) -> None:
@@ -210,8 +229,9 @@ def _start_session(handler, ingress_path: str, user_id: int, remember: bool, nex
         revoke_session(db_path, old.id)          # new token on every login (no session fixation)
     token, _session = create_session(db_path, user_id, remember=remember,
                                      user_agent=handler.headers.get("User-Agent", ""))
+    # Exactly ONE Set-Cookie: HA Ingress passes response headers on as a plain dict, so a second cookie
+    # (e.g. clearing the login token) would replace the session cookie. The login token expires by itself.
     set_cookie(handler, SESSION_COOKIE, token, max_age=REMEMBER_DAYS * 86400 if remember else None)
-    clear_cookie(handler, LOGIN_CSRF_COOKIE)
     handler._redirect(ingress_path + _safe_next(next_path))
 
 
