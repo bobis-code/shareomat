@@ -8,7 +8,7 @@
 
 Hallo
 
-Dieses Repository ist mein Versuch, ein einfaches und nachvollziehbares Abrechnungssystem für Schweizer LEG- und ZEV-Gemeinschaften zu entwickeln.
+Dieses Repository ist mein Versuch, ein einfaches und nachvollziehbares Abrechnungssystem für Schweizer LEG (lokale Elektrizitätsgemeinschaften) zu entwickeln. ZEV und vZEV sind geplant, werden aber noch nicht unterstützt.
 
 Die Idee entstand, weil ich bisher keine wirklich schlanke Lösung gefunden habe, die sich auf das Wesentliche konzentriert: Messdaten des Netzbetreibers möglichst automatisch zu importieren, den Verbrauch der LEG-Gemeinschaft korrekt zwischen lokal erzeugter Energie und Netzbezug aufzuteilen und daraus nachvollziehbare Abrechnungen zu erstellen.
 
@@ -174,7 +174,7 @@ Shareomat splits configuration into two places, deliberately:
   broker addresses and MQTT/IMAP credentials.
 - **The admin web interface** (backed by `data/shareomat.db`) —
   Gemeinschaft, Teilnehmer, Messpunkte, Vertrag (which governs Tarife), and
-  automation settings. This is the data that actually changes as a LEG/ZEV
+  automation settings. This is the data that actually changes as a LEG
   community grows, so it is managed live in the UI instead of a config file
   that requires a restart.
 
