@@ -346,3 +346,15 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
 .nav-logout { background: transparent; border: 1px solid rgba(255,255,255,.3); color: #fff; padding: 6px 12px;
               border-radius: 8px; cursor: pointer; width: fit-content; }
 .nav-logout:hover { background: rgba(255,255,255,.1); }
+
+@media (max-width: 720px) {
+  /* Forms on phones: one field per line, finger-sized controls (>= 44 px). */
+  .card form.actions-row input[type=text], .card form.actions-row input[type=date],
+  .card form.actions-row input[type=password], .card form.actions-row select { flex: 1 1 100%; min-width: 0 !important;
+    width: 100% !important; box-sizing: border-box; min-height: 44px; font-size: 1rem; }
+  .card form.actions-row label { flex: 1 1 100%; }
+  button, .btn { min-height: 44px; }
+  .btn-small { min-height: 36px; }
+  input[type=checkbox] { width: 22px; height: 22px; vertical-align: middle; }
+  .form-card input, .form-card select { min-height: 44px; font-size: 1rem; }
+}
