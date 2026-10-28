@@ -43,9 +43,12 @@ der alte Entwurf ist obsolet — siehe Abschnitt 5 unten.
 
 Die lokale Kommunikation zwischen EMSOMAT und SHAREOMAT wird ausschließlich über
 
-**MQTT 5.0 + Eclipse Sparkplug Specification 3.0**
+**MQTT 3.1.1 + Eclipse Sparkplug Specification 3.0**
 
 realisiert.
+
+(Ursprünglich MQTT 5.0; geändert durch ADR-0006, weil beide Programme MQTT 3.1.1
+sprechen und keine MQTT-5-Funktion benötigt wird.)
 
 Es gibt danach **keine zweite MQTT-Kommunikation parallel dazu**.
 
@@ -87,7 +90,7 @@ EMSOMAT und SHAREOMAT benutzen denselben vorhandenen lokalen MQTT-Broker.
 
 ```text
                  MQTT Broker
-              MQTT 5 + Sparkplug
+             MQTT 3.1.1 + Sparkplug
                       │
           ┌───────────┴───────────┐
           │                       │
@@ -625,7 +628,7 @@ Sparkplug 3.0 ist eine offene Eclipse-Spezifikation und besitzt mit Eclipse Tahu
 
 ```text
                 LOKALER MQTT BROKER
-                  MQTT 5.0
+                  MQTT 3.1.1
                Sparkplug 3.0
                        │
          ┌─────────────┴─────────────┐
@@ -659,7 +662,7 @@ Sparkplug 3.0 ist eine offene Eclipse-Spezifikation und besitzt mit Eclipse Tahu
 ```text
 EMSOMAT ↔ SHAREOMAT
 =
-MQTT 5.0
+MQTT 3.1.1
 +
 Eclipse Sparkplug Specification 3.0
 ```
@@ -891,18 +894,14 @@ Bestätigt und übernommen:
   das ausschliesslich die Kommunikationsschicht — die lokale Regelung
   (`battery_logic.py` etc.) läuft unverändert weiter, siehe Abschnitt 17/18.
 
-## 28.3 MQTT-5-Session-Parameter
+## 28.3 MQTT-Session-Parameter (MQTT 3.1.1, ADR-0006)
 
 - **Clean Session/Clean Start = true** — normativ bestätigt: *"The MQTT clean
   session flag MUST always be set to true for all Sparkplug clients."*
-- **Session Expiry Interval = 0** — folgt direkt aus "clean session muss immer true
-  sein": ein Session Expiry Interval > 0 würde in MQTT 5 eine persistente Session
-  erlauben, was der "always clean"-Vorgabe widerspricht. **Hinweis zur Quellenlage:**
-  dieser exakte MQTT-5-Parametername wird im geprüften Normativtext-Auszug nicht
-  wörtlich genannt (der Standard nutzt durchgehend die ältere MQTT-3.1.1-Terminologie
-  "clean session") — Session Expiry Interval=0 ist die korrekte MQTT-5-Übersetzung
-  dieser Vorgabe, keine eigene Erfindung, aber vor Implementierung gegen die volle
-  PDF-Spezifikation gegenprüfen, falls dort ein expliziterer MQTT-5-Abschnitt existiert.
+- **Session Expiry Interval:** entfällt, weil MQTT 3.1.1 verwendet wird (ADR-0006).
+  Falls später MQTT 5 eingeführt wird: Session Expiry Interval = 0 als Übersetzung von
+  "clean session muss immer true sein"; dann gegen die volle Sparkplug-PDF-Spezifikation
+  gegenprüfen.
 - **Will Message:** wie in 28.1/28.2 — NDEATH (Edge Node) und STATE-OFFLINE (Host)
   werden je als MQTT Will beim Connect registriert, nicht aktiv gesendet.
 

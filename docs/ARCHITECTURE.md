@@ -377,8 +377,10 @@ Konsequenzen. Aktuell:
 * ADR-0001 — Freigegebene Abrechnungsläufe sind unveränderlich.
 * ADR-0002 — Rohformat-Parser normalisieren auf ein gemeinsames internes Modell.
 * ADR-0003 — "Raise, don't guess" bei unverifizierten externen Datenformaten.
-* ADR-0004 — MQTT 5.0 + Sparkplug B 3.0 für die lokale Emsomat↔Shareomat-Kommunikation.
+* ADR-0004 — MQTT 5.0 + Sparkplug B 3.0 für die lokale Emsomat↔Shareomat-Kommunikation
+  (MQTT-Version ersetzt durch ADR-0006).
 * ADR-0005 — Cross-House-Kommunikation über zentralen Sparkplug-B-Relay.
+* ADR-0006 — MQTT 3.1.1 statt 5.0 für die Sparkplug-B-Kommunikation.
 
 Angenommene ADRs sind dauerhafte Leitplanken für künftige Änderungen, nicht
 nur historische Notizen — siehe `docs/decisions/README.md`, "Verbindlichkeit".
