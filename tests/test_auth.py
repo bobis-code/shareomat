@@ -488,6 +488,26 @@ def test_publish_upload_skips_a_name_taken_in_the_meantime(tmp_path, monkeypatch
     assert (tmp_path / "readings.csv").read_text(encoding="utf-8") == "FIRST"
 
 
+def test_publish_upload_fallback_leaves_no_empty_file_if_replace_fails(tmp_path, monkeypatch):
+    """Round 8 P2-V8-01: a failed replace after the O_EXCL reservation left an empty readings.csv behind."""
+    import pathlib
+    from shareomat.web import server as server_module
+
+    def no_link(*_args):
+        raise OSError("hard links not supported")
+
+    def broken_replace(self, _target):
+        raise OSError("disk error")
+
+    monkeypatch.setattr(server_module.os, "link", no_link)
+    temp = tmp_path / ".upload.tmp"
+    temp.write_text("DATA", encoding="utf-8")
+    monkeypatch.setattr(pathlib.Path, "replace", broken_replace)
+    with pytest.raises(OSError, match="disk error"):
+        server_module._publish_upload(temp, tmp_path, "readings.csv")
+    assert not (tmp_path / "readings.csv").exists()
+
+
 def test_cookie_path_is_the_ingress_path_only_behind_the_supervisor(server):
     """Round 6 P1-03: behind HA Ingress the session cookie must not reach other add-ons' paths."""
     _setup_admin(server)

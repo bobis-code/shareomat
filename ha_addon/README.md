@@ -61,9 +61,17 @@ not here — see "Ersteinrichtung" below.
 
 ## Ersteinrichtung
 
-Nach der Installation öffnen Sie die Shareomat Weboberfläche (Ingress-Panel
-des Add-ons). Beim ersten Start ist die Datenbank leer und ein
-Einrichtungsassistent führt durch: Gemeinschaft → Teilnehmer → Messpunkte →
+**Erstes Login (ab 0.6.0):** Shareomat ist mit einem Passwort geschützt.
+Nach dem Start steht im **Protokoll** des Add-ons eine Zeile
+«Shareomat Ersteinrichtung: Einmal-Code XXXX-XXXX-XXXX». Shareomat öffnen,
+den Code eintragen, Benutzername und ein Passwort mit mindestens 12 Zeichen
+festlegen. Auf dem eigenen Handy «30 Tage angemeldet bleiben» ankreuzen.
+Passwort vergessen: Option `reset_login` einschalten, Add-on neu starten,
+neuen Code aus dem Protokoll verwenden, Option wieder ausschalten.
+Schritt für Schritt: `docs/Erstes_Login.md` im Repository.
+
+Nach dem Login führt beim ersten Start (leere Datenbank) ein
+Einrichtungsassistent durch: Gemeinschaft → Teilnehmer → Messpunkte →
 Vertrag. Danach lassen sich Teilnehmer, Messpunkte, Vertrag und die Automatik
 jederzeit über die Weboberfläche verwalten — Änderungen gelten sofort, ohne
 Add-on-Neustart.

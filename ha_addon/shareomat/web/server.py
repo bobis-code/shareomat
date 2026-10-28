@@ -131,7 +131,11 @@ def _publish_upload(temp: Path, directory: Path, filename: str) -> Path:
                 os.close(os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
             except FileExistsError:
                 continue
-            temp.replace(target)
+            try:
+                temp.replace(target)
+            except OSError:
+                target.unlink(missing_ok=True)      # our own empty reservation, never someone else's file
+                raise
             return target
         temp.unlink()
         return target
