@@ -255,3 +255,7 @@ docs/Energieversorgungsunternehmen/**/*LEG_ONE*.md
 # Temporary working notes/demos (not versioned)
 docs/temp/
 docs/Temp/
+
+# draw.io editor backups/temp files
+.$*.bkp
+.$*.dtmp
