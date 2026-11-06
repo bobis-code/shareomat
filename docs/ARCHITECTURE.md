@@ -239,8 +239,16 @@ layout".
 Übersicht     — Dashboard
 VERWALTUNG    — Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag
 BETRIEB       — Messdaten, Analyse, Abrechnungen, Rechnungen*, Automatisierung, Berichte
+INTEGRATIONEN — Apps & Integrationen
 SYSTEM        — Einstellungen, Externe Daten
 ```
+
+"Apps & Integrationen" (`web/pages/apps.py`) zeigt Emsomat an: installiert
+ja/nein und Version (liest `custom_components/emsomat/manifest.json` im
+HA-Konfigurationsordner, `ha/emsomat_install.py`), online/offline über den
+lokalen Sparkplug-Kanal (`SparkplugHost.emsomat_online`). Die Seite liest
+nur und verlinkt auf HACS bzw. Home Assistant. Installiert und aktualisiert
+wird Emsomat weiter über HACS, die Geräte verwaltet Emsomat selbst.
 
 \* Rechnungen ist aktuell ein Platzhalter (`PLACEHOLDER_ROUTES` in
 `navigation.py`) — siehe §11.

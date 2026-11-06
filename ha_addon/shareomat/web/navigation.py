@@ -43,6 +43,7 @@ ROUTE_PATHS: dict[str, str] = {
     "reports_download": "/reports/download",
     "settings": "/settings",
     "external_data": "/external-data",
+    "apps": "/apps",
     "run": "/actions/run",
     "static": "/static",
     "banner": "/static/banner.png",
@@ -65,6 +66,9 @@ NAV_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("invoices", "Rechnungen"),
         ("automation", "Automatisierung"),
         ("reports", "Berichte"),
+    ]),
+    ("INTEGRATIONEN", [
+        ("apps", "Apps & Integrationen"),
     ]),
     ("SYSTEM", [
         ("settings", "Einstellungen"),

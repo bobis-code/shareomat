@@ -46,6 +46,7 @@ class WebState:
         self._on_run: Callable[[], None] | None = None
         self._db_path: Path | None = None
         self._runtime: RuntimeConfig | None = None
+        self._emsomat_online_getter: Callable[[], bool] | None = None
 
         self._flash_msg: str = ""
         self._flash_ok: bool = True
@@ -113,6 +114,18 @@ class WebState:
         """Register the technical runtime configuration (paths/mqtt/email/web)."""
         with self._lock:
             self._runtime = runtime
+
+    def register_emsomat_online(self, getter: Callable[[], bool]) -> None:
+        """Register where Emsomat's live online state comes from (the local Sparkplug host)."""
+        with self._lock:
+            self._emsomat_online_getter = getter
+
+    @property
+    def emsomat_online(self) -> bool | None:
+        """True/False from the local Sparkplug channel, None if that channel is not running."""
+        with self._lock:
+            getter = self._emsomat_online_getter
+        return bool(getter()) if getter is not None else None
 
     def trigger_run(self) -> bool:
         """Start one settlement run unless another manual run is already active."""
