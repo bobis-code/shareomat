@@ -303,7 +303,9 @@ information only — billing never uses it. Contract:
 
 Neither project requires the other. Note: unlike Shareomat, Emsomat is a
 Home Assistant *integration* and is installed via HACS, not the Add-on
-Store — see its own README.
+Store — see its own README. The **Apps & Integrationen** page shows whether
+Emsomat is installed (and which version), whether it is online, and links to
+install/set it up in Home Assistant — it never installs anything itself.
 
 ## Project layout
 
@@ -354,6 +356,7 @@ shareomat/                    Python package
     meter_data.py               IntervalReading / EnergySlot / ImportFile
     billing.py                  MatchResult / BillingRecord
     invoicing.py                Invoices, payments, payouts, payment profile
+    integrations.py             EmsomatInstall (Apps & Integrationen page)
   web/                        Admin web interface (standalone or behind HA Ingress)
     server.py                  HTTP server, routing, upload/download, CSRF
     login.py                   Central login gate, cookies, client address
@@ -367,6 +370,7 @@ shareomat/                    Python package
   ha/
     mqtt_runtime.py          MQTT client lifecycle
     mqtt_discovery.py        Home Assistant MQTT Discovery
+    emsomat_install.py       Detects the installed Emsomat integration (read-only)
     entities/                HA entity definitions (sensors, buttons, numbers, switches)
   sparkplug/                  Sparkplug B: host, participant relay, WAN up/downlink (Emsomat, Cross-House)
 ha_addon/                    Home Assistant Add-on

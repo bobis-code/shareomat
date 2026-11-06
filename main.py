@@ -491,6 +491,8 @@ def main() -> None:
         state.register_runtime(runtime)
         _prepare_login(db_path, runtime)
         state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host))
+        if sparkplug_host is not None:
+            state.register_emsomat_online(lambda: sparkplug_host.emsomat_online)
         for warning in startup_warnings:
             state.add_warning(warning)
 

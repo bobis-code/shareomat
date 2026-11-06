@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% from "components/status_card.html" import tile %}
+{% block title %}Apps & Integrationen{% endblock %}
+{% block heading %}Apps & Integrationen{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Emsomat</h2>
+  <p class="ts">Energiemanagement im Haus: Batterie, Wärmepumpe, E-Auto und weitere Geräte.
+    Emsomat läuft als eigene Home-Assistant-Integration, auch ohne Shareomat.</p>
+
+  <div class="grid" style="margin-top:12px">
+    {% if not emsomat.config_dir_found %}
+      {{ tile("Installation", "unbekannt", "warn") }}
+    {% elif emsomat.installed %}
+      {{ tile("Installation", "installiert", "ok") }}
+    {% else %}
+      {{ tile("Installation", "nicht installiert", "warn") }}
+    {% endif %}
+    {{ tile("Version", emsomat.version or "–") }}
+    {% if emsomat_online is none %}
+      {{ tile("Verbindung", "unbekannt") }}
+    {% elif emsomat_online %}
+      {{ tile("Verbindung", "online", "ok") }}
+    {% else %}
+      {{ tile("Verbindung", "offline", "offline") }}
+    {% endif %}
+  </div>
+
+  {% if not emsomat.config_dir_found %}
+  <p class="ts" style="margin-top:12px">Shareomat sieht keinen Home-Assistant-Konfigurationsordner
+    (eigenständiger Betrieb). Ob Emsomat installiert ist, lässt sich hier nicht prüfen.</p>
+  {% endif %}
+  {% if emsomat_online is none %}
+  <p class="ts" style="margin-top:12px">Die Verbindung wird über den lokalen Sparkplug-Kanal geprüft.
+    Dieser ist nicht aktiv.</p>
+  {% endif %}
+
+  <div class="actions-row">
+    {% if not emsomat.installed %}
+    <a class="btn" href="{{ emsomat_links.install }}" target="_blank" rel="noopener">In Home Assistant installieren (HACS)</a>
+    {% endif %}
+    <a class="btn{{ ' btn-muted' if not emsomat.installed }}" href="{{ emsomat_links.setup }}" target="_blank" rel="noopener">Einrichten</a>
+    <a class="btn btn-muted" href="{{ emsomat_links.open }}" target="_blank" rel="noopener">In Home Assistant öffnen</a>
+  </div>
+  <div class="field-hint">Installation und Updates laufen über HACS, die Geräte werden in Emsomat selbst verwaltet.
+    Shareomat zeigt hier nur den Stand an.</div>
+</div>
+
+<div class="card">
+  <h2>Weitere Module</h2>
+  <p class="ts">Später erweiterbar.</p>
+</div>
+{% endblock %}

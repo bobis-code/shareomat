@@ -45,6 +45,7 @@ from shareomat.web.navigation import url_for
 from shareomat.web.pages import (
     account,
     analysis,
+    apps,
     automation,
     billing,
     community,
@@ -97,6 +98,7 @@ _PAGE_MODULES = {
     "reports": reports_page,
     "settings": settings_page,
     "external_data": external_data,
+    "apps": apps,
 }
 
 
