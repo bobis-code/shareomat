@@ -15,24 +15,30 @@ Part of:
 from __future__ import annotations
 
 import sqlite3
-from decimal import Decimal
 from pathlib import Path
+
+from shareomat.core.price_validation import finite_decimal, validate_period, validate_price_fields
 
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.models.external_data import ReferencePrice
 
 
+def _validated(price: ReferencePrice) -> ReferencePrice:
+    validate_period(price.period_start, price.period_end, required_end=True)
+    return validate_price_fields(price, ("price_chf_kwh",))
+
+
 def _row_to_reference_price(row: sqlite3.Row) -> ReferencePrice:
-    return ReferencePrice(
+    return _validated(ReferencePrice(
         id=row["id"],
         technology=row["technology"],
         period_start=str_to_date(row["period_start"]),
         period_end=str_to_date(row["period_end"]),
-        price_chf_kwh=Decimal(row["price_chf_kwh"]),
+        price_chf_kwh=finite_decimal(row["price_chf_kwh"]),
         source=row["source"],
         is_official=bool(row["is_official"]),
         published_at=str_to_date(row["published_at"]),
-    )
+    ))
 
 
 def list_reference_prices(db_path: Path, *, technology: str | None = None) -> list[ReferencePrice]:
@@ -64,6 +70,7 @@ def get_reference_price_for_period(db_path: Path, technology: str, as_of) -> Ref
 
 def save_reference_price(db_path: Path, price: ReferencePrice) -> ReferencePrice:
     """Insert or replace one (technology, period_start, source) reference price."""
+    price = _validated(price)
     now = now_iso()
     with connect(db_path) as conn:
         with conn:

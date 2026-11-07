@@ -40,6 +40,9 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
@@ -180,6 +183,7 @@ def _result_fingerprint(preview: BillingPreview) -> str:
 
 def _collect_readings_for_period(
     db_path: Path, runtime: RuntimeConfig, period_start: date, period_end: date,
+    *, persist_readings: bool = True,
 ) -> tuple[list[IntervalReading], list[BillingSourceFile], list[str]]:
     """Parse every inbox + archive file and keep only readings inside the period, de-duplicated.
 
@@ -222,12 +226,12 @@ def _collect_readings_for_period(
             issues.append(f"Datei {imp.path.name} konnte nicht gelesen werden: {exc}")
             continue
         in_range = [r for r in file_readings if start_dt <= r.slot_start < end_dt]
-        if not in_range:
-            continue
         if row_errors:
             issues.append(
                 f"Datei {imp.path.name}: {len(row_errors)} Zeile(n) abgewiesen (z. B. {row_errors[0]})."
             )
+        if not in_range:
+            continue
         seen_sha256.add(imp.sha256)
         sources.append(BillingSourceFile(filename=imp.path.name, sha256=imp.sha256, origin=origin))
         for r in in_range:
@@ -247,7 +251,8 @@ def _collect_readings_for_period(
         issues.append(f"… insgesamt {conflicts} widersprüchliche Messwerte.")
 
     readings = list(by_key.values())
-    save_meter_readings(db_path, readings)
+    if persist_readings:
+        save_meter_readings(db_path, readings)
     return readings, sources, issues
 
 
@@ -264,6 +269,7 @@ def _base_config(db_path: Path, runtime: RuntimeConfig, days: list[date]):
 
 def compute_billing_preview(
     db_path: Path, runtime: RuntimeConfig, period_start: date, period_end: date,
+    *, persist_readings: bool = True,
 ) -> BillingPreview:
     """Scan available meter data and compute a live billing preview for a period.
 
@@ -273,6 +279,9 @@ def compute_billing_preview(
     day applies, so joins, departures and price changes inside the period
     are respected. Everything that makes the result unreliable is collected
     in availability.blocking_issues; release is refused while any remain.
+
+    Release validation sets persist_readings=False so the optimistic
+    consistency check observes external commits, not its own cache writes.
 
     Raises shareomat.database.config_builder.IncompleteConfigError if
     setup (community/participants/meters/tariff) is incomplete for the
@@ -284,7 +293,9 @@ def compute_billing_preview(
     days = [period_start + timedelta(days=i) for i in range((period_end - period_start).days + 1)]
     base_config = _base_config(db_path, runtime, days)
     # hard: never releasable (wrong or missing basis); soft: releasable only with a written reason.
-    readings, sources, hard = _collect_readings_for_period(db_path, runtime, period_start, period_end)
+    readings, sources, hard = _collect_readings_for_period(
+        db_path, runtime, period_start, period_end, persist_readings=persist_readings,
+    )
     soft: list[str] = []
     resolver = EligibilityResolver(db_path)
 
@@ -509,6 +520,52 @@ def _row_to_run(row) -> BillingRun:
     )
 
 
+@contextmanager
+def _workflow_transaction(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Commit status and audit together; translate only SQLite lock conflicts."""
+    try:
+        with connect(db_path) as conn:
+            with conn:
+                yield conn
+    except sqlite3.OperationalError as exc:
+        if (getattr(exc, "sqlite_errorcode", 0) & 0xff) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise BillingWorkflowError(
+                "Datenbank ist vorübergehend gesperrt — bitte den Vorgang erneut versuchen."
+            ) from exc
+        raise
+
+
+def _release_file_state(runtime: RuntimeConfig) -> list[tuple[str, int, int, str]]:
+    """Observe file content AND ordering metadata; SQLite cannot lock source files.
+
+    Include all supported files, even outside the period: a new file can
+    contain relevant readings. Fail closed on unreadable/disappearing files.
+    This detects changes during validation, but is not a filesystem lock.
+    """
+    state = []
+    try:
+        for directory in (runtime.paths.inbox, runtime.paths.archive):
+            if not directory.exists():
+                continue
+            for path in sorted(directory.iterdir()):
+                if path.suffix.lower() not in {".csv", ".xml", ".sdat", ".xlsx"} or not path.is_file():
+                    continue
+                before = path.stat()
+                with path.open("rb") as stream:
+                    digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                after = path.stat()
+                if (before.st_size, before.st_mtime_ns, before.st_ino) != (
+                    after.st_size, after.st_mtime_ns, after.st_ino,
+                ):
+                    raise BillingWorkflowError("Messdateien haben sich während der Freigabe geändert — bitte erneut prüfen.")
+                state.append((str(path), after.st_size, after.st_mtime_ns, digest))
+    except OSError as exc:
+        raise BillingWorkflowError(
+            "Messdateien konnten während der Freigabe nicht verlässlich geprüft werden — bitte erneut versuchen."
+        ) from exc
+    return state
+
+
 def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
     """Persist a computed preview as a new draft BillingRun (a new version if the period already has runs)."""
     now = now_iso()
@@ -615,49 +672,71 @@ def release_billing_run(
     can never be released. Soft issues (data gaps, missing grid-operator
     confirmations) need a written reason, stored on the run and in the
     audit log. With `runtime`, the period is recomputed first and the
-    release refused if anything changed since the draft was saved
-    (corrected meter data, membership, tariffs).
+    release refused if anything changed since the draft was saved.
+    Recompute without writes, then reserve the SQLite writer and compare
+    data_version on the SAME connection. Any intervening commit invalidates
+    validation. Source files are observed before/after, not locked by SQLite.
     """
-    if runtime is not None:
+    with _workflow_transaction(db_path) as conn:
+        version = conn.execute("PRAGMA data_version").fetchone()[0]
         draft = get_billing_run(db_path, run_id).run
-        if draft.status == BILLING_STATUS_DRAFT and draft.result_fingerprint:
-            current = compute_billing_preview(db_path, runtime, draft.period_start, draft.period_end)
+        checked_files = None
+        if runtime is not None and draft.status == BILLING_STATUS_DRAFT and draft.result_fingerprint:
+            checked_files = _release_file_state(runtime)
+            try:
+                current = compute_billing_preview(
+                    db_path, runtime, draft.period_start, draft.period_end, persist_readings=False,
+                )
+            except IncompleteConfigError as exc:
+                raise BillingWorkflowError(
+                    "Die Berechnungsgrundlage ist nicht mehr vollständig — bitte Einrichtung prüfen und neu berechnen."
+                ) from exc
             if _result_fingerprint(current) != draft.result_fingerprint:
                 raise BillingWorkflowError(
                     "Seit dem Speichern des Entwurfs haben sich Messdaten, Mitgliedschaften oder Tarife geändert — "
                     "bitte den Zeitraum neu berechnen und als neuen Entwurf speichern."
                 )
-    with connect(db_path) as conn:
-        with conn:
-            row = conn.execute("SELECT status, quality_issues FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
-            if row is None:
-                raise BillingWorkflowError(f"Abrechnung {run_id} wurde nicht gefunden.")
-            if row["status"] != BILLING_STATUS_DRAFT:
+        conn.execute("BEGIN IMMEDIATE")
+        if checked_files is not None:
+            if conn.execute("PRAGMA data_version").fetchone()[0] != version:
                 raise BillingWorkflowError(
-                    f"Nur Entwürfe können freigegeben werden (aktueller Status: {row['status']})."
+                    "Die Datenbank hat sich während der Freigabe geändert — bitte erneut prüfen und freigeben."
                 )
-            hard_issues, soft_issues = _load_issues(row["quality_issues"])
-            if hard_issues:
+            if _release_file_state(runtime) != checked_files:
                 raise BillingWorkflowError(
-                    "Freigabe nicht möglich — nicht übersteuerbare Fehler: " + " ".join(hard_issues[:3])
-                    + (" …" if len(hard_issues) > 3 else "")
+                    "Messdateien haben sich während der Freigabe geändert — bitte erneut prüfen und freigeben."
                 )
-            issues = soft_issues
-            reason = override_reason.strip()
-            if issues and not reason:
-                raise BillingWorkflowError(
-                    f"Freigabe gesperrt — {len(issues)} offene Prüfpunkt(e): " + " ".join(issues[:3])
-                    + (" …" if len(issues) > 3 else "")
-                    + " Daten ergänzen und neu berechnen, oder mit schriftlicher Begründung freigeben."
-                )
-            now = now_iso()
-            conn.execute(
-                "UPDATE billing_runs SET status = ?, released_at = ?, release_override_reason = ?, updated_at = ? "
-                "WHERE id = ?",
-                (BILLING_STATUS_RELEASED, now, reason if issues else "", now, run_id),
+        row = conn.execute("SELECT status, quality_issues FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise BillingWorkflowError(f"Abrechnung {run_id} wurde nicht gefunden.")
+        if row["status"] != BILLING_STATUS_DRAFT:
+            raise BillingWorkflowError(
+                f"Nur Entwürfe können freigegeben werden (aktueller Status: {row['status']})."
             )
-            record_event(conn, "billing_run", run_id, "released",
-                         f"trotz {len(issues)} Prüfpunkt(en), Begründung: {reason}" if issues else "Prüfungen bestanden")
+        hard_issues, soft_issues = _load_issues(row["quality_issues"])
+        if hard_issues:
+            raise BillingWorkflowError(
+                "Freigabe nicht möglich — nicht übersteuerbare Fehler: " + " ".join(hard_issues[:3])
+                + (" …" if len(hard_issues) > 3 else "")
+            )
+        issues = soft_issues
+        reason = override_reason.strip()
+        if issues and not reason:
+            raise BillingWorkflowError(
+                f"Freigabe gesperrt — {len(issues)} offene Prüfpunkt(e): " + " ".join(issues[:3])
+                + (" …" if len(issues) > 3 else "")
+                + " Daten ergänzen und neu berechnen, oder mit schriftlicher Begründung freigeben."
+            )
+        now = now_iso()
+        updated = conn.execute(
+            "UPDATE billing_runs SET status = ?, released_at = ?, release_override_reason = ?, updated_at = ? "
+            "WHERE id = ? AND status = ?",
+            (BILLING_STATUS_RELEASED, now, reason if issues else "", now, run_id, BILLING_STATUS_DRAFT),
+        )
+        if updated.rowcount != 1:
+            raise BillingWorkflowError("Freigabe nicht möglich — der Status wurde zwischenzeitlich geändert.")
+        record_event(conn, "billing_run", run_id, "released",
+                     f"trotz {len(issues)} Prüfpunkt(en), Begründung: {reason}" if issues else "Prüfungen bestanden")
     logger.info("Billing: released run %d", run_id)
     return get_billing_run(db_path, run_id).run
 
@@ -668,27 +747,30 @@ def cancel_billing_run(db_path: Path, run_id: int) -> BillingRun:
     Takes the write lock before checking for issued documents, so it can't
     interleave with shareomat.database.invoicing.issue_documents.
     """
-    with connect(db_path) as conn:
+    with _workflow_transaction(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
-        with conn:
-            row = conn.execute("SELECT status FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
-            if row is None:
-                raise BillingWorkflowError(f"Abrechnung {run_id} wurde nicht gefunden.")
-            if row["status"] == BILLING_STATUS_CANCELLED:
-                raise BillingWorkflowError("Abrechnung ist bereits storniert.")
-            issued = conn.execute(
-                "SELECT COUNT(*) FROM billing_documents WHERE billing_run_id = ? AND status != 'cancelled'", (run_id,)
-            ).fetchone()[0]
-            if issued:
-                raise BillingWorkflowError(
-                    f"Zu dieser Abrechnung sind {issued} Rechnung(en)/Gutschrift(en) erstellt — "
-                    "zuerst die Belege stornieren (nur ohne gebuchte Zahlungen möglich)."
-                )
-            now = now_iso()
-            conn.execute(
-                "UPDATE billing_runs SET status = ?, updated_at = ? WHERE id = ?",
-                (BILLING_STATUS_CANCELLED, now, run_id),
+        row = conn.execute("SELECT status FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
+        if row is None:
+            raise BillingWorkflowError(f"Abrechnung {run_id} wurde nicht gefunden.")
+        if row["status"] == BILLING_STATUS_CANCELLED:
+            raise BillingWorkflowError("Abrechnung ist bereits storniert.")
+        if row["status"] not in (BILLING_STATUS_DRAFT, BILLING_STATUS_RELEASED):
+            raise BillingWorkflowError("Nur Entwürfe und freigegebene Abrechnungen können storniert werden.")
+        issued = conn.execute(
+            "SELECT COUNT(*) FROM billing_documents WHERE billing_run_id = ? AND status != 'cancelled'", (run_id,)
+        ).fetchone()[0]
+        if issued:
+            raise BillingWorkflowError(
+                f"Zu dieser Abrechnung sind {issued} Rechnung(en)/Gutschrift(en) erstellt — "
+                "zuerst die Belege stornieren (nur ohne gebuchte Zahlungen möglich)."
             )
+        now = now_iso()
+        updated = conn.execute(
+            "UPDATE billing_runs SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+            (BILLING_STATUS_CANCELLED, now, run_id, row["status"]),
+        )
+        if updated.rowcount != 1:
+            raise BillingWorkflowError("Stornierung nicht möglich — der Status wurde zwischenzeitlich geändert.")
     logger.info("Billing: cancelled run %d", run_id)
     return get_billing_run(db_path, run_id).run
 

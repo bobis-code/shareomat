@@ -17,17 +17,27 @@ import sqlite3
 from decimal import Decimal
 from pathlib import Path
 
+from shareomat.core.price_validation import finite_decimal, validate_period, validate_price_fields
+
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.models.external_data import SupplierTariff
 
 
 def _dec(value) -> Decimal | None:
-    return Decimal(value) if value is not None else None
+    return finite_decimal(value) if value is not None else None
+
+
+def _validated(tariff: SupplierTariff) -> SupplierTariff:
+    validate_period(tariff.valid_from, tariff.valid_until)
+    return validate_price_fields(tariff, (), (
+        "energy_rate_ht_chf_kwh", "energy_rate_nt_chf_kwh", "grid_rate_ht_chf_kwh", "grid_rate_nt_chf_kwh",
+        "base_price_chf_year", "metering_price_chf_year", "feed_in_rate_chf_kwh", "hkn_rate_chf_kwh",
+    ))
 
 
 def _row_to_supplier_tariff(row: sqlite3.Row) -> SupplierTariff:
-    return SupplierTariff(
+    return _validated(SupplierTariff(
         id=row["id"],
         source=row["source"],
         product=row["product"],
@@ -42,7 +52,7 @@ def _row_to_supplier_tariff(row: sqlite3.Row) -> SupplierTariff:
         valid_from=str_to_date(row["valid_from"]),
         valid_until=str_to_date(row["valid_until"]),
         active=bool(row["active"]),
-    )
+    ))
 
 
 def list_supplier_tariffs(db_path: Path, *, include_inactive: bool = True) -> list[SupplierTariff]:
@@ -57,6 +67,7 @@ def list_supplier_tariffs(db_path: Path, *, include_inactive: bool = True) -> li
 
 def create_supplier_tariff(db_path: Path, tariff: SupplierTariff) -> SupplierTariff:
     """Insert a new supplier tariff version fetched from an external source."""
+    tariff = _validated(tariff)
     now = now_iso()
 
     def _str(v: Decimal | None) -> str | None:
@@ -119,6 +130,9 @@ def replace_supplier_tariffs(db_path: Path, source: str, valid_from, tariffs: li
 
     Returns the number of tariffs stored.
     """
+    tariffs = [_validated(tariff) for tariff in tariffs]
+    if any(tariff.source != source or tariff.valid_from != valid_from for tariff in tariffs):
+        raise ValueError("Tarife passen nicht zum ersetzten Netzbetreiber und Zeitraum.")
     with connect(db_path) as conn:
         with conn:
             conn.execute(

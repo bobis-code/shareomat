@@ -55,7 +55,9 @@ import hashlib
 from dataclasses import replace
 from pathlib import Path
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, DecimalException
+
+from shareomat.core.price_validation import PriceValidationError, finite_decimal
 
 from shareomat.core.participant_roles import ParticipantRoles, participant_roles, roles_by_participant
 from shareomat.database.audit import list_events
@@ -132,7 +134,10 @@ def _form_rappen(ctx: RequestContext, field_name: str, *, label: str) -> Decimal
     the conversion happens once, right here, at the form boundary. Decimal
     division by 100 is exact (no float rounding), so no precision is lost.
     """
-    return form_decimal(ctx, field_name, label=label) / _RAPPEN_PER_CHF
+    try:
+        return form_decimal(ctx, field_name, label=label) / _RAPPEN_PER_CHF
+    except DecimalException as exc:
+        raise FormError(f"'{label}': Zahl liegt ausserhalb des technischen Rechenbereichs.") from exc
 
 
 def _require_month_start(value: date, *, label: str) -> None:
@@ -229,11 +234,14 @@ def _reference_from_form(ctx: RequestContext) -> tuple[str, Decimal, Decimal | N
         return "", Decimal("0"), None
     if choice == "current":
         nt_raw = ctx.form.get("current_reference_price_nt") or ""
-        return (
-            (ctx.form.get("current_reference_product") or "").strip(),
-            Decimal(ctx.form.get("current_reference_price") or "0"),
-            Decimal(nt_raw) if nt_raw else None,
-        )
+        try:
+            return (
+                (ctx.form.get("current_reference_product") or "").strip(),
+                finite_decimal(ctx.form.get("current_reference_price") or "0"),
+                finite_decimal(nt_raw) if nt_raw else None,
+            )
+        except PriceValidationError as exc:
+            raise FormError(str(exc)) from exc
     try:
         tariff = get_supplier_tariff(ctx.db_path, int(choice))
     except ValueError:

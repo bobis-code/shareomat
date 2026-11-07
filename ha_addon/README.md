@@ -57,7 +57,7 @@ not here — see "Ersteinrichtung" below.
 | `email_username` | Mailbox address (e.g. a dedicated Gmail account) | |
 | `email_password` | IMAP password — for Gmail use an **App Password**, not the account password | |
 | `email_folder` | IMAP folder to watch | `INBOX` |
-| `email_allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender | `[]` |
+| `email_allowed_senders` | Only accept attachments whose `From` header matches one of these addresses. The header can be spoofed, so this is a filter, not sender authentication. Empty = accept any sender | `[]` |
 | `email_poll_interval_seconds` | How often to check the mailbox | `300` |
 
 ## Ersteinrichtung

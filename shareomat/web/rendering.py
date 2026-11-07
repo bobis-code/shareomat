@@ -16,15 +16,17 @@ Part of:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import quote
 
 import jinja2
 
 from shareomat.config import RuntimeConfig
+from shareomat.core.price_validation import PriceValidationError, finite_decimal
 from shareomat.security.context import current_principal
 from shareomat.web.navigation import NAV_SECTIONS, PLACEHOLDER_ROUTES
 from shareomat.web.navigation import url_for as _url_for
@@ -37,6 +39,27 @@ _env = jinja2.Environment(
     autoescape=True,
 )
 _env.filters["path_segment"] = lambda value: quote(str(value), safe="")
+
+_UPLOAD_FLASH_PREFIX = "shareomat-upload-v1:"
+
+
+def _upload_flash_data(message: str) -> dict | None:
+    """Decode only data for the fixed upload notice, never HTML from a message."""
+    if not message.startswith(_UPLOAD_FLASH_PREFIX):
+        return None
+    try:
+        data = json.loads(message[len(_UPLOAD_FLASH_PREFIX):])
+    except (ValueError, TypeError):
+        return None
+    if (isinstance(data, dict) and isinstance(data.get("filename"), str)
+            and type(data.get("size")) is int and data["size"] >= 0):
+        return data
+    return None
+
+
+def upload_flash_message(filename: str, size: int) -> str:
+    """Serializable data for a fixed template; preserves the existing session storage schema."""
+    return _UPLOAD_FLASH_PREFIX + json.dumps({"filename": str(filename), "size": size})
 
 
 @dataclass
@@ -99,10 +122,13 @@ def form_bool(ctx: RequestContext, field_name: str) -> bool:
 
 def form_decimal(ctx: RequestContext, field_name: str, *, label: str) -> Decimal:
     """Parse a required decimal money/rate field, raising a friendly FormError on bad input."""
-    raw = (ctx.form.get(field_name) or "").strip().replace(",", ".")
+    value = ctx.form.get(field_name, "")
+    if not isinstance(value, str):
+        raise FormError(f"Ungültiger Wert bei '{label}': Dezimalzahl als Text erwartet.")
+    raw = value.strip().replace(",", ".")
     try:
-        return Decimal(raw)
-    except InvalidOperation:
+        return finite_decimal(raw, label=label)
+    except PriceValidationError:
         raise FormError(f"Ungültiger Wert bei '{label}': '{raw}'")
 
 
@@ -125,6 +151,8 @@ def render_page(template_name: str, ctx: RequestContext, active_route: str, **ex
     """Render a Jinja2 template with the shared admin-UI context (nav, flash, CSRF, ...)."""
     state = get_state()
     flash_message, flash_ok = state.pop_flash()
+    # Even a Markup subclass must not grant arbitrary flash messages HTML trust.
+    flash_message = str(flash_message)
     snapshot = state.get()
 
     community_name = ""
@@ -148,6 +176,7 @@ def render_page(template_name: str, ctx: RequestContext, active_route: str, **ex
         active_route=active_route,
         community_name=community_name,
         flash_message=flash_message,
+        flash_upload=_upload_flash_data(flash_message),
         flash_ok=flash_ok,
         warnings=snapshot.get("warnings", []),
         csrf_token=state.csrf_token,

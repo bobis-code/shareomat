@@ -33,7 +33,6 @@ import shutil
 import threading
 import time
 import uuid
-from html import escape as _html_escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -61,7 +60,7 @@ from shareomat.web.pages import (
     setup,
     tariffs,
 )
-from shareomat.web.rendering import FormError, Redirect, RequestContext, check_csrf
+from shareomat.web.rendering import FormError, Redirect, RequestContext, check_csrf, upload_flash_message
 from shareomat.web.reports import report_path
 from shareomat.web.state import get_state
 
@@ -518,7 +517,7 @@ class _Handler(BaseHTTPRequestHandler):
             return None
         except Exception as exc:
             logger.error("Signed document upload failed: %s", exc)
-            get_state().set_flash(f"Upload fehlgeschlagen: {_html_escape(str(exc))}", ok=False)
+            get_state().set_flash(f"Upload fehlgeschlagen: {exc}", ok=False)
             return None
         if fields is None:
             get_state().set_flash("Upload fehlgeschlagen: ungültige Formulardaten.", ok=False)
@@ -583,12 +582,11 @@ class _Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 logger.warning("Upload: inbox counter refresh failed: %s", exc)
             get_state().set_flash(
-                f"&#10003; Hochgeladen: <strong>{_html_escape(filename)}</strong> "
-                f"({size:,} bytes) &rarr; Eingang", ok=True,
+                upload_flash_message(filename, size), ok=True,
             )
         except Exception as exc:
             logger.error("Upload failed: %s", exc)
-            get_state().set_flash(f"Upload fehlgeschlagen: {_html_escape(str(exc))}", ok=False)
+            get_state().set_flash(f"Upload fehlgeschlagen: {exc}", ok=False)
 
         self._redirect(redirect_target)
 

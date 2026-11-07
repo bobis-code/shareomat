@@ -60,6 +60,12 @@ def _read_meter_id(row: dict) -> str:
     return meter_id.strip()
 
 
+def _csv_error(path: Path, lineno: int, message: str, errors: list[str] | None) -> None:
+    logger.warning("%s:%d: skipping invalid CSV data - %s", path.name, lineno, message)
+    if errors is not None:
+        errors.append(f"Zeile {lineno}: {message}")
+
+
 # ── Public functions ──────────────────────────────────────────────────────────
 
 
@@ -74,9 +80,30 @@ def parse_csv(
     seen: dict = {}
 
     with path.open(newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for lineno, row in enumerate(reader, start=2):
+        reader = csv.DictReader(f, strict=True)
+        try:
+            headers = reader.fieldnames or []
+        except csv.Error as exc:
+            _csv_error(path, 1, f"Ungültige CSV-Kopfzeile: {exc}", errors)
+            return readings
+        required = {"timestamp", "value_kwh", "direction"}
+        missing = required - set(headers)
+        if missing or not ({"meter_id", "mpid"} & set(headers)) or len(headers) != len(set(headers)):
+            _csv_error(path, 1, "Pflichtspalten fehlen oder Spaltennamen sind doppelt: "
+                       "timestamp, meter_id (oder mpid), value_kwh, direction erforderlich.", errors)
+            return readings
+        while True:
             try:
+                row = next(reader)
+            except StopIteration:
+                break
+            except csv.Error as exc:
+                _csv_error(path, reader.line_num, f"Ungültige CSV-Struktur: {exc}", errors)
+                break  # A broken quote makes subsequent record boundaries ambiguous.
+            lineno = reader.line_num
+            try:
+                if None in row or any(value is None for value in row.values()):
+                    raise ValueError("Unvollständige CSV-Zeile oder zusätzliche Felder gegenüber der Kopfzeile")
                 direction = row["direction"].strip().lower()
                 if direction not in _VALID_DIRECTIONS:
                     raise ValueError(f"invalid direction '{direction}' — must be import or export")
@@ -110,8 +137,6 @@ def parse_csv(
                         path.name, lineno, meter_id, slot.isoformat(), direction,
                     )
                     continue
-                seen[dedup_key] = value
-
                 readings.append(IntervalReading(
                     meter_id=meter_id,
                     slot_start=slot,
@@ -120,10 +145,9 @@ def parse_csv(
                     quality=row.get("quality", "valid").strip(),
                     source_file=path.name,
                 ))
+                seen[dedup_key] = value
             except (KeyError, ValueError) as exc:
-                logger.warning("%s:%d: skipping row – %s", path.name, lineno, exc)
-                if errors is not None:
-                    errors.append(f"Zeile {lineno}: {exc}")
+                _csv_error(path, lineno, str(exc), errors)
 
     logger.info("Parsed %d reading(s) from %s", len(readings), path.name)
     return readings

@@ -29,7 +29,9 @@ Part of:
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, DecimalException
+
+from shareomat.core.price_validation import PriceValidationError
 
 from shareomat.database.supplier_tariffs import (
     create_supplier_tariff,
@@ -145,6 +147,15 @@ def handle_get(ctx: RequestContext) -> str:
 
 def handle_post(ctx: RequestContext) -> str | None:
     """Create, update, or toggle a tariff, depending on the sub-path."""
+    try:
+        return _handle_post(ctx)
+    except PriceValidationError as exc:
+        raise FormError(str(exc)) from exc
+    except DecimalException as exc:
+        raise FormError("Preis liegt ausserhalb des technischen Rechenbereichs.") from exc
+
+
+def _handle_post(ctx: RequestContext) -> str | None:
     if ctx.segments == ["vnb", "import"]:
         url = form_required(ctx, "url", label="Adresse der Tarifdatei")
         try:
