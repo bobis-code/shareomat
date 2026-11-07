@@ -21,22 +21,26 @@ Notes:
 from __future__ import annotations
 
 import sqlite3
-from decimal import Decimal
 from pathlib import Path
+
+from shareomat.core.price_validation import finite_decimal, validate_price_fields
 
 from shareomat.database.sqlite import connect, now_iso
 from shareomat.external_data.elcom import ElcomTariffComponents
+
+_PRICE_FIELDS = ("energy_chf_kwh", "grid_chf_kwh", "aidfee_chf_kwh", "community_fees_chf_kwh",
+                 "total_chf_kwh", "fixcosts_chf_year")
 
 
 def _row_to_tariff(row: sqlite3.Row) -> ElcomTariffComponents:
     return ElcomTariffComponents(
         category=row["category"],
-        energy_chf_kwh=Decimal(row["energy_chf_kwh"]),
-        grid_chf_kwh=Decimal(row["grid_chf_kwh"]),
-        aidfee_chf_kwh=Decimal(row["aidfee_chf_kwh"]),
-        community_fees_chf_kwh=Decimal(row["community_fees_chf_kwh"]),
-        total_chf_kwh=Decimal(row["total_chf_kwh"]),
-        fixcosts_chf_year=Decimal(row["fixcosts_chf_year"]),
+        energy_chf_kwh=finite_decimal(row["energy_chf_kwh"]),
+        grid_chf_kwh=finite_decimal(row["grid_chf_kwh"]),
+        aidfee_chf_kwh=finite_decimal(row["aidfee_chf_kwh"]),
+        community_fees_chf_kwh=finite_decimal(row["community_fees_chf_kwh"]),
+        total_chf_kwh=finite_decimal(row["total_chf_kwh"]),
+        fixcosts_chf_year=finite_decimal(row["fixcosts_chf_year"]),
         operator_iri=None,
         operator_name=row["operator_name"] or None,
     )
@@ -46,6 +50,7 @@ def save_elcom_tariffs(
     db_path: Path, municipality_bfs_number: str, year: int, tariffs: list[ElcomTariffComponents],
 ) -> None:
     """Insert or update one municipality/year's ElCom tariff categories."""
+    tariffs = [validate_price_fields(tariff, _PRICE_FIELDS) for tariff in tariffs]
     now = now_iso()
     with connect(db_path) as conn:
         with conn:

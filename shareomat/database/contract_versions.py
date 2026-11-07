@@ -32,6 +32,8 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
+from shareomat.core.price_validation import PriceValidationError, finite_decimal, validate_price_fields
+
 from shareomat.database.audit import record_event
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
@@ -41,6 +43,23 @@ from shareomat.models.contract import ContractVersion
 
 class ContractWorkflowError(Exception):
     """Raised for invalid contract-version requests (bad status transition, notice period, not found)."""
+
+
+def _contract_price(value) -> Decimal:
+    try:
+        return finite_decimal(value)
+    except PriceValidationError as exc:
+        raise ContractWorkflowError(str(exc)) from exc
+
+
+def _validated_prices(version: ContractVersion) -> ContractVersion:
+    try:
+        version = validate_price_fields(version, ("vnb_reference_price_chf_kwh", "price_reduction_chf_kwh"),
+                                        ("vnb_reference_price_nt_chf_kwh", "price_reduction_nt_chf_kwh"))
+        return validate_price_fields(version, ("local_rate_chf_kwh", "feed_in_rate_chf_kwh", "admin_fee_chf_kwh"),
+                                     ("local_rate_nt_chf_kwh", "feed_in_rate_nt_chf_kwh"), binary_float=True)
+    except PriceValidationError as exc:
+        raise ContractWorkflowError(str(exc)) from exc
 
 
 def _add_months(value: date, months: int) -> date:
@@ -58,21 +77,21 @@ def _row_to_version(row: sqlite3.Row, community_id: str) -> ContractVersion:
         version=row["version"],
         status=row["status"],
         contract_text_snapshot=row["contract_text_snapshot"],
-        vnb_reference_price_chf_kwh=Decimal(row["vnb_reference_price_chf_kwh"]),
-        price_reduction_chf_kwh=Decimal(row["price_reduction_chf_kwh"]),
+        vnb_reference_price_chf_kwh=_contract_price(row["vnb_reference_price_chf_kwh"]),
+        price_reduction_chf_kwh=_contract_price(row["price_reduction_chf_kwh"]),
         vnb_reference_price_nt_chf_kwh=(
-            Decimal(row["vnb_reference_price_nt_chf_kwh"]) if row["vnb_reference_price_nt_chf_kwh"] else None
+            _contract_price(row["vnb_reference_price_nt_chf_kwh"]) if row["vnb_reference_price_nt_chf_kwh"] is not None else None
         ),
         price_reduction_nt_chf_kwh=(
-            Decimal(row["price_reduction_nt_chf_kwh"]) if row["price_reduction_nt_chf_kwh"] else None
+            _contract_price(row["price_reduction_nt_chf_kwh"]) if row["price_reduction_nt_chf_kwh"] is not None else None
         ),
-        local_rate_chf_kwh=Decimal(row["local_rate_chf_kwh"]),
-        local_rate_nt_chf_kwh=Decimal(row["local_rate_nt_chf_kwh"]) if row["local_rate_nt_chf_kwh"] else None,
-        feed_in_rate_chf_kwh=Decimal(row["feed_in_rate_chf_kwh"]),
+        local_rate_chf_kwh=_contract_price(row["local_rate_chf_kwh"]),
+        local_rate_nt_chf_kwh=_contract_price(row["local_rate_nt_chf_kwh"]) if row["local_rate_nt_chf_kwh"] is not None else None,
+        feed_in_rate_chf_kwh=_contract_price(row["feed_in_rate_chf_kwh"]),
         feed_in_rate_nt_chf_kwh=(
-            Decimal(row["feed_in_rate_nt_chf_kwh"]) if row["feed_in_rate_nt_chf_kwh"] else None
+            _contract_price(row["feed_in_rate_nt_chf_kwh"]) if row["feed_in_rate_nt_chf_kwh"] is not None else None
         ),
-        admin_fee_chf_kwh=Decimal(row["admin_fee_chf_kwh"]),
+        admin_fee_chf_kwh=_contract_price(row["admin_fee_chf_kwh"]),
         rate_mode=row["rate_mode"],
         representative_name=row["representative_name"],
         representative_address_line=row["representative_address_line"],
@@ -203,6 +222,7 @@ _EDITABLE_COLUMNS = (
 
 
 def _editable_values(version: ContractVersion) -> tuple:
+    version = _validated_prices(version)
     return (
         str(version.vnb_reference_price_chf_kwh),
         str(version.price_reduction_chf_kwh),
@@ -374,6 +394,7 @@ def _validate_publishable(draft: ContractVersion, prior: ContractVersion | None)
     not after the version it supersedes would leave overlapping or empty
     validity windows.
     """
+    draft = _validated_prices(draft)
     if draft.valid_from is None:
         raise ContractWorkflowError('„Gültig ab" muss gesetzt sein, um eine Version zu veröffentlichen.')
     if draft.valid_from.day != 1:
@@ -454,6 +475,10 @@ def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = Fa
                 "SELECT grid_rate_chf_kwh FROM tariffs ORDER BY valid_from DESC, id DESC LIMIT 1"
             ).fetchone()
             grid_rate_chf_kwh = base_tariff_row["grid_rate_chf_kwh"] if base_tariff_row else "0"
+            try:
+                grid_rate_chf_kwh = str(finite_decimal(grid_rate_chf_kwh, binary_float=True))
+            except PriceValidationError as exc:
+                raise ContractWorkflowError(str(exc)) from exc
 
             now = now_iso()
             community_row_id = ensure_community_row_id(conn)

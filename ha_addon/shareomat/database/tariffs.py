@@ -20,29 +20,38 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
+
+from shareomat.core.price_validation import finite_decimal, validate_period, validate_price_fields
 
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.models.tariff import Tariff
 
 
+def _validated(tariff: Tariff) -> Tariff:
+    validate_period(tariff.valid_from, tariff.valid_until)
+    return validate_price_fields(
+        tariff, ("local_rate_chf_kwh", "grid_rate_chf_kwh", "feed_in_rate_chf_kwh", "admin_fee_chf_kwh"),
+        ("local_rate_nt_chf_kwh", "feed_in_rate_nt_chf_kwh"), binary_float=True,
+    )
+
+
 def _row_to_tariff(row: sqlite3.Row) -> Tariff:
-    return Tariff(
-        local_rate_chf_kwh=Decimal(row["local_rate_chf_kwh"]),
-        grid_rate_chf_kwh=Decimal(row["grid_rate_chf_kwh"]),
-        feed_in_rate_chf_kwh=Decimal(row["feed_in_rate_chf_kwh"]),
-        admin_fee_chf_kwh=Decimal(row["admin_fee_chf_kwh"]),
+    return _validated(Tariff(
+        local_rate_chf_kwh=finite_decimal(row["local_rate_chf_kwh"]),
+        grid_rate_chf_kwh=finite_decimal(row["grid_rate_chf_kwh"]),
+        feed_in_rate_chf_kwh=finite_decimal(row["feed_in_rate_chf_kwh"]),
+        admin_fee_chf_kwh=finite_decimal(row["admin_fee_chf_kwh"]),
         rate_mode=row["rate_mode"],
-        local_rate_nt_chf_kwh=Decimal(row["local_rate_nt_chf_kwh"]) if row["local_rate_nt_chf_kwh"] else None,
-        feed_in_rate_nt_chf_kwh=Decimal(row["feed_in_rate_nt_chf_kwh"]) if row["feed_in_rate_nt_chf_kwh"] else None,
+        local_rate_nt_chf_kwh=finite_decimal(row["local_rate_nt_chf_kwh"]) if row["local_rate_nt_chf_kwh"] is not None else None,
+        feed_in_rate_nt_chf_kwh=finite_decimal(row["feed_in_rate_nt_chf_kwh"]) if row["feed_in_rate_nt_chf_kwh"] is not None else None,
         name=row["name"],
         valid_from=str_to_date(row["valid_from"]),
         valid_until=str_to_date(row["valid_until"]),
         active=bool(row["active"]),
         id=row["id"],
-    )
+    ))
 
 
 def list_tariffs(db_path: Path, *, include_inactive: bool = True) -> list[Tariff]:
@@ -65,6 +74,7 @@ def get_tariff(db_path: Path, tariff_id: int) -> Tariff | None:
 
 def create_tariff(db_path: Path, tariff: Tariff) -> Tariff:
     """Insert a new tariff version."""
+    tariff = _validated(tariff)
     now = now_iso()
     with connect(db_path) as conn:
         with conn:
@@ -96,6 +106,7 @@ def create_tariff(db_path: Path, tariff: Tariff) -> Tariff:
 
 def update_tariff(db_path: Path, tariff_id: int, tariff: Tariff) -> Tariff:
     """Update an existing tariff by its internal database id."""
+    tariff = _validated(tariff)
     with connect(db_path) as conn:
         with conn:
             cursor = conn.execute(

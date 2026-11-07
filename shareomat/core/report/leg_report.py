@@ -82,6 +82,28 @@ _AUDIT_FIELDS = [
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 
+# S-06: spreadsheet programs (Excel, LibreOffice, Google Sheets, Numbers)
+# evaluate a cell as a formula/DDE command when it starts with one of these
+# characters, also after leading whitespace, and some also accept the
+# full-width forms.
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n", "＝", "＋", "－", "＠")
+
+
+def _text_cell(value: object) -> str:
+    """Neutralise formula injection in a TEXT cell (names, IDs).
+
+    Only for free text that may come from user input or meter files; numeric
+    energy/CHF columns are written as numbers and never pass through here, so
+    negative values stay machine-readable. A risky cell gets a leading
+    apostrophe, which spreadsheets treat as "this is text". Machine consumers
+    that need the raw names should read billing_*.json, which is unchanged.
+    """
+    text = str(value)
+    if text.lstrip("  ").startswith(_FORMULA_TRIGGERS):
+        return "'" + text
+    return text
+
+
 def _to_ch(dt: datetime) -> str:
     """Convert a UTC datetime to a Europe/Zurich ISO string for report output."""
     return dt.astimezone(_TZ_CH).isoformat()
@@ -134,9 +156,9 @@ def write_billing_csv(
         writer.writeheader()
         for r in records:
             writer.writerow({
-                "participant_id":   r.participant_id,
-                "label":            r.label,
-                "meter_ids":        ";".join(r.meter_ids),
+                "participant_id":   _text_cell(r.participant_id),
+                "label":            _text_cell(r.label),
+                "meter_ids":        _text_cell(";".join(r.meter_ids)),
                 "period_start":     _to_ch(r.period_start),
                 "period_end":       _to_ch(r.period_end),
                 "slot_count":       r.slot_count,
@@ -313,10 +335,13 @@ def write_ledger_csv(
     reports_dir.mkdir(parents=True, exist_ok=True)
     path = _new_report_path(reports_dir, "energy_ledger", period_start, ".csv")
 
-    def _label(meter_id: str) -> str:
+    def _raw_label(meter_id: str) -> str:
         if meter_labels:
             return meter_labels.get(meter_id, meter_id)
         return meter_id
+
+    def _label(meter_id: str) -> str:
+        return _text_cell(_raw_label(meter_id))
 
     def _fmt(v: float) -> str:
         return f"{round(v, 3):.3f}"
@@ -414,7 +439,7 @@ def write_ledger_csv(
 
         sum_row = {k: 0.0 for k in ("local_supplied", "grid_export", "local_received", "grid_import")}
 
-        for mid in sorted(totals, key=_label):
+        for mid in sorted(totals, key=_raw_label):
             m = totals[mid]
             total_exp = m["local_supplied"] + m["grid_export"]
             total_imp = m["local_received"] + m["grid_import"]

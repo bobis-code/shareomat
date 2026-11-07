@@ -2,6 +2,7 @@
 """Tests for the IMAP email importer (attachment extraction, sender filtering, UID state)."""
 from __future__ import annotations
 
+import re
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -58,8 +59,10 @@ def test_save_attachment_avoids_overwrite(tmp_path):
     first = _save_attachment(tmp_path, uid=1, filename="readings.csv", content=b"first")
     second = _save_attachment(tmp_path, uid=2, filename="readings.csv", content=b"second")
 
-    assert first.name == "readings.csv"
-    assert second.name == "2_readings.csv"
+    assert re.fullmatch(r"email-1-[0-9a-f]{32}\.csv", first.name)
+    assert re.fullmatch(r"email-2-[0-9a-f]{32}\.csv", second.name)
+    assert first != second
+    assert first.parent == second.parent == tmp_path
     assert first.read_bytes() == b"first"
     assert second.read_bytes() == b"second"
 
@@ -78,8 +81,10 @@ def test_import_new_messages_saves_matching_attachment(tmp_path):
     mock_conn = MagicMock()
     mock_conn.login.return_value = ("OK", [b""])
     mock_conn.select.return_value = ("OK", [b""])
+    mock_conn.response.return_value = ("UIDVALIDITY", [b"1"])
     mock_conn.uid.side_effect = [
         ("OK", [b"5"]),
+        ("OK", [f"1 (UID 5 RFC822.SIZE {len(msg.as_bytes())})".encode()]),
         ("OK", [(b"5 (BODY[] {123}", msg.as_bytes())]),
     ]
 
@@ -97,6 +102,8 @@ def test_import_new_messages_saves_matching_attachment(tmp_path):
         count = importer._import_new_messages()
 
     assert count == 1
-    assert (inbox / "readings.csv").read_bytes() == b"a,b,c"
+    [stored] = inbox.iterdir()
+    assert re.fullmatch(r"email-5-[0-9a-f]{32}\.csv", stored.name)
+    assert stored.read_bytes() == b"a,b,c"
     assert _load_last_uid(state) == 5
     mock_conn.logout.assert_called_once()

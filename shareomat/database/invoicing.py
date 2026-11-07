@@ -140,14 +140,21 @@ def local_today() -> date:
 @contextmanager
 def _write_txn(db_path: Path) -> Iterator[sqlite3.Connection]:
     """One write transaction taken BEFORE the checks read anything (serializes concurrent writers)."""
-    with connect(db_path) as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            yield conn
-            conn.commit()
-        except BaseException:
-            conn.rollback()
-            raise
+    try:
+        with connect(db_path) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield conn
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+    except sqlite3.OperationalError as exc:
+        if (getattr(exc, "sqlite_errorcode", 0) & 0xff) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise InvoicingError(
+                "Datenbank ist vorübergehend gesperrt — bitte den Vorgang erneut versuchen."
+            ) from exc
+        raise
 
 
 def _sha(text: str) -> str:

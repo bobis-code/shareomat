@@ -184,7 +184,7 @@ Shareomat splits configuration into two places, deliberately:
 | `paths.share_inbox` | External share folder to watch for meter files; empty = disabled |
 | `mqtt.enabled` / `broker` / `port` | Optional — publish status/prices/tariffs as MQTT topics (with Home Assistant MQTT Discovery) for Home Assistant or any other MQTT-aware system. Off by default; Shareomat runs fully without it. |
 | `email.enabled` | Poll an IMAP mailbox (e.g. a dedicated Gmail account) for meter-data attachments |
-| `email.allowed_senders` | Only accept attachments from these sender addresses; empty = accept any sender |
+| `email.allowed_senders` | Filters only the spoofable `From` header; this is not sender authentication. Empty = accept any sender. |
 | `web.enabled` / `port` | Admin web interface — always available; standalone (`http://localhost:8099`) or, if run as the HA add-on, also behind Home Assistant Ingress |
 
 Never commit real passwords or private MQTT/email credentials. Use the Home

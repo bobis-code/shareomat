@@ -1,5 +1,5 @@
 {% if flash_message %}
-  <div class="notice-{{ 'ok' if flash_ok else 'err' }}">{{ flash_message | safe }}</div>
+  <div class="notice-{{ 'ok' if flash_ok else 'err' }}">{% if flash_upload %}✓ Hochgeladen: <strong>{{ flash_upload.filename }}</strong> ({{ '{:,}'.format(flash_upload.size) }} bytes) → Eingang{% else %}{{ flash_message }}{% endif %}</div>
 {% endif %}
 {% if warnings %}
   <div class="error-box">

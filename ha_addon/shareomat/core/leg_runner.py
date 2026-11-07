@@ -13,7 +13,7 @@ Part of:
 Notes:
     Processing order is strict:
       1. Parse
-      2. Filter unknown/inactive meters (unknown_meter_policy)
+      2. Filter unknown/inactive meters and validate overlapping full intervals
       3. Match
       4. Billing
       5. Write reports
@@ -23,6 +23,8 @@ Notes:
       9. Publish via MQTT (if client provided)
     Files are never archived before reports are safely written.
     MQTT publish failure does not roll back the settlement cycle.
+    Parse errors or conflicting intervals abort before raw readings, snapshots,
+    reports, processed-file state, archive or MQTT results are written.
 
     run() takes an already-built LegConfig rather than a path — the
     caller (main.py) builds a fresh one from SQLite before every run via
@@ -59,6 +61,37 @@ from shareomat.database.meter_readings import save_meter_readings
 from shareomat.database.settlement_history import save_settlement_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def _unique_interval_readings(readings: list[IntervalReading]) -> list[IntervalReading]:
+    """Validate complete intervals in ONE automatic file batch, before any persistence.
+
+    IntervalReading represents a full meter/direction interval, not an additive
+    submeasurement (ADR-0002). Different meters/directions/slots stay separate.
+    Only exactly equal values AND qualities may repeat; never choose a newer
+    file or apply a numeric tolerance to conflicting measurements. source_file
+    is provenance, not a separate physical measurement channel.
+    """
+    by_key: dict[tuple[str, datetime, str], IntervalReading] = {}
+    duplicates = 0
+    for reading in readings:
+        key = (reading.meter_id, reading.slot_start, reading.direction)
+        previous = by_key.get(key)
+        if previous is None:
+            by_key[key] = reading
+        elif previous.value_kwh != reading.value_kwh or previous.quality != reading.quality:
+            raise ValueError(
+                f"Widersprüchliche Intervallmessung für {reading.meter_id} {reading.direction} "
+                f"{reading.slot_start.isoformat()}: "
+                f"{previous.value_kwh} kWh / Qualität {previous.quality!r} ({previous.source_file}) "
+                f"vs. {reading.value_kwh} kWh / Qualität {reading.quality!r} ({reading.source_file}). "
+                "Automatische Dateiauswertung abgebrochen; Quelldateien prüfen und erneut starten."
+            )
+        else:
+            duplicates += 1
+    if duplicates:
+        logger.info("Automatic file batch: ignored %d identical full-interval repeat(s)", duplicates)
+    return list(by_key.values())
 
 
 def parse_file(
@@ -138,15 +171,28 @@ def run(config: LegConfig, mqtt_client: object = None, db_path: Path | None = No
         if is_processed(state_dir, imp.sha256):
             logger.info("Already processed, skipping: %s", imp.path.name)
             continue
+        row_errors: list[str] = []
         try:
             readings = parse_file(
                 imp, slot_minutes, known_meter_ids,
                 meter_data_source=config.processing.meter_data_source,
+                errors=row_errors,
             )
-            all_readings.extend(readings)
-            newly_processed.append(imp)
         except Exception as exc:
             logger.error("Failed to parse %s: %s", imp.path.name, exc)
+            raise ValueError(
+                f"Automatische Dateiauswertung abgebrochen: Datei {imp.path.name} "
+                f"konnte nicht vollständig gelesen werden: {exc}"
+            ) from exc
+        if row_errors:
+            # CSV parsing can return valid rows even after rejecting a conflicting
+            # duplicate. Never persist, mark or publish that partial selection.
+            raise ValueError(
+                f"Automatische Dateiauswertung abgebrochen: Datei {imp.path.name}: "
+                f"{len(row_errors)} abgewiesene Zeile(n): {'; '.join(row_errors[:3])}"
+            )
+        all_readings.extend(readings)
+        newly_processed.append(imp)
 
     if not all_readings:
         logger.info("No new readings to process.")
@@ -159,6 +205,8 @@ def run(config: LegConfig, mqtt_client: object = None, db_path: Path | None = No
     if not all_readings:
         logger.info("No valid readings remain after meter filtering.")
         return
+
+    all_readings = _unique_interval_readings(all_readings)
 
     if db_path is not None:
         save_meter_readings(db_path, all_readings)

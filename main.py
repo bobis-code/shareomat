@@ -355,6 +355,12 @@ def _run_daemon(
         logger.info("Share importer started: %s", runtime.paths.share_inbox)
 
     if runtime.email.enabled:
+        get_web_state().add_warning(
+            "E-Mail-Import: Der From-Filter authentifiziert keine Absender. "
+            "Der empfangende Mailserver muss vertrauenswürdige Zustellung gewährleisten."
+            + (" Die leere Absenderliste erlaubt Nachrichten von allen Absendern."
+               if not any(address.strip() for address in runtime.email.allowed_senders) else "")
+        )
         from shareomat.core.collector.leg_email_importer import EmailImporterThread
         email_t = EmailImporterThread(
             imap_host=runtime.email.imap_host,

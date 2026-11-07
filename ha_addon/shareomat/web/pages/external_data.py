@@ -32,6 +32,8 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Callable, TypeVar
 
+from shareomat.core.price_validation import PriceValidationError
+
 from shareomat.database.data_imports import list_recent_imports, record_import
 from shareomat.database.elcom_tariffs import list_elcom_tariffs, save_elcom_tariffs
 from shareomat.database.exchange_rates import list_exchange_rates, save_exchange_rates
@@ -77,6 +79,13 @@ def handle_get(ctx: RequestContext) -> str:
 
 def handle_post(ctx: RequestContext) -> str | None:
     """Save settings or run the requested on-demand external-data fetch."""
+    try:
+        return _handle_post(ctx)
+    except PriceValidationError as exc:
+        raise FormError(str(exc)) from exc
+
+
+def _handle_post(ctx: RequestContext) -> str | None:
     action = ctx.segments[0] if ctx.segments else ""
 
     if action == "settings":

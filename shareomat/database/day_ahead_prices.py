@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import sqlite3
 from datetime import datetime
-from decimal import Decimal
 from pathlib import Path
+
+from shareomat.core.price_validation import finite_decimal, validate_price_fields
 
 from shareomat.database.sqlite import connect, now_iso
 from shareomat.models.external_data import DayAheadPricePoint
@@ -31,7 +32,7 @@ def _row_to_point(row: sqlite3.Row) -> DayAheadPricePoint:
     return DayAheadPricePoint(
         id=row["id"],
         slot_start=datetime.fromisoformat(row["slot_start"]),
-        price_chf_kwh=Decimal(row["price_chf_kwh"]),
+        price_chf_kwh=finite_decimal(row["price_chf_kwh"]),
     )
 
 
@@ -39,6 +40,7 @@ def save_day_ahead_prices(db_path: Path, points: list[DayAheadPricePoint]) -> in
     """Upsert native-resolution price points; returns the number of points written."""
     if not points:
         return 0
+    points = [validate_price_fields(point, ("price_chf_kwh",)) for point in points]
     now = now_iso()
     with connect(db_path) as conn:
         with conn:
