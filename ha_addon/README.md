@@ -46,6 +46,9 @@ not here — see "Ersteinrichtung" below.
 | `base_topic` | Root MQTT topic prefix | `shareomat` |
 | `discovery_prefix` | HA MQTT Discovery prefix | `homeassistant` |
 | `command_topic_enabled` | Listen on `shareomat/cmd/run_once` for manual trigger | `true` |
+| `sparkplug` → `mode` | Emsomat connection: `auto` finds the Emsomat on this Home Assistant, `manual` uses the two values below, `off` disables it | `auto` |
+| `sparkplug` → `node_id` | Emsomat node ID, only used with `manual` | `emsomat-node` |
+| `sparkplug` → `group_id` | Emsomat Sparkplug group, only used with `manual` | `emsomat` |
 | `timezone` | Timezone for report timestamps | `Europe/Zurich` |
 | `log_level` | Log verbosity (`debug/info/warning/error`) | `info` |
 | `mqtt_tls` / `mqtt_ca_cert` | MQTT broker TLS | `false` / |

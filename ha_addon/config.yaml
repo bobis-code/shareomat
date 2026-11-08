@@ -32,6 +32,12 @@ options:
   base_topic: "shareomat"
   discovery_prefix: "homeassistant"
   command_topic_enabled: true
+  # Verbindung zu Emsomat. auto: Emsomat auf demselben Home Assistant wird
+  # automatisch gefunden. manual: node_id und group_id gelten. off: keine Verbindung.
+  sparkplug:
+    mode: "auto"
+    node_id: "emsomat-node"
+    group_id: "emsomat"
   timezone: "Europe/Zurich"
   log_level: "info"
   mqtt_tls: false
@@ -58,6 +64,10 @@ schema:
   base_topic: str
   discovery_prefix: str
   command_topic_enabled: bool
+  sparkplug:
+    mode: list(auto|manual|off)
+    node_id: str
+    group_id: str
   timezone: str
   log_level: list(debug|info|warning|error)
   mqtt_tls: bool
