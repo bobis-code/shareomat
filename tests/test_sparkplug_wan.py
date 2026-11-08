@@ -130,7 +130,7 @@ def _house(broker: FakeBroker, *, site_id: str, participant_ids: tuple[str, ...]
 
     local_relay = _local_relay(edge_node_id=f"{site_id}-local-relay")
     downlink_client = FakeClient(broker)
-    downlink = WanDownlink(_wan_config(site_id), local_relay, client_id=f"{site_id}-downlink", client=downlink_client)
+    downlink = WanDownlink(_wan_config(site_id), local_relay, client_id=f"{site_id}-downlink", allowed_source=lambda edge, device: True, client=downlink_client)
     downlink.start()
 
     return uplink, downlink, local_relay

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 14
+_SCHEMA_VERSION = 15
 
 _SCHEMA_STATEMENTS = [
     """
@@ -486,6 +486,55 @@ _SCHEMA_STATEMENTS = [
     CREATE TABLE IF NOT EXISTS auth_state (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+    )
+    """,
+    # Live-Messquellen (ADR-0007, Abschnitt 2): configuration only. Live values
+    # never live in this database (see shareomat/live/store.py, live.db).
+    """
+    CREATE TABLE IF NOT EXISTS live_sources (
+        id INTEGER PRIMARY KEY,
+        meter_id INTEGER NOT NULL REFERENCES meters(id),
+        source_type TEXT NOT NULL,
+        adapter TEXT NOT NULL,
+        source_key TEXT NOT NULL,
+        measurement_mode TEXT NOT NULL CHECK (measurement_mode IN ('import_export', 'signed', 'import_only')),
+        sign_convention TEXT CHECK (sign_convention IS NULL OR sign_convention IN ('positive_is_import', 'positive_is_export')),
+        no_export_note TEXT NOT NULL DEFAULT '',
+        adapter_config TEXT NOT NULL DEFAULT '{}',
+        max_power_w REAL NOT NULL CHECK (max_power_w > 0),
+        freshness_evidence TEXT NOT NULL CHECK (freshness_evidence IN ('A', 'B', 'C')),
+        identity_basis TEXT NOT NULL DEFAULT '',
+        identity_note TEXT NOT NULL DEFAULT '',
+        identity_verified_at TEXT,
+        state TEXT NOT NULL CHECK (state IN ('testing', 'active', 'retired')),
+        activated_at TEXT,
+        retired_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (
+            (source_type = 'emsomat' AND adapter = 'emsomat_local')
+            OR (source_type = 'home_assistant' AND adapter = 'ha_mqtt')
+            OR (source_type = 'external' AND adapter IN ('wan_sparkplug', 'gateway_mqtt'))
+        ),
+        CHECK ((measurement_mode = 'signed') = (sign_convention IS NOT NULL)),
+        CHECK (measurement_mode != 'import_only' OR no_export_note != '')
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_live_sources_meter_active
+        ON live_sources(meter_id) WHERE state = 'active'
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_live_sources_key_open
+        ON live_sources(source_key) WHERE state IN ('testing', 'active')
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS live_source_channels (
+        id INTEGER PRIMARY KEY,
+        live_source_id INTEGER NOT NULL REFERENCES live_sources(id) ON DELETE CASCADE,
+        quantity TEXT NOT NULL CHECK (quantity IN ('import', 'export', 'signed')),
+        channel_ref TEXT NOT NULL,
+        UNIQUE(live_source_id, quantity)
     )
     """,
     """

@@ -46,6 +46,7 @@ _POST_PERMISSIONS = {
     "community": "masterdata.edit",
     "participants": "masterdata.edit",
     "meters": "masterdata.edit",
+    "live_energy": "masterdata.edit",
     "tariffs": "masterdata.edit",
     "contract": "contract.manage",
     "settings": "system.configure",

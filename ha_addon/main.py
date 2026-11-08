@@ -60,7 +60,11 @@ from shareomat.database.meter_readings import list_meter_readings
 from shareomat.database.settings import OperationSettings, get_operation_settings
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
+from shareomat.ha.live_sensors import LiveHaPublisher, publish_live_discovery
 from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.live.adapters.sparkplug import EmsomatLocalAdapter, WanSparkplugAdapter
+from shareomat.live.service import LiveStatusService
+from shareomat.models.live_source import ADAPTER_EMSOMAT_LOCAL
 from shareomat.sparkplug import coordinator_mapping
 from shareomat.sparkplug.bridge import mirror_host_to_uplink
 from shareomat.sparkplug.host import SparkplugHost
@@ -263,7 +267,23 @@ def _run_safe_cycle(
         _RUN_LOCK.release()
 
 
-def _setup_sparkplug(runtime: RuntimeConfig) -> tuple[object | None, object | None, object | None, object | None]:
+def _setup_live(db_path: Path, runtime: RuntimeConfig, mqtt_client: object | None) -> LiveStatusService | None:
+    """Start the live layer (ADR-0007). A failure here never touches billing or the admin UI."""
+    try:
+        service = LiveStatusService(db_path)
+        if mqtt_client is not None:
+            publish_live_discovery(mqtt_client, runtime.mqtt)
+            service.add_listener(LiveHaPublisher(mqtt_client, runtime.mqtt))
+        service.start()
+    except Exception as exc:
+        logger.error("Live layer could not be started: %s", exc)
+        return None
+    return service
+
+
+def _setup_sparkplug(
+    runtime: RuntimeConfig, live_service: LiveStatusService | None = None,
+) -> tuple[object | None, object | None, object | None, object | None]:
     """Start the Sparkplug B local channel (Emsomat<->Shareomat) and, if configured, the
     Cross-House WAN channel (Shareomat<->Shareomat). Returns
     (sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink) - any of which is None
@@ -289,7 +309,14 @@ def _setup_sparkplug(runtime: RuntimeConfig) -> tuple[object | None, object | No
             logger.warning("WAN Uplink could not connect — Cross-House uplink disabled")
             wan_uplink = None
 
-        wan_downlink = WanDownlink(runtime.wan, sparkplug_relay, client_id=f"{runtime.mqtt.client_id}-wan-downlink")
+        # Only sources registered in "Live-Energie" are accepted. Without the live layer: none.
+        wan_downlink = WanDownlink(
+            runtime.wan, sparkplug_relay, client_id=f"{runtime.mqtt.client_id}-wan-downlink",
+            allowed_source=live_service.is_registered_wan if live_service is not None else (lambda edge, device: False),
+            live_sink=WanSparkplugAdapter(live_service) if live_service is not None else None,
+        )
+        if live_service is not None:
+            live_service.register_unknown_pairs_getter(lambda: wan_downlink.unknown_pairs if wan_downlink else ())
         if not wan_downlink.start():
             logger.warning("WAN Downlink could not connect — Cross-House downlink disabled")
             wan_downlink = None
@@ -302,7 +329,13 @@ def _setup_sparkplug(runtime: RuntimeConfig) -> tuple[object | None, object | No
     sparkplug_host = SparkplugHost(
         runtime.sparkplug, runtime.mqtt,
         on_metrics_changed=_on_emsomat_metrics_changed if wan_uplink is not None else None,
+        live_sink=(
+            EmsomatLocalAdapter(live_service, runtime.sparkplug.emsomat_edge_node_id)
+            if live_service is not None else None
+        ),
     )
+    if live_service is not None:
+        live_service.register_rebirth_handler(ADAPTER_EMSOMAT_LOCAL, sparkplug_host.request_rebirth)
     if not sparkplug_host.start():
         logger.warning("Sparkplug Host could not connect — cannot read Emsomat's local Sparkplug data")
         sparkplug_host = None
@@ -485,8 +518,9 @@ def main() -> None:
             "credentials, and whether the broker is running."
         )
 
-    sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink = _setup_sparkplug(runtime)
-    sparkplug_components = (sparkplug_host, wan_uplink, wan_downlink, sparkplug_relay)
+    live_service = _setup_live(db_path, runtime, mqtt_client)
+    sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink = _setup_sparkplug(runtime, live_service)
+    sparkplug_components = (sparkplug_host, wan_uplink, wan_downlink, sparkplug_relay, live_service)
 
     web_server = None
     if runtime.web.enabled:
@@ -495,6 +529,7 @@ def main() -> None:
         state = get_web_state()
         state.register_db(db_path)
         state.register_runtime(runtime)
+        state.register_live_service(live_service)
         _prepare_login(db_path, runtime)
         state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host))
         if sparkplug_host is not None:

@@ -47,6 +47,7 @@ class WebState:
         self._db_path: Path | None = None
         self._runtime: RuntimeConfig | None = None
         self._emsomat_online_getter: Callable[[], bool] | None = None
+        self._live_service = None
 
         self._flash_msg: str = ""
         self._flash_ok: bool = True
@@ -114,6 +115,17 @@ class WebState:
         """Register the technical runtime configuration (paths/mqtt/email/web)."""
         with self._lock:
             self._runtime = runtime
+
+    def register_live_service(self, service) -> None:
+        """Register the live layer (None while it is not running)."""
+        with self._lock:
+            self._live_service = service
+
+    @property
+    def live_service(self):
+        """The LiveStatusService, or None if the live layer is not running."""
+        with self._lock:
+            return self._live_service
 
     def register_emsomat_online(self, getter: Callable[[], bool]) -> None:
         """Register where Emsomat's live online state comes from (the local Sparkplug host)."""

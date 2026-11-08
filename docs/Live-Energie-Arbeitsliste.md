@@ -29,6 +29,24 @@ lokale `TODO.md` verweist für die Liveplattform hierher.
 
 Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
+## Aktueller Schwerpunkt (ab 08.11.2026)
+
+Es wird ausschliesslich an Shareomat gearbeitet. Ziel: die Verwaltung um
+Live-Energie erweitern und danach einen ersten Pilot über die HA Entity Bridge
+und HA Second ermöglichen. Reihenfolge:
+
+1. LE-04: ungültige Sparkplug-Messwerte und `is_null`
+2. LE-05: Sparkplug-Sessions, Quellenidentität, Broker-Ausfälle (LE-14 dabei
+   prüfen)
+3. LE-06: Messquellen ohne separaten Einspeisesensor
+4. LE-07: Live-Datenmodell, Qualitätsprüfung, LEG-Bilanz
+5. LE-08: Verwaltung mit Live-Messquellen-Zuordnung
+6. LE-09: HA-Live-Status-Sensoren
+7. LE-12: Pilot über HA Second und Entity Bridge
+
+Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
+(Sensorprüfer). Alle übrigen Aufgaben bleiben unverändert bestehen.
+
 ## Übersicht
 
 | ID | Projekt | Aufgabe | Priorität | Status | Abhängig von |
@@ -36,17 +54,17 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 | LE-01 | Emsomat | EV-Anschlussschutz bei ungültiger Netzleistung | HOCH | TEST AUSSTEHEND | – |
 | LE-02 | Emsomat | PID-Test und ungültige Messwerte | MITTEL | ERLEDIGT | – |
 | LE-03 | Emsomat | Sparkplug EA-1 abschliessen | HOCH | TEST AUSSTEHEND | – |
-| LE-04 | Shareomat | Ungültige Werte über `bridge.py` und `WanDownlink` erhalten (K-3) | HOCH | OFFEN | LE-03 |
-| LE-05 | Shareomat | Sparkplug-Sitzungen und Quellenidentität (S-L4, S-L5, K-1, K-2) | HOCH | OFFEN | LE-04 |
-| LE-06 | Shareomat | Anschlüsse ohne separaten Einspeisesensor | MITTEL | OFFEN | – (fachlich vor LE-07) |
-| LE-07 | Shareomat | Live-Modul (Datenmodell, Prüfung, Bilanz) | HOCH | OFFEN | LE-04, LE-05, LE-06 |
-| LE-08 | Shareomat | Verwaltung «Live-Energie», Live-Messquelle zuordnen | HOCH | OFFEN | LE-07 |
-| LE-09 | Shareomat | HA-Sensoren LEG-Status und Integrationsprüfung | MITTEL | OFFEN | LE-07, LE-08 |
+| LE-04 | Shareomat | Ungültige Werte über `bridge.py` und `WanDownlink` erhalten (K-3) | HOCH | ERLEDIGT | LE-03 |
+| LE-05 | Shareomat | Sparkplug-Sitzungen und Quellenidentität (S-L4, S-L5, K-1, K-2) | HOCH | TEST AUSSTEHEND | LE-04 |
+| LE-06 | Shareomat | Anschlüsse ohne separaten Einspeisesensor | MITTEL | ERLEDIGT | – (fachlich vor LE-07) |
+| LE-07 | Shareomat | Live-Modul (Datenmodell, Prüfung, Bilanz) | HOCH | ERLEDIGT | LE-04, LE-05, LE-06 |
+| LE-08 | Shareomat | Verwaltung «Live-Energie», Live-Messquelle zuordnen | HOCH | TEST AUSSTEHEND | LE-07 |
+| LE-09 | Shareomat | HA-Sensoren LEG-Status und Integrationsprüfung | MITTEL | TEST AUSSTEHEND | LE-07, LE-08 |
 | LE-10 | Shareomat (+ HA-Blueprint) | Home Assistant als direkte Quelle (`ha_mqtt`) | MITTEL | OFFEN | LE-07, LE-08 |
 | LE-11 | Shareomat | Externes Gateway / AMS Reader (`gateway_mqtt`) | MITTEL | OFFEN | LE-07, LE-08, Broker-Entscheid |
 | LE-12 | alle | Nachbar-Pilot | MITTEL | OFFEN | LE-09, LE-10 oder LE-11, O-3 |
 | LE-13 | Shareomat | Teilnehmerportal | NIEDRIG | OFFEN | LE-12, Security-Review |
-| LE-14 | Shareomat | Vendor-Code: NDEATH-Zeitstempel beim Lesen vertauscht | NIEDRIG | OFFEN | – |
+| LE-14 | Shareomat | Vendor-Code: NDEATH-Zeitstempel beim Lesen vertauscht | NIEDRIG | ERLEDIGT | – |
 | LE-15 | Emsomat | Eingehende Teilnehmerwerte ohne Zeitstempel bekommen «jetzt» | NIEDRIG | OFFEN | – |
 | LE-16 | Emsomat | EV `fast`/`pv_min` erzwingen `min_charge_a` auch ohne Anschlussreserve (Lösung in LE-19) | HOCH | OFFEN | LE-19 |
 | LE-17 | Emsomat | Kein Bezugssensor konfiguriert = EV ohne Anschlussschutz | MITTEL | OFFEN | Entscheid |
@@ -70,7 +88,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
   definiert und umgesetzt; gültige 0 W unverändert; bestehende Schutz- und
   Verriegelungslogik berücksichtigt; vollständige Emsomat-Testsuite grün.
   Keine realen Ladeversuche.
-* **Ergebnis (08.11.2026, nicht committet):**
+* **Ergebnis (08.11.2026, Commit `5c72b08`):**
   * **Ursache bestätigt:** `ev_logic.py` las `get_market_import_now_w()`.
     Bei `unavailable`, `unknown`, leerem Zustand, NaN oder keiner Zahl gab
     der Getter 0.0 zurück. Die Hauslast galt damit als 0 A, und FAST gab
@@ -117,7 +135,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Prüfkriterien:** Beschreibung und Verhalten stimmen überein;
   Regressionstests; keine Änderung an der PID-Regelung selbst;
   vollständige Testsuite grün.
-* **Ergebnis (09.11.2026, nicht committet):**
+* **Ergebnis (08.11.2026, Commit `cbb4da1`):**
   * **Ursache bestätigt:** Die Standardquelle «Import − Export» las die
     Getter, die bei einem ungültigen Sensor 0.0 liefern. Mit `unavailable`,
     `unknown`, leer, keiner Zahl, NaN, Inf, fehlender Entity oder ohne
@@ -146,7 +164,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
 * **Projekt:** Emsomat · **Priorität:** HOCH · **Status:** TEST AUSSTEHEND
 * **Ursache:** S-L2, S-L3 (ADR-0007 Kontext).
-* **Bereits umgesetzt (07.11.2026, nicht committet, nicht neu schreiben):**
+* **Bereits umgesetzt (07.11.2026, Commit `e6be1c7`, nicht neu schreiben):**
   `Emsomat/sparkplug/power_sample.py` (neu); `edge_node.py`: `is_null`
   statt 0 W, auch im NBIRTH vor dem ersten Wert; beide Werte immer in einer
   Nachricht; Metric-Zeitstempel = `last_reported` (Fallback
@@ -170,7 +188,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
 ## LE-04 – Shareomat: Ungültige Werte über die Bridge erhalten
 
-* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** ERLEDIGT
 * **Ursache:** `sparkplug/bridge.py` (`mirror_host_to_uplink`) und
   `WanDownlink._extract_power()` machen mit `float(value or 0.0)` aus
   einem ungültigen Wert 0 W (S-L1). `ParticipantRelay` gibt nur zwei
@@ -181,11 +199,18 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Abhängigkeiten:** LE-03 (Emsomat-Format).
 * **Prüfkriterien:** Regressionstests; vollständige Shareomat-Testsuite
   grün.
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** `is_null`, NaN, Inf und negative Werte werden in
+  `bridge.py`, `WanDownlink` und `ParticipantRelay` nie zu 0 W. Zeitstempel und
+  `Market/PowerTimeSource` gehen mit. Ein gültiger Wert ohne Zeitstempel wird
+  nicht mit «jetzt» versehen. Geht Emsomat weg, wird der Teilnehmer auf dem WAN
+  entfernt. Tests: `tests/test_live_transport.py`.
+* **Hinweis Inbetriebnahme:** Eine Emsomat-Installation ohne den Stand aus LE-03
+  liefert bei Sensorausfall weiterhin 0 W. Emsomat muss dafür aktualisiert sein.
 * **ADR:** ADR-0007 Kontext S-L1, §4 Härtung, §10 K-3.
 
 ## LE-05 – Shareomat: Sparkplug-Sitzungen und Quellenidentität
 
-* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** TEST AUSSTEHEND
 * **Ursache:** S-L4, S-L5, K-1, K-2.
 * **Ziel:** Verbindungsabbruch erkennen, alte Werte ungültig machen,
   Sitzung und `seq` prüfen, Rebirth und Wiederanlauf behandeln,
@@ -197,12 +222,20 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
   Broker brauchen eine Freigabe.
 * **Prüfkriterien:** Tests nach ADR-0007 §8 Nr. 5 und 6; vollständige
   Testsuite grün; ACL-Nachweis isoliert dokumentiert.
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Verbindungsverlust macht Werte sofort ungültig, gültig
+  erst wieder mit neuem BIRTH. Neues BIRTH löscht alte Metrics, `seq`-Lücken
+  fordern lokal höchstens einmal pro Minute einen Rebirth an. Retained, zu
+  grosse und zu lange Nachrichten werden verworfen. Der `WanDownlink` nimmt nur
+  in «Live-Energie» registrierte Paare an (K-1: Uplink wiederholt Births alle
+  5 Minuten, keine Befehle zwischen Standorten).
+* **Ausstehend:** ACL-Negativtest auf einem isolierten Test-Broker (K-2). Bis
+  dahin bleibt «Identität nachgewiesen» bewusst leer.
 * **ADR:** ADR-0007 §4.1, §4.2, §10 K-1, K-2.
 
 ## LE-06 – Anschlüsse ohne separaten Einspeisesensor
 
 * **Projekt:** Shareomat (Modell), später auch Emsomat · **Priorität:** MITTEL
-* **Status:** OFFEN
+* **Status:** ERLEDIGT
 * **Ursache:** Nicht jeder Abnehmer hat PV. Es gibt drei Fälle: Zähler mit
   Bezug und Einspeisung; ein Nettosensor mit Vorzeichen; ein reiner
   Bezugssensor bei einem Anschluss, an dem Einspeisung nachweislich
@@ -213,11 +246,14 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Abhängigkeiten:** fachlich vor LE-07 festzulegen (Datenmodell).
 * **Prüfkriterien:** Ergänzung in ADR-0007 (§2 `measurement_mode`, §3);
   Tests in LE-07.
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Messarten `import_export`, `signed` und `import_only`.
+  `import_only` nur für Verbraucher-Messpunkte und mit Begründung. Eine fehlende
+  Live-Quelle oder Einspeisung wird nie als 0 W gewertet (ADR-0007 §3.7).
 * **ADR:** ADR-0007 §2, §3.
 
 ## LE-07 – Shareomat: Live-Modul
 
-* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** ERLEDIGT
 * **Ziel:** `live_sources` und `live_source_channels` (vollständiges
   Modell), `live.db`, Rohproben, zentrale Qualitätsprüfung, Aktualität und
   Identität, LEG-Bilanz, Hysterese, `LiveStatusService`. Unvollständige,
@@ -226,11 +262,16 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Grenzen:** keine Änderung an der Abrechnungsberechnung.
 * **Prüfkriterien:** Tests ADR-0007 §8 Nr. 1–9, insbesondere die Trennung
   von Live-Daten und Abrechnung; vollständige Testsuite grün.
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Paket `shareomat/live/`, Schema-Version 15, `live.db`
+  neben `shareomat.db`. Architekturtests sichern, dass Abrechnung und
+  Datenbankcode das Live-Paket nicht importieren. Abrechnungscode wurde nicht
+  geändert. Tests: `tests/test_live_core.py`, `tests/test_main_live_wiring.py`.
+  `max_age` ist neu 90 s, weil Emsomat alle 30 s sendet.
 * **ADR:** ADR-0007 §2, §3, §4.
 
 ## LE-08 – Verwaltung: Live-Messquelle zuordnen
 
-* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** TEST AUSSTEHEND
 * **Ziel:** Menü BETRIEB → «Live-Energie»: Übersicht aller offiziellen
   LEG-Messpunkte, aktuelle Live-Messquelle, Kommunikation, Qualität,
   letzte gültige Messung; «Live-Messquelle zuordnen» mit
@@ -241,11 +282,16 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Grenzen:** Die übrige Verwaltung bleibt unverändert.
 * **Prüfkriterien:** Tests ADR-0007 §8 Nr. 8; CSRF, Admin-Recht, Audit;
   vollständige Testsuite grün; Sichtprüfung in HA (Ingress).
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Übersicht, Zuordnen, Prüfen, Aktivieren, Ändern,
+  Deaktivieren und Identitätsnachweis in der Oberfläche. Über den echten
+  Webserver geprüft (ohne Login Umleitung, ohne CSRF keine Änderung). Ohne Broker
+  nutzbar mit `tools/live_energy_demo.py`.
+* **Ausstehend:** Sichtprüfung in HA hinter Ingress.
 * **ADR:** ADR-0007 §2, §5.1.
 
 ## LE-09 – HA-Sensoren und Integrationsprüfung
 
-* **Projekt:** Shareomat · **Priorität:** MITTEL · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** MITTEL · **Status:** TEST AUSSTEHEND
 * **Ziel:** `sensor.shareomat_leg_ueberschuss` und
   `sensor.shareomat_leg_live_status`. Keine falsche Überschusszahl bei
   unsicherer Messung. Tests für `unknown`/`unavailable`, Wiederanlauf,
@@ -254,6 +300,13 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Abhängigkeiten:** LE-07, LE-08.
 * **Prüfkriterien:** vollständige Testsuite grün. Reale Tests ohne
   autorisierte Testumgebung werden hier als ausstehend aufgeführt.
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** 9 Sensoren per MQTT Discovery (`ha/live_sensors.py`),
+  ohne Befehlskanal. `ha_addon/` synchron. Die eigene gültige Einzelmessung ist
+  auch bei unvollständiger Bilanz sichtbar, der LEG-Überschuss nur bei
+  `VOLLSTÄNDIG`.
+* **Ausstehend:** Realtest mit Mosquitto und HA: Entities erscheinen, «None» wird
+  zu `unknown`, Wiederanlauf, Übernahme durch die Entity Bridge. Ausserdem an
+  realen Daten prüfen, ob 90 s zu den Meldeintervallen der Sensoren passen.
 * **ADR:** ADR-0007 §5 I2.
 
 ## LE-10 – Home Assistant als direkte Quelle
@@ -308,12 +361,13 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
 ## LE-14 – Shareomat: NDEATH-Zeitstempel im Vendor-Code
 
-* **Projekt:** Shareomat · **Priorität:** NIEDRIG · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** NIEDRIG · **Status:** ERLEDIGT
 * **Ursache:** `shareomat/sparkplug/vendor/payload.py:176`: Die Bedingung
   ist vertauscht (`… if not payload.HasField("timestamp") else None`). Der
   Zeitstempel einer NDEATH geht beim Lesen verloren. Heute wird er nicht
   verwendet.
-* **Abhängigkeiten:** sinnvoll zusammen mit LE-05.
+* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Bedingung korrigiert, Test in
+  `tests/test_live_transport.py`.
 
 ## LE-15 – Emsomat: Teilnehmerwerte ohne Zeitstempel
 
@@ -329,7 +383,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 ## LE-16 – Emsomat: EV-Mindeststrom ohne Anschlussreserve
 
 * **Projekt:** Emsomat · **Priorität:** HOCH · **Status:** OFFEN
-* **Stand 09.11.2026:** Istanalyse erstellt:
+* **Stand 08.11.2026:** Istanalyse erstellt:
   Emsomat `docs/development/EV_Ladelogik_Istanalyse_LE-16.md`. Wichtigster
   Befund: Der Bezugssensor enthält den eigenen Ladestrom, die
   Reserveformel zählt ihn doppelt (bei 3 Phasen dreifach). Der Iststrom der
@@ -397,7 +451,8 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
   * **Später:** Die Core Registry teilt die verfügbare Leistung über OUT HI
     zu (Battery vor EV, Haus).
 * **Enthält:** LE-16 (Anschlussreserve als OUT-HI-Grenze, kein Mindeststrom
-  über der Reserve, Anti-Cycling hält keinen Strom über der Reserve).
+  über der Reserve, Anti-Cycling hält keinen Strom über der Reserve). Keine
+  parallele zweite EV-Regelung entwickeln.
 * **Zu beachten:** Der Regler geht im ROUT bei ungültigem Messwert nicht auf
   HOLD, der LE-01-Schutz muss ausserhalb greifen (ROUT auf 0). Eine Prüfung,
   ob ein Sensor hängt, gehört nicht ins EV und nicht an den PID-Eingang: Das
@@ -413,7 +468,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 ## LE-20 – Emsomat: Sensorprüfer als Library-Objekt
 
 * **Projekt:** Emsomat · **Priorität:** MITTEL · **Status:** OFFEN (später,
-  Entscheid 09.11.2026)
+  Entscheid 08.11.2026)
 * **Ursache:** Ein Sensor ist IO BAD oder in Ordnung. Ob er ungültig ist oder
   hängt, soll nicht an jeder Verwendungsstelle einzeln geprüft werden. Heute
   sitzt die Altersprüfung (120 s, aus LE-01) direkt in
@@ -423,8 +478,38 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
   einem Ausgang IO BAD (mit Grund). Verbraucher wie EV oder PID-Eingang werten
   nur noch IO BAD aus.
 * **Umbau:** Die Altersprüfung aus `ev_logic.py` wandert in den Sensorprüfer.
-  Bis dahin bleibt sie wie sie ist und wird **nicht** entfernt. Die 120 s
+  Bis dahin bleibt sie wie sie ist und wird **nicht** entfernt. Ersetzt wird
+  sie erst in einer späteren, getesteten Migration. Die 120 s
   werden ein Parameter (LE-18).
+* **Notizen zur Klasse (Vorschlag, noch nicht angelegt):**
+  * Neues Paket neben `lib/pid` und `lib/trend`, z. B. `lib/sensor_check/` mit
+    einer Klasse `SensorCheck`. Kein `homeassistant`-Import, damit sie ohne HA
+    testbar ist.
+  * Konfiguration pro Instanz, z. B. erlaubte Einheiten, Wertebereich, ob
+    negative Werte erlaubt sind, maximales Alter.
+  * Eingang: Zustand, Einheit und Zeitstempel eines Sensors.
+  * Ausgang: Wert, **IO BAD** ja/nein und Grund (`unknown`, `unavailable`,
+    keine Zahl, NaN/Inf, Bereich, Einheit, veraltet, fehlt). Ein gültiger Wert
+    0 bleibt 0.
+  * Ein Verbraucher wertet nur IO BAD aus und prüft nichts mehr selbst. Welches
+    Verhalten bei IO BAD gilt, entscheidet weiterhin der Verbraucher.
+  * Wie ein hängender Sensor sicher erkannt wird, wird beim Bau festgelegt. Das
+    Alter nach HA-Zeitstempel allein erkennt einen weiter geschriebenen,
+    eingefrorenen Wert nicht.
+* **Stellen, die heute selbst prüfen (Stand 08.11.2026):**
+
+  | Stelle | Sensor |
+  |---|---|
+  | `addon/ev_logic.py` | Netzleistung mit Altersprüfung, SoC des Autos, Verfügbarkeit der Wallbox |
+  | `sparkplug/power_sample.py` | Bezug und Einspeisung für Sparkplug, EV und PID-Test |
+  | `manager.py` (`_as_float`, `_as_bool`) | u. a. Preis, Exportpreis, Batterie-SoC, Wärmeenergie, Wärmeleistung, Aussentemperatur, PV-Leistung, direkt gewählter PID-Sensor |
+  | `taskgrid_ha/device_snapshot.py` | SoC des Autos für TaskGrid |
+  | `models/parameters.py` | wiederhergestellte Zustände der Parameter |
+  | `adapters/tempForecastAdapter.py` | Temperatursensor |
+
+  `get_battery_soc_pct()` und `get_live_pv_power()` geben immer eine Zahl
+  zurück. Beim Umbau prüfen, was sie bei ungültigem Sensor liefern. Pro Stelle
+  einzeln entscheiden, ob sie umgestellt wird.
 * **Abhängigkeiten:** keine.
 * **Prüfkriterien:** Tests des Library-Objekts; das Verhalten aus LE-01
   (Laden stoppt bei ungültigem oder veraltetem Bezug) bleibt nachgewiesen;

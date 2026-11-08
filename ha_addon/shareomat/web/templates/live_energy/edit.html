@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Live-Messquelle ändern{% endblock %}
+{% block heading %}Live-Messquelle ändern{% endblock %}
+{% block content %}
+<div class="card">
+  <p>{{ type_label }} · <span style="font-family:monospace">{{ source.source_key.split(':', 1)[-1] }}</span> · Messpunkt {{ source.meter_id }}</p>
+  <p class="ts">Die technische Kennung lässt sich nicht ändern. Eine andere Quelle wird neu zugeordnet.</p>
+  <form class="form-card" method="post" action="{{ url_for('live_energy', suffix='/sources/' ~ source.id ~ '/edit') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="measurement_mode">Messart</label>
+      <select id="measurement_mode" name="measurement_mode">
+        <option value="import_export" {{ 'selected' if source.measurement_mode == 'import_export' }}>{{ mode_labels['import_export'] }}</option>
+        {% if can_be_signed %}<option value="signed" {{ 'selected' if source.measurement_mode == 'signed' }}>{{ mode_labels['signed'] }}</option>{% endif %}
+        {% if can_be_import_only %}<option value="import_only" {{ 'selected' if source.measurement_mode == 'import_only' }}>{{ mode_labels['import_only'] }}</option>{% endif %}
+      </select>
+    </div>
+    {% if can_be_signed %}
+    <div class="field">
+      <label for="sign_convention">Vorzeichenregel</label>
+      <select id="sign_convention" name="sign_convention">
+        <option value="">bitte wählen</option>
+        <option value="positive_is_import" {{ 'selected' if source.sign_convention == 'positive_is_import' }}>positiv = Bezug</option>
+        <option value="positive_is_export" {{ 'selected' if source.sign_convention == 'positive_is_export' }}>positiv = Einspeisung</option>
+      </select>
+    </div>
+    {% endif %}
+    {% if can_be_import_only %}
+    <div class="field">
+      <label for="no_export_note">Begründung bei «Nur Bezug»</label>
+      <input type="text" id="no_export_note" name="no_export_note" maxlength="300" value="{{ source.no_export_note }}">
+    </div>
+    {% endif %}
+    <div class="field">
+      <label for="max_power_w">Maximale Leistung am Anschluss (W)</label>
+      <input type="number" id="max_power_w" name="max_power_w" min="1" max="1000000" step="1" required value="{{ source.max_power_w | int }}">
+    </div>
+    <div class="field">
+      <label for="freshness_evidence">Nachweisstufe der Messaktualität</label>
+      <select id="freshness_evidence" name="freshness_evidence">
+        {% for value, label in evidence_labels.items() %}<option value="{{ value }}" {{ 'selected' if source.freshness_evidence == value }}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="actions-row">
+      <button type="submit" class="btn">Speichern</button>
+      <a class="btn btn-muted" href="{{ url_for('live_energy') }}">Abbrechen</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

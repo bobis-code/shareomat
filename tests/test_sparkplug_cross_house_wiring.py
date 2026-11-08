@@ -148,7 +148,7 @@ def _site_b_stack(broker: FakeBroker):
     local_relay = ParticipantRelay(local_relay_sp_config, local_relay_mqtt_config, client=object())
 
     downlink_client = FakeClient(broker)
-    downlink = WanDownlink(wan_config, local_relay, client_id="site-b-downlink", client=downlink_client)
+    downlink = WanDownlink(wan_config, local_relay, client_id="site-b-downlink", allowed_source=lambda edge, device: True, client=downlink_client)
     downlink.start()
     return downlink, local_relay
 
