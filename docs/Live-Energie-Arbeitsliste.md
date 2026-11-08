@@ -34,7 +34,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 | ID | Projekt | Aufgabe | Priorität | Status | Abhängig von |
 |---|---|---|---|---|---|
 | LE-01 | Emsomat | EV-Anschlussschutz bei ungültiger Netzleistung | HOCH | TEST AUSSTEHEND | – |
-| LE-02 | Emsomat | PID-Test und ungültige Messwerte | MITTEL | OFFEN | – |
+| LE-02 | Emsomat | PID-Test und ungültige Messwerte | MITTEL | ERLEDIGT | – |
 | LE-03 | Emsomat | Sparkplug EA-1 abschliessen | HOCH | TEST AUSSTEHEND | – |
 | LE-04 | Shareomat | Ungültige Werte über `bridge.py` und `WanDownlink` erhalten (K-3) | HOCH | OFFEN | LE-03 |
 | LE-05 | Shareomat | Sparkplug-Sitzungen und Quellenidentität (S-L4, S-L5, K-1, K-2) | HOCH | OFFEN | LE-04 |
@@ -48,9 +48,11 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 | LE-13 | Shareomat | Teilnehmerportal | NIEDRIG | OFFEN | LE-12, Security-Review |
 | LE-14 | Shareomat | Vendor-Code: NDEATH-Zeitstempel beim Lesen vertauscht | NIEDRIG | OFFEN | – |
 | LE-15 | Emsomat | Eingehende Teilnehmerwerte ohne Zeitstempel bekommen «jetzt» | NIEDRIG | OFFEN | – |
-| LE-16 | Emsomat | EV `fast`/`pv_min` erzwingen `min_charge_a` auch ohne Anschlussreserve (vor LE-02) | HOCH | BLOCKIERT | Entscheid nach Istanalyse |
+| LE-16 | Emsomat | EV `fast`/`pv_min` erzwingen `min_charge_a` auch ohne Anschlussreserve (Lösung in LE-19) | HOCH | OFFEN | LE-19 |
 | LE-17 | Emsomat | Kein Bezugssensor konfiguriert = EV ohne Anschlussschutz | MITTEL | OFFEN | Entscheid |
-| LE-18 | Emsomat | `grid_power_max_age_s` nicht konfigurierbar | NIEDRIG | OFFEN | – |
+| LE-18 | Emsomat | `grid_power_max_age_s` nicht konfigurierbar | NIEDRIG | OFFEN | LE-20 |
+| LE-19 | Emsomat | EV-Regelung mit PID, Phasen aus OUT, ROUT-Stufen ohne Messung | HOCH | OFFEN | – |
+| LE-20 | Emsomat | Sensorprüfer als Library-Objekt mit Ausgang IO BAD | MITTEL | OFFEN | – |
 
 ---
 
@@ -104,7 +106,7 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
 ## LE-02 – Emsomat: PID-Test und ungültige Messwerte
 
-* **Projekt:** Emsomat · **Priorität:** MITTEL · **Status:** OFFEN
+* **Projekt:** Emsomat · **Priorität:** MITTEL · **Status:** ERLEDIGT
 * **Ursache:** `_read_pid_shadow_grid_power_w()` nimmt bei der Standardquelle
   `get_market_import_now_w() − get_market_export_now_w()`. Ein ungültiger
   Sensor ergibt dort 0 W. Die eigene Beschreibung verlangt «ungültige PV
@@ -115,7 +117,29 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Prüfkriterien:** Beschreibung und Verhalten stimmen überein;
   Regressionstests; keine Änderung an der PID-Regelung selbst;
   vollständige Testsuite grün.
-* **Ergebnis und Testnachweis:** –
+* **Ergebnis (09.11.2026, nicht committet):**
+  * **Ursache bestätigt:** Die Standardquelle «Import − Export» las die
+    Getter, die bei einem ungültigen Sensor 0.0 liefern. Mit `unavailable`,
+    `unknown`, leer, keiner Zahl, NaN, Inf, fehlender Entity oder ohne
+    konfigurierten Sensor bekam der Regler eine Zahl statt «ungültig».
+  * **Korrektur:** neu `net_grid_power_w()` in
+    `Emsomat/sparkplug/power_sample.py`. `manager.py` nutzt sie für die
+    Standardquelle. Ungültig → `None` → `pv_valid = False` → HOLD. Der direkt
+    gewählte Sensor und `lib/pid` sind unverändert.
+  * **Verhalten:** Gültige 0 W bleiben eine Messung. Ein negativer Wert zählt
+    wie bisher als 0 W. Neu: Fehlt einer der beiden Sensoren in der
+    Konfiguration, ist die Standardquelle ungültig. Dann muss im Test ein
+    Sensor direkt gewählt werden.
+  * **Dateien (Emsomat):** `Emsomat/manager.py`,
+    `Emsomat/sparkplug/power_sample.py`, `docs/technik_de.md`, neu
+    `tests/test_pid_shadow_input.py` (34 Tests).
+  * **Testnachweis:** 19 Tests schlugen vor der Korrektur fehl, 16 davon
+    gegen den echten Code aus `manager.py` (per `ast` geladen, weil das Modul
+    ohne HA nicht importierbar ist). Danach alle grün. Vollständige
+    Emsomat-Suite: **1381 bestanden** (vorher 1347).
+  * **Nicht Teil von LE-02:** `tick_battery_pid_shadow()` wurde nicht als Ganzes ausgeführt, die
+    Wirkung ist auf Ebene Eingang und Regler getestet. Der PID-Test steuert
+    keine Hardware.
 * **ADR:** ADR-0007 §10.
 
 ## LE-03 – Emsomat: Sparkplug EA-1 abschliessen
@@ -304,14 +328,13 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
 ## LE-16 – Emsomat: EV-Mindeststrom ohne Anschlussreserve
 
-* **Projekt:** Emsomat · **Priorität:** HOCH (vor LE-02) · **Status:** BLOCKIERT
-* **Stand 08.11.2026:** Istanalyse erstellt, noch keine Codeänderung:
+* **Projekt:** Emsomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Stand 09.11.2026:** Istanalyse erstellt:
   Emsomat `docs/development/EV_Ladelogik_Istanalyse_LE-16.md`. Wichtigster
   Befund: Der Bezugssensor enthält den eigenen Ladestrom, die
   Reserveformel zählt ihn doppelt (bei 3 Phasen dreifach). Der Iststrom der
-  Wallbox ist unbekannt. Wie die Reserve den eigenen Ladestrom
-  berücksichtigen soll, entscheidet der Projektverantwortliche, bevor
-  LE-16 umgesetzt wird.
+  Wallbox ist unbekannt. **Entschieden:** Die Reserve rechnet mit einer neuen,
+  optionalen Ist-Leistung der Wallbox. Die Umsetzung gehört zu LE-19.
 * **Ursache:** Bei LE-01 gefunden. `fast` rechnet
   `_clamp(available_a, min_a, max_a)`, `pv_min`
   `_clamp(max(min_a, …), min_a, max_a)`. Ist die freie Anschlussreserve
@@ -344,7 +367,68 @@ Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 * **Ursache:** `grid_power_max_age_s` (Standard 120 s) wird von
   `manager.get_ev_cfg()` nicht durchgereicht und ist im Betrieb fest. Für
   Sensoren, die selten melden, könnte ein anderer Wert nötig sein.
-* **Abhängigkeiten:** Realtest LE-01 (zeigt, ob 120 s passen).
+* **Abhängigkeiten:** LE-20 (die Grenze wird dort ein Parameter), Realtest
+  LE-01 (zeigt, ob 120 s passen).
+
+## LE-19 – Emsomat: EV-Regelung mit PID
+
+* **Projekt:** Emsomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Ursache:** Die EV-Logik springt zwischen Strömen und Phasen (Istanalyse
+  LE-16). Die Phasenregel «≥ 10 A → 3 Phasen» läuft ohne Hysterese und ohne
+  Mindestzeit und schaltet bei wenig Überschuss zu früh hoch (2,5 kW
+  Überschuss → 6 A×3 = 4,1 kW, 1,6 kW Netzbezug).
+* **Entscheide des Projektverantwortlichen (08.11.2026):**
+  * Der **Score** entscheidet, ob geladen wird. Der Netzbezug wird nicht
+    vom PV-Überschuss abgezogen.
+  * Der **PID** entscheidet, wie viel: Messwert = Netzleistung mit
+    Vorzeichen (Bezug − Einspeisung), Sollwert 0 W, OUT = Ladeleistung.
+    Eigene Instanz des Library-Objekts `lib/pid`. Der Battery-PID-Test ist
+    davon unabhängig, ein Umbau am EV hat keinen Einfluss darauf.
+  * **Phasen aus den OUT-Grenzen:** 1 Phase 1,4–3,7 kW, 3 Phasen 4,1–11 kW.
+    Auf 3 Phasen springt OUT LO auf 4,1 kW. Gewechselt wird erst, wenn OUT
+    eine Mindestzeit an der Grenze anliegt, mit Nachführung des Reglers.
+  * **Ist-Leistung der Wallbox:** neues optionales Feld. Wallbox-Sensor oder
+    Helfer. Ein Helfer muss auf einer echten Messung beruhen.
+  * **Ohne Messung (Feld leer):** Der User wählt eine feste Stufe: 1 Phase
+    10 A (2,3 kW), 3 Phasen 6 A (4,1 kW) oder 3 Phasen 16 A (11 kW). Der PID
+    läuft dann in ROUT.
+  * **Deadline** («um 16:00 voll»): so viel PV wie möglich, der Rest aus dem
+    Netz. Ersetzt die feste Regel «2 h vor Ende FAST». Braucht den SoC.
+  * **Später:** Die Core Registry teilt die verfügbare Leistung über OUT HI
+    zu (Battery vor EV, Haus).
+* **Enthält:** LE-16 (Anschlussreserve als OUT-HI-Grenze, kein Mindeststrom
+  über der Reserve, Anti-Cycling hält keinen Strom über der Reserve).
+* **Zu beachten:** Der Regler geht im ROUT bei ungültigem Messwert nicht auf
+  HOLD, der LE-01-Schutz muss ausserhalb greifen (ROUT auf 0). Eine Prüfung,
+  ob ein Sensor hängt, gehört nicht ins EV und nicht an den PID-Eingang: Das
+  macht der Sensorprüfer (LE-20), der IO BAD meldet. Die Getter
+  `get_market_import_now_w()`/`get_market_export_now_w()` haben seit LE-02
+  keinen Aufrufer mehr und können dann entfallen.
+* **Abhängigkeiten:** keine.
+* **Prüfkriterien:** Regressionstests aus dem LE-16-Auftrag (FAST, PV_MIN,
+  PV, 1/3 Phasen, Grenzfälle, keine Stopp-/Start-Zyklen, kein
+  Phasenflattern); vollständige Testsuite grün; Realtest in einer
+  HA-Testinstanz ohne reale Ladung.
+
+## LE-20 – Emsomat: Sensorprüfer als Library-Objekt
+
+* **Projekt:** Emsomat · **Priorität:** MITTEL · **Status:** OFFEN (später,
+  Entscheid 09.11.2026)
+* **Ursache:** Ein Sensor ist IO BAD oder in Ordnung. Ob er ungültig ist oder
+  hängt, soll nicht an jeder Verwendungsstelle einzeln geprüft werden. Heute
+  sitzt die Altersprüfung (120 s, aus LE-01) direkt in
+  `Emsomat/addon/ev_logic.py`.
+* **Ziel:** ein Sensorprüfer als eigenes Library-Objekt, aufgebaut wie
+  `lib/pid`: für alle Sensoren gleich, je Verwendung eine eigene Instanz, mit
+  einem Ausgang IO BAD (mit Grund). Verbraucher wie EV oder PID-Eingang werten
+  nur noch IO BAD aus.
+* **Umbau:** Die Altersprüfung aus `ev_logic.py` wandert in den Sensorprüfer.
+  Bis dahin bleibt sie wie sie ist und wird **nicht** entfernt. Die 120 s
+  werden ein Parameter (LE-18).
+* **Abhängigkeiten:** keine.
+* **Prüfkriterien:** Tests des Library-Objekts; das Verhalten aus LE-01
+  (Laden stoppt bei ungültigem oder veraltetem Bezug) bleibt nachgewiesen;
+  vollständige Testsuite grün.
 
 ## Ausstehende reale Tests (ohne autorisierte Testumgebung nicht möglich)
 
