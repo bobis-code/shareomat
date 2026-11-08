@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Live-Energie: Diagnose{% endblock %}
+{% block heading %}Live-Energie: Diagnose{% endblock %}
+{% block content %}
+{% if not available %}
+<div class="card"><p class="notice-warn">Die Live-Ebene läuft derzeit nicht. Details stehen im Add-on-Log.</p></div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0">Empfang pro Messquelle</h3>
+  {% set sources = rows | selectattr('diagnostics') | list %}
+  {% if sources %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Messpunkt</th><th>Quelle</th><th>Zustand</th><th>Letzte Nachricht</th><th>Letzte gültige Messung</th><th>Herkunft Zeitstempel</th><th>Verworfen</th></tr>
+      </thead>
+      <tbody>
+        {% for row in sources %}{% for s in row.diagnostics %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td style="font-family:monospace">{{ s.key }}</td>
+          <td>{{ s.state_label }}</td>
+          <td>{{ s.last_message_at }}</td>
+          <td>{{ s.last_valid_at }} ({{ s.last_valid_import_w }} / {{ s.last_valid_export_w }})</td>
+          <td>{{ s.time_origin }}</td>
+          <td>{{ s.dropped }}</td>
+        </tr>
+        {% endfor %}{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Live-Messquelle zugeordnet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Nicht zugeordnete Standorte auf dem WAN-Broker</h3>
+  {% if unknown_pairs %}
+  <p class="ts">Diese Absender wurden gesehen und verworfen, weil sie keinem Messpunkt zugeordnet sind.</p>
+  <ul>{% for edge, device in unknown_pairs %}<li style="font-family:monospace">{{ edge }} / {{ device }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="ts">Keine.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Parameter</h3>
+  <p class="ts">Überprüfbare Startwerte: Messwert veraltet nach {{ params.max_age_s | int }} s · Zeitabweichung bis {{ params.max_skew_s | int }} s ·
+    Widerspruch ab {{ params.conflict_w | int }} W · Überschuss ein ab {{ params.on_threshold_w | int }} W für {{ params.on_hold_s | int }} s ·
+    aus unter {{ params.off_threshold_w | int }} W für {{ params.off_hold_s | int }} s</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Letzte Statuswechsel</h3>
+  {% if events %}
+  <ul class="ts">{% for e in events %}<li>{{ e.at }}: {{ e.detail }}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="ts">Noch keine.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

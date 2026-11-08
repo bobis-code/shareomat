@@ -37,7 +37,7 @@ from shareomat.live.model import (
     DISPLAY_SURPLUS,
     LIVE_ACTIVE,
     LIVE_NONE,
-    LIVE_PLANNED,
+    LIVE_TESTING,
     QUALITY_CONFLICT,
     QUALITY_INVALID,
     QUALITY_MISSING,
@@ -634,7 +634,7 @@ def test_meter_rows_show_three_live_states(db_path, clock):
     assert rows["M1"].live_status == LIVE_ACTIVE and rows["M2"].live_status == LIVE_NONE and "GRID" not in rows
     _wan(db_path)
     service.reload_masterdata()
-    assert {r.meter_id: r for r in service.meter_rows()}["M2"].live_status == LIVE_PLANNED
+    assert {r.meter_id: r for r in service.meter_rows()}["M2"].live_status == LIVE_TESTING
 
 
 def test_rebirth_handler_called_for_new_source(db_path, clock):

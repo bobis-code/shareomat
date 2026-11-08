@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Local demo of "Betrieb -> Live-Energie" with test data, without any broker.
+Local demo of the "LIVE-ENERGIE" views with test data, without any broker.
 
 Uses a throw-away database in a temporary folder, listens on 127.0.0.1 only and
 prints a one-time password. It touches neither Home Assistant nor MQTT, and it
@@ -59,7 +59,10 @@ def build_demo(folder: Path) -> tuple[LiveStatusService, str, str]:
     service = LiveStatusService(db_path)
     state = get_state()
     state.register_db(db_path)
-    state.register_runtime(SimpleNamespace(sparkplug=SimpleNamespace(emsomat_edge_node_id=EDGE_NODE)))
+    state.register_runtime(SimpleNamespace(
+        sparkplug=SimpleNamespace(emsomat_edge_node_id=EDGE_NODE),
+        web=SimpleNamespace(trusted_proxies=[]),
+    ))
     state.register_live_service(service)
     service.submit(SessionStart(ADAPTER_EMSOMAT_LOCAL, SOURCE_KEY, "demo"))
     return service, "demo", password

@@ -3,8 +3,8 @@
 File: shareomat/web/pages/live_energy.py
 
 Purpose:
-    "Betrieb -> Live-Energie": overview of all official meters with their
-    live source, and "Live-Messquelle zuordnen" (ADR-0007, 5.1).
+    The three views of the "LIVE-ENERGIE" menu group (ADR-0007, 5.1):
+    Uebersicht, Messquellen with "Live-Messquelle zuordnen", and Diagnose.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
@@ -28,8 +28,10 @@ from shareomat.database.live_sources import (
     create_live_source,
     get_live_source,
     list_live_sources,
+    list_meter_live_states,
     record_identity_proof,
     retire_live_source,
+    set_meter_live_state,
     update_live_source,
 )
 from shareomat.database.meters import get_meter
@@ -43,29 +45,43 @@ from shareomat.models.live_source import (
     MODE_IMPORT_EXPORT,
     MODE_IMPORT_ONLY,
     MODE_SIGNED,
+    METER_STATE_NO_MEASUREMENT,
     SIGN_POSITIVE_IS_EXPORT,
     SIGN_POSITIVE_IS_IMPORT,
+    STATE_ACTIVE,
     STATE_RETIRED,
     STATE_TESTING,
 )
+from shareomat.web.navigation import url_for
 from shareomat.web.rendering import FormError, RequestContext, form_required, render_page
 from shareomat.web.state import get_state
 
 ROUTE = "live_energy"
+ROUTE_SOURCES = "live_energy_sources"
+ROUTE_DIAGNOSTICS = "live_energy_diagnostics"
 
 # (adapter, label) - what the administrator chooses, without technical detail.
 SOURCE_CHOICES = [
     (ADAPTER_EMSOMAT_LOCAL, "Emsomat / Sparkplug"),
     (ADAPTER_HA_MQTT, "Home Assistant / HA-Sensoren"),
     (ADAPTER_GATEWAY_MQTT, "Externe Quelle / Gateway"),
-    (ADAPTER_WAN_SPARKPLUG, "Externe Quelle / anderer Standort (WAN-Sparkplug)"),
+    (ADAPTER_WAN_SPARKPLUG, "Externer Standort / WAN-Sparkplug"),
 ]
 SOURCE_LABELS = dict(SOURCE_CHOICES)
+# What can be stated about a meter without any technical source.
+STATE_CHOICES = [
+    (METER_STATE_NO_MEASUREMENT, "Keine Live-Messung vorhanden"),
+]
 QUALITY_LABELS = {"ok": "gültig", "missing": "fehlt", "invalid": "ungültig", "stale": "veraltet", "conflict": "widersprüchlich"}
 COMM_LABELS = {"online": "verbunden", "offline": "getrennt", "nie_empfangen": "nie empfangen"}
 STATUS_LABELS = {"vollstaendig": "Vollständig", "unsicher": "Unvollständig", "keine_daten": "Keine Live-Daten"}
-STATE_LABELS = {"testing": "geplant / in Prüfung", "active": "aktiv", "retired": "abgelöst"}
-LIVE_STATUS_LABELS = {"none": "Keine Live-Messquelle", "planned": "Live-Messquelle geplant", "active": "Live-Messquelle aktiv"}
+STATE_LABELS = {"testing": "in Prüfung", "active": "aktiv", "retired": "abgelöst"}
+LIVE_STATUS_LABELS = {
+    "none": "Noch nicht festgelegt",
+    **dict(STATE_CHOICES),
+    "testing": "Live-Messquelle in Prüfung",
+    "active": "Live-Messquelle aktiv",
+}
 MODE_LABELS = {
     MODE_IMPORT_EXPORT: "Bezug und Einspeisung getrennt",
     MODE_SIGNED: "Ein Wert mit Vorzeichen",
@@ -127,14 +143,11 @@ def _source_view(source, reading, now: datetime) -> dict:
     }
 
 
-def _overview(ctx: RequestContext) -> str:
-    service = _service()
-    if service is None:
-        return render_page("live_energy/overview.html", ctx, ROUTE, available=False)
-    now = service.now()
-    status = service.leg_status()
+def _row_views(service, now: datetime) -> list[dict]:
     rows = []
     for row in service.meter_rows(now=now):
+        active = _source_view(row.active_source, row.active_reading, now) if row.active_source else None
+        testing = [_source_view(source, reading, now) for source, reading in row.testing]
         rows.append({
             "meter_id": row.meter_id,
             "label": row.label,
@@ -144,10 +157,21 @@ def _overview(ctx: RequestContext) -> str:
             "unconfirmed": row.unconfirmed,
             "live_status": row.live_status,
             "live_status_label": LIVE_STATUS_LABELS[row.live_status],
-            "active": _source_view(row.active_source, row.active_reading, now) if row.active_source else None,
-            "planned": [_source_view(source, reading, now) for source, reading in row.planned],
+            "active": active,
+            "testing": testing,
+            "shown": active or (testing[0] if testing else None),
+            "diagnostics": ([active] if active else []) + testing,
             "open_reasons": row.open_reasons,
         })
+    return rows
+
+
+def _overview(ctx: RequestContext) -> str:
+    service = _service()
+    if service is None:
+        return render_page("live_energy/overview.html", ctx, ROUTE, available=False)
+    now = service.now()
+    status = service.leg_status()
     own = service.own_reading(now=now)
     return render_page(
         "live_energy/overview.html", ctx, ROUTE,
@@ -167,7 +191,25 @@ def _overview(ctx: RequestContext) -> str:
             "export_w": _watts(own.export_w),
             "measured_at": _local(own.measured_at),
         },
-        rows=rows,
+        rows=_row_views(service, now),
+    )
+
+
+def _sources(ctx: RequestContext) -> str:
+    service = _service()
+    if service is None:
+        return render_page("live_energy/sources.html", ctx, ROUTE_SOURCES, available=False)
+    return render_page("live_energy/sources.html", ctx, ROUTE_SOURCES, available=True, rows=_row_views(service, service.now()))
+
+
+def _diagnostics(ctx: RequestContext) -> str:
+    service = _service()
+    if service is None:
+        return render_page("live_energy/diagnostics.html", ctx, ROUTE_DIAGNOSTICS, available=False)
+    return render_page(
+        "live_energy/diagnostics.html", ctx, ROUTE_DIAGNOSTICS,
+        available=True,
+        rows=_row_views(service, service.now()),
         params=service.params,
         events=[{"at": _local(e["occurred_at"]), "detail": e["detail"]} for e in service.recent_events()],
         unknown_pairs=service.unknown_wan_pairs(),
@@ -179,26 +221,39 @@ def _configured_edge_node() -> str:
     return runtime.sparkplug.emsomat_edge_node_id if runtime is not None else ""
 
 
+def _current_status(ctx: RequestContext, meter_id: str, existing: list) -> str:
+    if any(s.state == STATE_ACTIVE for s in existing):
+        return "active"
+    if existing:
+        return "testing"
+    return list_meter_live_states(ctx.db_path).get(meter_id, "none")
+
+
 def _assign_form(ctx: RequestContext, meter_id: str) -> str:
     meter = get_meter(ctx.db_path, meter_id)
     if meter is None or meter.role == METER_ROLE_GRID:
-        return render_page("placeholders/coming_soon.html", ctx, ROUTE, title="Messpunkt nicht gefunden", description="")
+        return render_page("placeholders/coming_soon.html", ctx, ROUTE_SOURCES, title="Messpunkt nicht gefunden", description="")
     adapter = ctx.query.get("adapter", "")
     if adapter not in ADAPTER_SOURCE_TYPES:
         adapter = ""
     service = _service()
+    existing = [s for s in list_live_sources(ctx.db_path) if s.meter_id == meter_id]
+    current_status = _current_status(ctx, meter_id, existing)
     return render_page(
-        "live_energy/assign.html", ctx, ROUTE,
+        "live_energy/assign.html", ctx, ROUTE_SOURCES,
         meter=meter,
         adapter=adapter,
         adapter_label=SOURCE_LABELS.get(adapter, ""),
         source_choices=SOURCE_CHOICES,
+        state_choices=STATE_CHOICES,
+        current_status=current_status,
+        current_status_label=LIVE_STATUS_LABELS[current_status],
         can_be_import_only=meter.role == METER_ROLE_CONSUMER,
         configured_edge_node=_configured_edge_node(),
         evidence_labels=EVIDENCE_LABELS,
         default_max_power=_DEFAULT_MAX_POWER_W,
         unknown_pairs=service.unknown_wan_pairs() if service else (),
-        existing=[s for s in list_live_sources(ctx.db_path) if s.meter_id == meter_id],
+        existing=existing,
         state_labels=STATE_LABELS,
     )
 
@@ -221,10 +276,10 @@ def _edit_form(ctx: RequestContext, raw_id: str) -> str:
         source_id = -1
     source = get_live_source(ctx.db_path, source_id)
     if source is None or source.state == STATE_RETIRED:
-        return render_page("placeholders/coming_soon.html", ctx, ROUTE, title="Live-Messquelle nicht gefunden", description="")
+        return render_page("placeholders/coming_soon.html", ctx, ROUTE_SOURCES, title="Live-Messquelle nicht gefunden", description="")
     meter = get_meter(ctx.db_path, source.meter_id)
     return render_page(
-        "live_energy/edit.html", ctx, ROUTE,
+        "live_energy/edit.html", ctx, ROUTE_SOURCES,
         source=source,
         meter=meter,
         type_label=SOURCE_LABELS.get(source.adapter, source.adapter),
@@ -238,6 +293,10 @@ def _edit_form(ctx: RequestContext, raw_id: str) -> str:
 def handle_get(ctx: RequestContext) -> str:
     if not ctx.segments:
         return _overview(ctx)
+    if ctx.segments == ["sources"]:
+        return _sources(ctx)
+    if ctx.segments == ["diagnostics"]:
+        return _diagnostics(ctx)
     if len(ctx.segments) == 2 and ctx.segments[1] == "assign":
         return _assign_form(ctx, ctx.segments[0])
     if len(ctx.segments) == 3 and ctx.segments[0] == "sources" and ctx.segments[2] == "edit":
@@ -285,7 +344,18 @@ def _handle_assign(ctx: RequestContext, meter_id: str) -> None:
     except LiveSourceError as exc:
         raise FormError(str(exc)) from exc
     _reload()
-    get_state().set_flash(f"Live-Messquelle für '{meter_id}' als geplant eingetragen. Sie zählt noch nicht zur Bilanz.", ok=True)
+    get_state().set_flash(f"Live-Messquelle für '{meter_id}' eingetragen und in Prüfung. Sie zählt noch nicht zur Bilanz.", ok=True)
+
+
+def _handle_state(ctx: RequestContext, meter_id: str) -> None:
+    state = form_required(ctx, "state", label="Zustand")
+    try:
+        retired = set_meter_live_state(ctx.db_path, meter_id=meter_id, state=state)
+    except LiveSourceError as exc:
+        raise FormError(str(exc)) from exc
+    _reload()
+    suffix = " Die bisher zugeordnete Quelle wurde deaktiviert." if retired else ""
+    get_state().set_flash(f"'{meter_id}': {LIVE_STATUS_LABELS[state]}.{suffix}", ok=True)
 
 
 def _handle_source_action(ctx: RequestContext, raw_id: str, action: str) -> None:
@@ -328,14 +398,27 @@ def _handle_source_action(ctx: RequestContext, raw_id: str, action: str) -> None
     _reload()
 
 
-def handle_post(ctx: RequestContext) -> str | None:
+def apply_post(ctx: RequestContext) -> None:
+    """Carry out a form action. Raises FormError if it is refused."""
     if len(ctx.segments) == 2 and ctx.segments[1] == "assign":
         _handle_assign(ctx, ctx.segments[0])
-        return None
+        return
+    if len(ctx.segments) == 2 and ctx.segments[1] == "state":
+        _handle_state(ctx, ctx.segments[0])
+        return
     if len(ctx.segments) == 3 and ctx.segments[0] == "sources":
         _handle_source_action(ctx, ctx.segments[1], ctx.segments[2])
-        return None
+        return
     raise FormError("Unbekannte Aktion.")
 
 
-__all__ = ["handle_get", "handle_post", "STATE_TESTING", "SIGN_POSITIVE_IS_IMPORT", "SIGN_POSITIVE_IS_EXPORT"]
+def handle_post(ctx: RequestContext) -> str:
+    """Every action starts on Messquellen, so that is where its result is shown."""
+    try:
+        apply_post(ctx)
+    except FormError as exc:
+        get_state().set_flash(str(exc), ok=False)
+    return url_for(ctx.ingress_path, ROUTE_SOURCES)
+
+
+__all__ = ["apply_post", "handle_get", "handle_post", "STATE_TESTING", "SIGN_POSITIVE_IS_IMPORT", "SIGN_POSITIVE_IS_EXPORT"]
