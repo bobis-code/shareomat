@@ -13,11 +13,11 @@ from shareomat.database.sqlite import init_db
 def test_first_call_computes_and_persists_a_forecast(tmp_path) -> None:
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
-    assert latest_computed_at(db_path) is None
+    assert latest_computed_at(app_main._coordinator_store(db_path)) is None
 
     app_main._maybe_recompute_demand_forecast(db_path)
 
-    assert latest_computed_at(db_path) is not None
+    assert latest_computed_at(app_main._coordinator_store(db_path)) is not None
 
 
 def test_second_call_within_throttle_window_does_not_recompute(tmp_path) -> None:
@@ -25,10 +25,10 @@ def test_second_call_within_throttle_window_does_not_recompute(tmp_path) -> None
     init_db(db_path)
 
     app_main._maybe_recompute_demand_forecast(db_path)
-    first = latest_computed_at(db_path)
+    first = latest_computed_at(app_main._coordinator_store(db_path))
 
     app_main._maybe_recompute_demand_forecast(db_path)
-    second = latest_computed_at(db_path)
+    second = latest_computed_at(app_main._coordinator_store(db_path))
 
     assert first == second  # no write happened on the second, immediate call
 

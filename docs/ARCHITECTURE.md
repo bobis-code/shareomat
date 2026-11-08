@@ -119,6 +119,8 @@ sources").
 * **Ausgang:** `data/reports/` (CSV/JSON), Web-UI, optional MQTT-Topics
   unter `{prefix}/...` (siehe `docs/emsomat-integration.md`).
 * **Persistenz:** `data/shareomat.db` (SQLite, Stammdaten + Betriebs­daten),
+  `data/live.db` (letzte Live-Werte, ADR-0007), `data/coordinator.db`
+  (Lastprognose und Day-Ahead-Preise für Emsomat, siehe §8),
   `config/leg_config.yaml` (technische Laufzeit-Konfiguration, nicht in
   Git).
 
@@ -179,7 +181,11 @@ Dazu, quer zu den vier Schichten:
 * `shareomat/external_data/` — On-Demand-Abrufe externer Referenzdaten
   (ElCom, BFE, SNB/via `market_forecast.py`, EBL-Platzhalter).
 * `shareomat/ha/` — MQTT-Client-Lifecycle, Home-Assistant-Discovery,
-  Entity-Definitionen.
+  Entity-Definitionen, Live-Energie-Sensoren (`live_sensors.py`).
+* `shareomat/live/` — Live-Energie-Ebene (ADR-0007). Wird nur von `main.py`
+  geladen, die Abrechnung kennt sie nicht.
+* `shareomat/sparkplug/` — lokaler Sparkplug-Kanal zu Emsomat und WAN
+  (ADR-0004, ADR-0005), `coordinator_store.py` für `coordinator.db`.
 
 ### Ebene 2 — Module je Schicht
 
@@ -206,6 +212,7 @@ core/
 
 database/                   SQLite, Quelle der Wahrheit für Stammdaten
   sqlite.py                    Verbindung, Schema, additive Migrationen
+  live_sources.py              Zuordnung der Live-Messquellen (ADR-0007)
   community.py / participants.py / meters.py / tariffs.py / settings.py
   contract_versions.py         Versionierte Vertragskonditionen (draft/publish/withdraw/end)
   contract_settings.py         Vorbelegung für einen neuen Vertragsentwurf
@@ -238,9 +245,10 @@ layout".
 ```text
 Übersicht     — Dashboard
 VERWALTUNG    — Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag
-BETRIEB       — Messdaten, Analyse, Abrechnungen, Rechnungen*, Automatisierung, Berichte
+BETRIEB       — Messdaten, Analyse, Abrechnungen, Rechnungen, Automatisierung, Berichte
 INTEGRATIONEN — Apps & Integrationen
 SYSTEM        — Einstellungen, Externe Daten
+LIVE-ENERGIE  — Übersicht, Messquellen, Diagnose (eigenständiger Bereich, ADR-0007)
 ```
 
 "Apps & Integrationen" (`web/pages/apps.py`) zeigt Emsomat an: installiert
@@ -249,9 +257,6 @@ HA-Konfigurationsordner, `ha/emsomat_install.py`), online/offline über den
 lokalen Sparkplug-Kanal (`SparkplugHost.emsomat_online`). Die Seite liest
 nur und verlinkt auf HACS bzw. Home Assistant. Installiert und aktualisiert
 wird Emsomat weiter über HACS, die Geräte verwaltet Emsomat selbst.
-
-\* Rechnungen ist aktuell ein Platzhalter (`PLACEHOLDER_ROUTES` in
-`navigation.py`) — siehe §11.
 
 ---
 
@@ -301,6 +306,18 @@ Cron-Zeitplan/Automatik-Scan wirken erst nach einem Neustart, weil die
 zugehörigen Threads nur beim Programmstart erzeugt werden (siehe `TODO.md`,
 "Betrieb").
 
+### Szenario: Programmende
+
+SIGTERM (Home Assistant stoppt das Add-on) und Ctrl+C lösen denselben Ablauf aus.
+Ein laufender Abrechnungszyklus wird nicht unterbrochen. Danach stoppt
+`main.py` genau das, was gestartet wurde, jeweils einmal und in umgekehrter
+Reihenfolge: Daemon-Threads, Webserver (nimmt nichts Neues an, laufende Anfragen
+dürfen fertig werden), laufende Abrechnung (beide zusammen höchstens 15 s),
+Coordinator (5 s), Sparkplug, Live-Ebene, MQTT. Das Add-on hat dafür 30 s
+(`timeout` in `ha_addon/config.yaml`, Vorgabe von Home Assistant: 10 s),
+Docker Compose ebenso. Was bei Fristablauf noch läuft, endet mit dem Prozess;
+SQLite verwirft dann die offene Transaktion.
+
 ### Szenario: interaktive Abrechnung für eine frei gewählte Periode
 
 `shareomat/database/billing.py` parst dafür bewusst **auch bereits
@@ -318,7 +335,7 @@ letzten Lauf reinkam".
 Home Assistant Host
   └── Docker-Container (aus ha_addon/, Multi-Arch-Image)
         ├── main.py (Python-Prozess)
-        ├── data/ (Volume: inbox, archive, reports, state, shareomat.db)
+        ├── data/ (Volume: inbox, archive, reports, state, shareomat.db, live.db, coordinator.db)
         └── Web-UI erreichbar über HA Ingress (Pfad-Präfix aus X-Ingress-Path)
   MQTT-Broker (z. B. Home Assistant Mosquitto Add-on) ── optional
 ```
@@ -326,6 +343,13 @@ Home Assistant Host
 `ha_addon/` ist **keine separate Codebasis** — ein Git-Pre-Commit-Hook hält
 es als Sync-Kopie von `shareomat/` + `main.py` aktuell (Docker-Build-Kontext
 für Home Assistant). Verifizieren: `python tools/prepare_addon.py --check`.
+
+Die HA Entity Bridge ist ein eigenständiges System. Sie übernimmt ausgewählte
+Entities aus HA Main und verwaltet ihre Topics, Profile und ACL-Vorlagen selbst:
+Shareomat → HA Main → HA Entity Bridge → HA Second.
+
+Die versionierten Diagramme (`docs/Architektur/Diagramm/`) zeigen den Stand vor
+Live-Energie.
 
 ### Variante B — Standalone (Docker Compose oder nativ)
 
@@ -377,6 +401,16 @@ end-to-end verifiziert (siehe §11).
 
 ---
 
+## Datenhaltung: drei getrennte SQLite-Dateien
+
+`shareomat.db` bleibt allein für Stammdaten, offizielle Messdaten und Abrechnung
+massgebend. Die Rechnungsfreigabe bricht ab, wenn sich die Datei während ihrer
+Prüfung ändert (`PRAGMA data_version`), auch durch eine fachlich unbeteiligte
+Tabelle. Darum liegen Coordinator-Daten in `coordinator.db` und Live-Werte in
+`live.db`. Beide lassen sich neu erzeugen, ein Fehler dort stoppt die Abrechnung nicht.
+
+---
+
 ## 9. Architekturentscheidungen
 
 Siehe `docs/decisions/` für die vollständige Liste mit Kontext/Begründung/
@@ -389,6 +423,7 @@ Konsequenzen. Aktuell:
   (MQTT-Version ersetzt durch ADR-0006).
 * ADR-0005 — Cross-House-Kommunikation über zentralen Sparkplug-B-Relay.
 * ADR-0006 — MQTT 3.1.1 statt 5.0 für die Sparkplug-B-Kommunikation.
+* ADR-0007 — Live-Energie-Ebene und Teilnehmerportal.
 
 Angenommene ADRs sind dauerhafte Leitplanken für künftige Änderungen, nicht
 nur historische Notizen — siehe `docs/decisions/README.md`, "Verbindlichkeit".
@@ -440,8 +475,9 @@ architektur-relevanten Punkte, Stand 2026-08-13:
 * **ENTSO-E** strukturell fertig, aber ungetestet ohne echten API-Token.
 * **`supplier_tariffs`-Tabelle** existiert im Schema, wird von nichts
   befüllt (wartet auf EBL) und hat keine eigene Verwaltungsseite.
-* **Rechnungen** (`invoices`) sind bewusst ein Platzhalter — PDF-Erzeugung,
-  Versand, Zahlungsstatus, Mahnungen fehlen komplett.
+* **Live-Energie** ist mit automatischen Tests geprüft. Realtests mit Broker,
+  Home Assistant, WAN und Add-on sowie die Audit-Befunde AUD-02, AUD-03, AUD-04
+  und AUD-07 sind offen (`docs/Live-Energie-Arbeitsliste.md`).
 * **Cron-/Watcher-Änderungen** wirken erst nach einem Neustart (Threads nur
   bei Programmstart erzeugt) — bekannte Einschränkung, keine Regression.
 * **Tarifwechsel mitten in einer Abrechnungsperiode** wird nicht anteilig

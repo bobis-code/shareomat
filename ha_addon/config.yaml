@@ -4,6 +4,7 @@ slug: shareomat
 description: Swiss LEG billing — local energy sharing, invoices and credit notes.
 url: https://github.com/bobis-code/shareomat
 startup: application
+timeout: 30
 boot: auto
 arch:
   - aarch64

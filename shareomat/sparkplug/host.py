@@ -43,6 +43,8 @@ _QOS_STATE = 1
 MAX_LOCAL_PAYLOAD_BYTES = 1_048_576
 # At most one Rebirth request per interval after a sequence gap.
 _REBIRTH_MIN_INTERVAL_S = 60.0
+# stop() waits at most this long for a publish that is under way.
+_STOP_LOCK_TIMEOUT_S = 2.0
 
 try:
     import paho.mqtt.client as mqtt
@@ -96,6 +98,9 @@ class SparkplugHost:
         self._ever_connected = False
         self._expected_seq: Optional[int] = None
         self._last_rebirth_request: Optional[float] = None
+        # Check-and-publish and stop() exclude each other: after stop() nothing is sent.
+        self._publish_lock = threading.Lock()
+        self._stopped = False
 
     # ------------------------------------------------------------------
     # topics
@@ -152,20 +157,33 @@ class SparkplugHost:
     def stop(self) -> None:
         """Publishes STATE OFFLINE explicitly (graceful, timely - not just
         relying on the Will at TCP timeout, same reasoning as Emsomat's
-        EdgeNodeAdapter.async_stop()) and disconnects."""
+        EdgeNodeAdapter.async_stop()) and disconnects. Safe to call twice."""
         if self._client is None:
             return
-        if self._connected.is_set():
-            try:
-                self._client.publish(self._state_topic, State(online=False).encode(), qos=_QOS_STATE, retain=True)
-            except Exception:
-                logger.exception("SparkplugHost: failed publishing graceful STATE offline")
+        locked = self._publish_lock.acquire(timeout=_STOP_LOCK_TIMEOUT_S)
+        if not locked:
+            logger.warning("SparkplugHost.stop: a publish did not finish in time, stopping anyway")
+        try:
+            if self._stopped:
+                return
+            self._stopped = True
+            self._publish_state_offline()
+        finally:
+            if locked:
+                self._publish_lock.release()
         try:
             self._client.loop_stop()
             self._client.disconnect()
         except Exception:
             pass
         self._connected.clear()
+
+    def _publish_state_offline(self) -> None:
+        if self._connected.is_set():
+            try:
+                self._client.publish(self._state_topic, State(online=False).encode(), qos=_QOS_STATE, retain=True)
+            except Exception:
+                logger.exception("SparkplugHost: failed publishing graceful STATE offline")
 
     def _on_connect(self, client, userdata, flags, rc=0, properties=None) -> None:
         ok = (int(rc) == 0) if not hasattr(rc, "value") else (rc.value == 0)
@@ -313,13 +331,9 @@ class SparkplugHost:
     def request_rebirth(self) -> None:
         """Publishes NCMD with Node Control/Rebirth=true to Emsomat, per
         Abschnitt 28.6 (required standard mechanic for every Edge Node)."""
-        if self._client is None or not self._connected.is_set():
-            logger.warning("SparkplugHost.request_rebirth: not connected, skipped")
-            return
         now_ms = get_current_timestamp()
         metric = Metric(timestamp=now_ms, name=METRIC_NODE_REBIRTH, datatype=DataType.BOOLEAN, value=True)
-        ncmd = NCmd(timestamp=now_ms, metrics=(metric,))
-        self._client.publish(self._node_topic(MessageType.NCMD), ncmd.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
+        self._publish_ncmd(NCmd(timestamp=now_ms, metrics=(metric,)), "request_rebirth")
 
     def publish_coordinator_ncmd(self, metrics: tuple[Metric, ...]) -> None:
         """Sends Coordinator-/Market-Metrics (LEG/DemandForecast,
@@ -329,12 +343,15 @@ class SparkplugHost:
         connected - the next settlement cycle retries; Emsomat's own local
         fallback logic covers the gap until then, never a plain-MQTT
         fallback (Hard Cut, Abschnitt 1/20)."""
-        if self._client is None or not self._connected.is_set():
-            logger.warning("SparkplugHost.publish_coordinator_ncmd: not connected, skipped")
-            return
-        now_ms = get_current_timestamp()
-        ncmd = NCmd(timestamp=now_ms, metrics=metrics)
-        self._client.publish(self._node_topic(MessageType.NCMD), ncmd.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
+        self._publish_ncmd(NCmd(timestamp=get_current_timestamp(), metrics=metrics), "publish_coordinator_ncmd")
+
+    def _publish_ncmd(self, ncmd: NCmd, caller: str) -> None:
+        """The check and the publish are one step with respect to stop()."""
+        with self._publish_lock:
+            if self._stopped or self._client is None or not self._connected.is_set():
+                logger.warning("SparkplugHost.%s: not connected, skipped", caller)
+                return
+            self._client.publish(self._node_topic(MessageType.NCMD), ncmd.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
 
     # ------------------------------------------------------------------
     # getters

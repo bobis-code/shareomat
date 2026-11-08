@@ -19,6 +19,12 @@ Metric-Timestamp-Erhalt über den echten Wire-Transport, NDEATH-Cleanup,
 Reconnect (Rebirth auf demselben Uplink-Objekt), Cross-LEG-Isolation — alle
 12 Checks bestanden. Coordinator-Aggregate weiterhin nicht Teil dieser
 Strecke.
+**Nachtrag 08.11.2026 (ADR-0007; im Code umgesetzt, am echten Broker noch nicht geprüft):**
+Der Downlink nimmt nur Paare (`edge_node_id`, `device_id`) an, die in Live-Energie
+zugeordnet sind. Ungültige Werte gehen als `is_null` über die Strecke, nie als 0 W,
+zusammen mit `Market/PowerTimeSource`. Der Uplink wiederholt NBIRTH und DBIRTH alle
+5 Minuten. Vor produktiver Nutzung offen: AUD-03, AUD-04, AUD-07.
+
 **Version:** 1.0
 **Voraussetzung:** Baut auf `Emsomat_Shareomat_MQTT_Vertrag.md` (lokale Strecke,
 implementiert und per echtem Broker-Test verifiziert, 2026-08-22) auf — gleicher
@@ -115,7 +121,8 @@ Topic-Struktur selbst, nicht über eine separate Registrierung: ein Participant
 erscheint nur unter der `edge_node_id` seines eigenen Hauses
 (`spBv1.0/<group_id>/DBIRTH/<eigene edge_node_id>/<participant_id>`) — die
 Broker-ACL (Abschnitt 6) verhindert, dass ein anderes Haus unter dieser
-`edge_node_id` publizieren kann.
+`edge_node_id` publizieren kann. Seit ADR-0007 prüft der Downlink zusätzlich die
+Zuordnung in Live-Energie. Das ist eine zweite Verteidigung, die Broker-ACL bleibt tragend.
 
 ---
 

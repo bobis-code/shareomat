@@ -14,6 +14,10 @@ Notes:
     An unknown value is published as "None", which Home Assistant shows as
     "unknown": never as 0. The sensors carry no data of other participants,
     only the LEG status and counts. They are read-only, no command topics.
+
+    Values are not retained: after a restart of Home Assistant an old value
+    must not look current. expire_after turns a sensor unavailable when the
+    live layer stops publishing, even if the rest of Shareomat keeps running.
 """
 
 from __future__ import annotations
@@ -50,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 UNKNOWN = "None"
 _REFRESH_S = 60.0
+_EXPIRE_AFTER_S = _REFRESH_S * 3
 _DEVICE = {
     "identifiers": ["shareomat_live"],
     "name": "Shareomat Live-Energie",
@@ -109,6 +114,7 @@ def publish_live_discovery(client: "_mqtt_type.Client", config: MqttConfig) -> N
             "default_entity_id": f"sensor.{sensor.object_id}",
             "state_topic": f"{prefix}/{sensor.topic}",
             "availability": availability,
+            "expire_after": int(_EXPIRE_AFTER_S),
             "device": _DEVICE,
         }
         if sensor.unit:
@@ -125,6 +131,16 @@ def publish_live_discovery(client: "_mqtt_type.Client", config: MqttConfig) -> N
             payload["json_attributes_topic"] = f"{prefix}/{sensor.topic}/attributes"
         client.publish(f"{config.discovery_prefix}/sensor/{sensor.object_id}/config", json.dumps(payload), qos=config.qos, retain=True)
     logger.info("HA Discovery published: %d live sensors", len(LIVE_SENSORS))
+    _clear_retained_values(client, config)
+
+
+def _clear_retained_values(client: "_mqtt_type.Client", config: MqttConfig) -> None:
+    """Earlier versions retained the values; an empty retained message removes them from the broker."""
+    prefix = f"{config.topic_prefix}/live"
+    for sensor in LIVE_SENSORS:
+        client.publish(f"{prefix}/{sensor.topic}", "", qos=config.qos, retain=True)
+        if sensor.attributes:
+            client.publish(f"{prefix}/{sensor.topic}/attributes", "", qos=config.qos, retain=True)
 
 
 def _number(value: float | None, digits: int) -> str:
@@ -171,7 +187,10 @@ def build_states(service, status: LegStatus) -> dict[str, str]:
 
 
 class LiveHaPublisher:
-    """Listener of LiveStatusService: publishes changes at once, everything once a minute."""
+    """Listener of LiveStatusService: publishes changes at once, everything once a minute.
+
+    Without a broker connection nothing is sent, so no old value is delivered
+    late as if it were new; after reconnecting everything is published again."""
 
     def __init__(self, client: "_mqtt_type.Client", config: MqttConfig) -> None:
         self._client = client
@@ -180,6 +199,11 @@ class LiveHaPublisher:
         self._last_full = 0.0
 
     def __call__(self, service, status: LegStatus) -> None:
+        is_connected = getattr(self._client, "is_connected", None)
+        if is_connected is not None and not is_connected():
+            self._last = {}
+            self._last_full = 0.0
+            return
         states = build_states(service, status)
         now = time.monotonic()
         full = now - self._last_full >= _REFRESH_S
@@ -188,7 +212,7 @@ class LiveHaPublisher:
         prefix = f"{self._config.topic_prefix}/live"
         for topic, payload in states.items():
             if full or self._last.get(topic) != payload:
-                self._client.publish(f"{prefix}/{topic}", payload, qos=self._config.qos, retain=True)
+                self._client.publish(f"{prefix}/{topic}", payload, qos=self._config.qos, retain=False)
         self._last = states
 
 

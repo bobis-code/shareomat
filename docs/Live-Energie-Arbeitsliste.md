@@ -10,8 +10,9 @@ lokale `TODO.md` verweist für die Liveplattform hierher.
 
 ## Arbeitsweise
 
-* Es wird immer nur **eine** Aufgabe gleichzeitig bearbeitet, danach wird
-  pausiert, bis der Projektverantwortliche die nächste freigibt.
+* Grundsätzlich wird eine Aufgabe nach der anderen bearbeitet und danach
+  pausiert. Zusammenhängende Aufgaben kann der Projektverantwortliche gemeinsam
+  freigeben.
 * Ablauf pro Aufgabe: Istzustand prüfen → Fehler bzw. Lücke nachweisen →
   gezielt korrigieren → Regressionstests → vollständige Testsuite →
   Ergebnis hier eintragen → Pause.
@@ -21,7 +22,7 @@ lokale `TODO.md` verweist für die Liveplattform hierher.
 * Neue Befunde bekommen eine neue ID (ab LE-14) mit Priorität und
   Abhängigkeiten. Ein neuer Befund löst nicht automatisch eine neue
   Entwicklungsrunde aus.
-* Grenzen: keine Commits, kein Push, keine Änderung der Git-History, keine
+* Grenzen: Commits und Push nur nach ausdrücklicher Freigabe, keine Änderung der Git-History, keine
   Installationen, keine Änderung an produktivem HA, MQTT oder Proxmox,
   keine Lizenzänderung, Abrechnungslogik nur mit ausdrücklicher Freigabe.
   Shareomat, Emsomat und Entity Bridge nicht gleichzeitig umbauen.
@@ -62,7 +63,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 | LE-09 | Shareomat | HA-Sensoren LEG-Status und Integrationsprüfung | MITTEL | TEST AUSSTEHEND | LE-07, LE-08 |
 | LE-10 | Shareomat (+ HA-Blueprint) | Home Assistant als direkte Quelle (`ha_mqtt`) | MITTEL | OFFEN | LE-07, LE-08 |
 | LE-11 | Shareomat | Externes Gateway / AMS Reader (`gateway_mqtt`) | MITTEL | OFFEN | LE-07, LE-08, Broker-Entscheid |
-| LE-12 | alle | Nachbar-Pilot | MITTEL | OFFEN | LE-09, LE-10 oder LE-11, O-3 |
+| LE-12 | alle | Nachbar-Pilot | MITTEL | OFFEN | LE-09, O-3, AUD-02; für eine Quelle beim Nachbarn zusätzlich LE-10 oder LE-11 |
 | LE-13 | Shareomat | Teilnehmerportal | NIEDRIG | OFFEN | LE-12, Security-Review |
 | LE-14 | Shareomat | Vendor-Code: NDEATH-Zeitstempel beim Lesen vertauscht | NIEDRIG | ERLEDIGT | – |
 | LE-15 | Emsomat | Eingehende Teilnehmerwerte ohne Zeitstempel bekommen «jetzt» | NIEDRIG | OFFEN | – |
@@ -276,9 +277,9 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
   (Übersicht, Messquellen, Diagnose): Übersicht aller offiziellen
   LEG-Messpunkte, aktuelle Live-Messquelle, Kommunikation, Qualität,
   letzte gültige Messung; «Live-Messquelle zuordnen» mit
-  `testing → active → retired`, kontrollierter Wechsel. Die drei Arten sind
-  in der Oberfläche vorgesehen. In Schritt 1 sind `emsomat_local` und
-  `wan_sparkplug` zuordenbar, die anderen Arten folgen mit LE-10 und LE-11.
+  `testing → active → retired`, kontrollierter Wechsel. Alle Arten lassen sich
+  eintragen. Empfang gibt es in Schritt 1 für `emsomat_local` und
+  `wan_sparkplug`, die Eingänge der anderen Arten folgen mit LE-10 und LE-11.
 * **Abhängigkeiten:** LE-07.
 * **Grenzen:** Die übrige Verwaltung bleibt unverändert.
 * **Prüfkriterien:** Tests ADR-0007 §8 Nr. 8; CSRF, Admin-Recht, Audit;
@@ -287,7 +288,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
   Deaktivieren und Identitätsnachweis in der Oberfläche. Über den echten
   Webserver geprüft (ohne Login Umleitung, ohne CSRF keine Änderung). Ohne Broker
   nutzbar mit `tools/live_energy_demo.py`.
-* **Korrektur (08.11.2026, nicht committet; vollständige Suite: 1227 bestanden,
+* **Korrektur (08.11.2026, Commit `91401a0`; vollständige Suite: 1227 bestanden,
   4 übersprungen):** Eigener Menübereich statt Eintrag unter BETRIEB, bestehende
   Menüpunkte unverändert. Ansichten Übersicht, Messquellen und Diagnose. Neue
   Auswahl «Keine Live-Messung vorhanden», gespeichert in `live_meter_states`
@@ -352,8 +353,9 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Ziel:** eigene Live-Messquelle beim Nachbarn, sichere Übertragung,
   eindeutige Zuordnung zum Messpunkt, korrekte LEG-Bilanz; optional HA
   Second mit Entity Bridge für die Anzeige (H-2).
-* **Abhängigkeiten:** LE-09, LE-10 oder LE-11; Datenschutz und Freigabe
-  der Gemeinschaftswerte (O-3) **vorher**.
+* **Abhängigkeiten:** LE-09, AUD-02 und Datenschutz und Freigabe der
+  Gemeinschaftswerte (O-3) **vorher**. Für eine eigene Quelle beim Nachbarn
+  zusätzlich LE-10 oder LE-11.
 * **Grenzen:** kein eigenständiger Eingriff in reale Nachbarsysteme.
 * **ADR:** ADR-0007 §9 Schritt 3, §10 O-3, H-2.
 
@@ -523,6 +525,26 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
   (Laden stoppt bei ungültigem oder veraltetem Bezug) bleibt nachgewiesen;
   vollständige Testsuite grün.
 
+## Audit vom 08.11.2026
+
+Bericht: `docs/development/Live-Energie-Audit_2026-11-08.md`. Der Audit-Bericht
+beschreibt den Stand `93daa3e`.
+
+| Befund | Stand |
+|---|---|
+| AUD-01 Automatik und Abrechnungszyklus | behoben, Coordinator ausserhalb der Sperre, nur mit Emsomat online |
+| AUD-02 Broker-Logins und ACL | **offen, nur Entwurf** (`docs/development/MQTT-Sicherheitskonzept_AUD-02.md`) |
+| AUD-03 Wert bleibt nach Deaktivieren bei Emsomat stehen | **offen, vor WAN-Nutzung** |
+| AUD-04 WAN-Quelle in `testing` erreicht Emsomat | **offen, vor WAN-Nutzung** |
+| AUD-05 Sparkplug/WAN stoppt die Abrechnung | behoben |
+| AUD-06 veraltete HA-Werte | behoben, Realtest offen |
+| AUD-07 WAN-NDEATH ohne `bdSeq` | **offen, vor WAN-Nutzung** |
+| AUD-08 bis AUD-12, AUD-16 | offen, nachrangig |
+| AUD-13 Fehler im Live-Modul beim Start | behoben |
+| AUD-14, AUD-15 Testlauf aus sauberem Checkout | behoben |
+| Gegenprüfung: `data_version`, Coordinator-Schreibzugriffe | behoben durch `coordinator.db` |
+| Gegenprüfung: Programmende | behoben: SIGTERM, Webserver, Sparkplug |
+
 ## Ausstehende reale Tests (ohne autorisierte Testumgebung nicht möglich)
 
 | Bezug | Test | Voraussetzung |
@@ -530,5 +552,9 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 | LE-03 | EA-1 in echtem HA: `unknown`/`unavailable`, Reconnect, NBIRTH, Zeitstempel | HA-Testinstanz mit Test-Broker |
 | LE-01 | EV-Schutz mit simuliertem Sensorausfall in echtem HA, ohne reale Ladung | HA-Testinstanz, Wallbox simuliert |
 | LE-05 | Broker-ACL-Negativtests | isolierter Test-Broker |
-| LE-09 | HA-Sensoren des Add-ons, Ingress | HA-Testinstanz |
+| LE-09 | HA-Sensoren des Add-ons, `expire_after`, Ingress, Add-on-Maske | HA-Testinstanz |
+| LE-09, H-2 | Entity Bridge und HA Second, auch bei `unavailable` | HA-Testinstanz |
+| AUD-01 | Wirkung der LEG-Daten auf Emsomat | HA-Testinstanz |
+| Programmende | SIGTERM und Frist von 30 s beim echten Add-on, `coordinator.db` nach einem Update | HA-Testinstanz |
+| K-1, AUD-03, AUD-04, AUD-07 | WAN zwischen zwei Standorten | Test-Broker |
 | LE-10, LE-11 | Blueprint bzw. Gateway gegen Test-Broker | HA-Testinstanz, Testgerät |

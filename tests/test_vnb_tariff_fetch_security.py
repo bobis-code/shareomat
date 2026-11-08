@@ -393,6 +393,7 @@ def _serve(monkeypatch, body: bytes, status=200, headers=None):
     return fake
 
 
+@pytest.mark.skipif(not EBL_SAMPLE.exists(), reason="real EBL tariff file is excluded from Git (.gitignore)")
 def test_real_ebl_tariff_file_still_imports(monkeypatch):
     _serve(monkeypatch, EBL_SAMPLE.read_bytes())
     operator, products = parse_vnb_tariff_json(fetch_vnb_tariff_json("https://www.ebl.ch/hubfs/EBL%202027.json"))
@@ -402,7 +403,7 @@ def test_real_ebl_tariff_file_still_imports(monkeypatch):
 
 
 def test_utf8_bom_is_accepted(monkeypatch):
-    _serve(monkeypatch, b"\xef\xbb\xbf" + EBL_SAMPLE.read_bytes())
+    _serve(monkeypatch, b"\xef\xbb\xbf" + b'{"operator": "EBL"}')
     assert isinstance(fetch_vnb_tariff_json("https://www.ebl.ch/t.json"), dict)
 
 

@@ -9,3 +9,5 @@ services:
       - ./data:/app/data:Z
       - ./config:/app/config:Z
     restart: "no"
+    # Time for the orderly stop of running requests and settlements (see main.py).
+    stop_grace_period: 30s
