@@ -39,6 +39,7 @@ from shareomat.models.live_source import (
     ADAPTER_WAN_SPARKPLUG,
     EVIDENCE_LEVELS,
     IDENTITY_BROKER_ACL,
+    METER_STATES,
     MODE_IMPORT_EXPORT,
     MODE_IMPORT_ONLY,
     MODE_SIGNED,
@@ -281,6 +282,8 @@ def create_live_source(
                     (source_id, quantity, channel_ref),
                 )
             record_event(conn, "live_source", source_id, "assigned", f"{meter_id}: {source_key} ({measurement_mode})")
+            if conn.execute("DELETE FROM live_meter_states WHERE meter_id = ?", (meter["id"],)).rowcount:
+                record_event(conn, "live_meter_state", meter["id"], "cleared", f"{meter_id}: Quelle zugeordnet")
             conn.commit()
         except sqlite3.IntegrityError as exc:
             conn.rollback()
@@ -289,6 +292,52 @@ def create_live_source(
             conn.rollback()
             raise
     return source_id
+
+
+def list_meter_live_states(db_path: Path) -> dict[str, str]:
+    """meter_id -> stored state, for meters without a technical live source."""
+    query = "SELECT m.meter_id, s.state FROM live_meter_states s JOIN meters m ON m.id = s.meter_id"
+    with connect(db_path) as conn:
+        return {r["meter_id"]: r["state"] for r in conn.execute(query).fetchall()}
+
+
+def set_meter_live_state(db_path: Path, *, meter_id: str, state: str) -> int:
+    """Record that a meter has no live measurement.
+
+    Open sources of the meter are retired in the same transaction, so a meter
+    is never "no measurement" and "measured" at once. Returns how many were
+    retired. Billing and the official meter are not touched.
+    """
+    if state not in METER_STATES:
+        raise LiveSourceError("Unbekannter Zustand der Live-Messung.")
+    now = now_iso()
+    with connect(db_path) as conn:
+        try:
+            _begin(conn)
+            meter = _meter_row(conn, meter_id)
+            open_sources = conn.execute(
+                "SELECT id FROM live_sources WHERE meter_id = ? AND state IN (?, ?)",
+                (meter["id"], STATE_TESTING, STATE_ACTIVE),
+            ).fetchall()
+            for row in open_sources:
+                conn.execute(
+                    "UPDATE live_sources SET state = ?, retired_at = ?, updated_at = ? WHERE id = ?",
+                    (STATE_RETIRED, now, now, row["id"]),
+                )
+                record_event(conn, "live_source", row["id"], "retired", f"Zustand des Messpunkts: {state}")
+            conn.execute(
+                """
+                INSERT INTO live_meter_states (meter_id, state, updated_at) VALUES (?, ?, ?)
+                ON CONFLICT(meter_id) DO UPDATE SET state = excluded.state, updated_at = excluded.updated_at
+                """,
+                (meter["id"], state, now),
+            )
+            record_event(conn, "live_meter_state", meter["id"], "changed", f"{meter_id}: {state}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    return len(open_sources)
 
 
 def update_live_source(

@@ -306,14 +306,13 @@ Verwechslung mit den „Phasen“ im
 
 > Architektur, Schnittstellen und Sicherheitsgrenzen:
 > [ADR-0007](decisions/ADR-0007-live-energie-ebene-und-teilnehmerportal.md)
-> (vorgeschlagen, 3. Fassung; Grundarchitektur angenommen, Schritt 1 noch
-> nicht freigegeben). Darin u. a.: Nachweisstufen der Messaktualität,
+> (angenommen, 5. Fassung; Schritt 1 umgesetzt, Realtest in Home Assistant
+> ausstehend). Darin u. a.: Nachweisstufen der Messaktualität,
 > Hysterese für die Anzeige, Regeln für Sparkplug-Messproben,
 > Quellenidentität über Broker-ACL, drei Arten von Live-Messquellen
 > (Emsomat, Home Assistant, externes Gateway) mit höchstens einer aktiven
 > Live-Messquelle pro offiziellem Messpunkt und der Bedienung
-> «Live-Messquelle zuordnen». Die Emsomat-Änderung EA-1 ist ein separater
-> Auftrag.
+> «Live-Messquelle zuordnen». Die Emsomat-Änderung EA-1 ist umgesetzt.
 
 Zielbild der App: [`Architektur/Ziel/Shareomat_ Lokale Energie clever nutzen.png`](Architektur/Ziel/)
 (Ideenskizze, keine Spezifikation).
@@ -345,9 +344,8 @@ Shareomat (HA Main) → Sensor «LEG-Überschuss» (MQTT Discovery)
 
 Voraussetzungen und offene Punkte:
 
-- Shareomat muss die Live-Bilanz überhaupt erst berechnen und als Sensor
-  veröffentlichen. Heute gibt es nur Status-, Abrechnungs- und
-  Systemsensoren (`ha/mqtt_runtime.py`).
+- Shareomat berechnet die Live-Bilanz seit Schritt 1 und veröffentlicht sie
+  als Sensor (`ha/live_sensors.py`). Der Realtest in Home Assistant steht aus.
 - Die Entity Bridge ist noch nicht real abgenommen (`docs/ABNAHME_M7B.md`),
   die Mosquitto-ACL muss aktiv sein.
 - **Netzweg:** HA Second verbindet sich mit dem Broker auf HA Main. Die

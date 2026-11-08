@@ -199,7 +199,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Abhängigkeiten:** LE-03 (Emsomat-Format).
 * **Prüfkriterien:** Regressionstests; vollständige Shareomat-Testsuite
   grün.
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** `is_null`, NaN, Inf und negative Werte werden in
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** `is_null`, NaN, Inf und negative Werte werden in
   `bridge.py`, `WanDownlink` und `ParticipantRelay` nie zu 0 W. Zeitstempel und
   `Market/PowerTimeSource` gehen mit. Ein gültiger Wert ohne Zeitstempel wird
   nicht mit «jetzt» versehen. Geht Emsomat weg, wird der Teilnehmer auf dem WAN
@@ -222,7 +222,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
   Broker brauchen eine Freigabe.
 * **Prüfkriterien:** Tests nach ADR-0007 §8 Nr. 5 und 6; vollständige
   Testsuite grün; ACL-Nachweis isoliert dokumentiert.
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Verbindungsverlust macht Werte sofort ungültig, gültig
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** Verbindungsverlust macht Werte sofort ungültig, gültig
   erst wieder mit neuem BIRTH. Neues BIRTH löscht alte Metrics, `seq`-Lücken
   fordern lokal höchstens einmal pro Minute einen Rebirth an. Retained, zu
   grosse und zu lange Nachrichten werden verworfen. Der `WanDownlink` nimmt nur
@@ -246,7 +246,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Abhängigkeiten:** fachlich vor LE-07 festzulegen (Datenmodell).
 * **Prüfkriterien:** Ergänzung in ADR-0007 (§2 `measurement_mode`, §3);
   Tests in LE-07.
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Messarten `import_export`, `signed` und `import_only`.
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** Messarten `import_export`, `signed` und `import_only`.
   `import_only` nur für Verbraucher-Messpunkte und mit Begründung. Eine fehlende
   Live-Quelle oder Einspeisung wird nie als 0 W gewertet (ADR-0007 §3.7).
 * **ADR:** ADR-0007 §2, §3.
@@ -262,7 +262,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Grenzen:** keine Änderung an der Abrechnungsberechnung.
 * **Prüfkriterien:** Tests ADR-0007 §8 Nr. 1–9, insbesondere die Trennung
   von Live-Daten und Abrechnung; vollständige Testsuite grün.
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Paket `shareomat/live/`, Schema-Version 15, `live.db`
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** Paket `shareomat/live/`, Schema-Version 15, `live.db`
   neben `shareomat.db`. Architekturtests sichern, dass Abrechnung und
   Datenbankcode das Live-Paket nicht importieren. Abrechnungscode wurde nicht
   geändert. Tests: `tests/test_live_core.py`, `tests/test_main_live_wiring.py`.
@@ -272,7 +272,8 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 ## LE-08 – Verwaltung: Live-Messquelle zuordnen
 
 * **Projekt:** Shareomat · **Priorität:** HOCH · **Status:** TEST AUSSTEHEND
-* **Ziel:** Menü BETRIEB → «Live-Energie»: Übersicht aller offiziellen
+* **Ziel:** Eigener Menübereich LIVE-ENERGIE nach den bestehenden Gruppen
+  (Übersicht, Messquellen, Diagnose): Übersicht aller offiziellen
   LEG-Messpunkte, aktuelle Live-Messquelle, Kommunikation, Qualität,
   letzte gültige Messung; «Live-Messquelle zuordnen» mit
   `testing → active → retired`, kontrollierter Wechsel. Die drei Arten sind
@@ -282,10 +283,17 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Grenzen:** Die übrige Verwaltung bleibt unverändert.
 * **Prüfkriterien:** Tests ADR-0007 §8 Nr. 8; CSRF, Admin-Recht, Audit;
   vollständige Testsuite grün; Sichtprüfung in HA (Ingress).
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Übersicht, Zuordnen, Prüfen, Aktivieren, Ändern,
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** Übersicht, Zuordnen, Prüfen, Aktivieren, Ändern,
   Deaktivieren und Identitätsnachweis in der Oberfläche. Über den echten
   Webserver geprüft (ohne Login Umleitung, ohne CSRF keine Änderung). Ohne Broker
   nutzbar mit `tools/live_energy_demo.py`.
+* **Korrektur (08.11.2026, nicht committet; vollständige Suite: 1227 bestanden,
+  4 übersprungen):** Eigener Menübereich statt Eintrag unter BETRIEB, bestehende
+  Menüpunkte unverändert. Ansichten Übersicht, Messquellen und Diagnose. Neue
+  Auswahl «Keine Live-Messung vorhanden», gespeichert in `live_meter_states`
+  (Schema 16, `shareomat.db`) und jederzeit änderbar. Eine fehlende Live-Messung
+  bleibt `MISSING`, nie 0 W. «Externer Standort / WAN-Sparkplug» ist eine eigene
+  Auswahl. Alle Menüseiten über den echten Webserver geprüft.
 * **Ausstehend:** Sichtprüfung in HA hinter Ingress.
 * **ADR:** ADR-0007 §2, §5.1.
 
@@ -300,7 +308,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Abhängigkeiten:** LE-07, LE-08.
 * **Prüfkriterien:** vollständige Testsuite grün. Reale Tests ohne
   autorisierte Testumgebung werden hier als ausstehend aufgeführt.
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** 9 Sensoren per MQTT Discovery (`ha/live_sensors.py`),
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** 9 Sensoren per MQTT Discovery (`ha/live_sensors.py`),
   ohne Befehlskanal. `ha_addon/` synchron. Die eigene gültige Einzelmessung ist
   auch bei unvollständiger Bilanz sichtbar, der LEG-Überschuss nur bei
   `VOLLSTÄNDIG`.
@@ -366,7 +374,7 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
   ist vertauscht (`… if not payload.HasField("timestamp") else None`). Der
   Zeitstempel einer NDEATH geht beim Lesen verloren. Heute wird er nicht
   verwendet.
-* **Ergebnis (08.11.2026, nicht committet; vollständige Suite: 1174 bestanden, 4 übersprungen):** Bedingung korrigiert, Test in
+* **Ergebnis (08.11.2026, Commit `13a0f8c`; vollständige Suite: 1174 bestanden, 4 übersprungen):** Bedingung korrigiert, Test in
   `tests/test_live_transport.py`.
 
 ## LE-15 – Emsomat: Teilnehmerwerte ohne Zeitstempel

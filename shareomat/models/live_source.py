@@ -50,6 +50,10 @@ STATE_TESTING = "testing"
 STATE_ACTIVE = "active"
 STATE_RETIRED = "retired"
 
+# A meter without a technical live source: stored, and never read as 0 W.
+METER_STATE_NO_MEASUREMENT = "no_measurement"
+METER_STATES = (METER_STATE_NO_MEASUREMENT,)
+
 IDENTITY_BROKER_ACL = "broker_acl"
 
 

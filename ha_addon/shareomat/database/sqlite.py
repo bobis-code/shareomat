@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 15
+_SCHEMA_VERSION = 16
 
 _SCHEMA_STATEMENTS = [
     """
@@ -527,6 +527,15 @@ _SCHEMA_STATEMENTS = [
     """
     CREATE UNIQUE INDEX IF NOT EXISTS ux_live_sources_key_open
         ON live_sources(source_key) WHERE state IN ('testing', 'active')
+    """,
+    # What is known about a meter without a technical live source. References
+    # the official meter only; the meters table itself is not touched.
+    """
+    CREATE TABLE IF NOT EXISTS live_meter_states (
+        meter_id INTEGER PRIMARY KEY REFERENCES meters(id) ON DELETE CASCADE,
+        state TEXT NOT NULL CHECK (state IN ('no_measurement')),
+        updated_at TEXT NOT NULL
+    )
     """,
     """
     CREATE TABLE IF NOT EXISTS live_source_channels (

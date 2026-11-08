@@ -38,7 +38,7 @@ from shareomat.live.model import (
     DISPLAY_SURPLUS,
     LIVE_ACTIVE,
     LIVE_NONE,
-    LIVE_PLANNED,
+    LIVE_TESTING,
     QUALITY_MISSING,
     QUALITY_OK,
     STATUS_COMPLETE,
@@ -475,6 +475,7 @@ class LiveStatusService:
         with self._lock:
             try:
                 meters = masterdata.load_meters(self._db_path)
+                meter_states = masterdata.load_meter_states(self._db_path)
             except Exception as exc:
                 logger.warning("Live: could not read meters: %s", exc)
                 return []
@@ -497,8 +498,12 @@ class LiveStatusService:
                         row.active_source = source
                         row.active_reading = self._reading(source, moment)
                     elif source.state == STATE_TESTING:
-                        row.planned.append((source, self._reading(source, moment)))
-                row.live_status = LIVE_ACTIVE if row.active_source else (LIVE_PLANNED if row.planned else LIVE_NONE)
+                        row.testing.append((source, self._reading(source, moment)))
+                row.live_status = (
+                    LIVE_ACTIVE if row.active_source
+                    else LIVE_TESTING if row.testing
+                    else meter_states.get(meter.meter_id, LIVE_NONE)
+                )
                 if meter.meter_id in status_points:
                     row.open_reasons.append(status_points[meter.meter_id])
                 rows.append(row)

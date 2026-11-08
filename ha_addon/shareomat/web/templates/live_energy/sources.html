@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Live-Energie: Messquellen{% endblock %}
+{% block heading %}Live-Energie: Messquellen{% endblock %}
+{% macro source_block(s, row) %}
+  <div class="kpis">
+    <div class="kpi"><div class="kpi-value">{{ s.import_w }}</div><div class="kpi-label">Netzbezug</div></div>
+    <div class="kpi"><div class="kpi-value">{{ s.export_w }}</div><div class="kpi-label">Netzeinspeisung</div></div>
+    <div class="kpi"><div class="kpi-value">{{ s.quality_label }}</div><div class="kpi-label">Messwertqualität</div></div>
+    <div class="kpi"><div class="kpi-value">{{ s.communication }}</div><div class="kpi-label">Verbindung</div></div>
+  </div>
+  <div class="ts">
+    {{ s.type_label }} · <span style="font-family:monospace">{{ s.key }}</span> · {{ s.state_label }} · {{ s.mode_label }} · max. {{ s.max_power_w }}<br>
+    Messzeitpunkt: {{ s.measured_at }}{% if s.age_s is not none %} (vor {{ s.age_s }} s){% endif %} · Nachweisstufe {{ s.evidence }} ·
+    Identität {{ 'nachgewiesen am ' ~ s.identity_at ~ ' (' ~ s.identity_note ~ ')' if s.identity_verified else 'nicht nachgewiesen' }}
+  </div>
+  {% if s.reason %}<div class="notice-warn" style="margin-top:8px">{{ s.reason }}</div>{% endif %}
+  <div class="actions-row" style="margin-top:8px">
+    {% if s.state == 'testing' %}
+    <form method="post" style="display:inline" action="{{ url_for('live_energy', suffix='/sources/' ~ s.id ~ '/activate') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-small btn-secondary">{{ 'Aktivieren (ersetzt die aktive Quelle)' if row.active else 'Aktivieren' }}</button>
+    </form>
+    {% endif %}
+    <a class="btn btn-muted btn-small" href="{{ url_for('live_energy', suffix='/sources/' ~ s.id ~ '/edit') }}">Ändern</a>
+    <form method="post" style="display:inline" action="{{ url_for('live_energy', suffix='/sources/' ~ s.id ~ '/retire') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-small btn-danger">Deaktivieren</button>
+    </form>
+  </div>
+{% endmacro %}
+{% block content %}
+{% if not available %}
+<div class="card"><p class="notice-warn">Die Live-Ebene läuft derzeit nicht. Details stehen im Add-on-Log.</p></div>
+{% else %}
+{% for row in rows %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline">
+    <div>
+      <b>{{ row.label }}</b> · <span style="font-family:monospace;font-size:.8rem">{{ row.meter_id }}</span> · {{ row.participant_id or '–' }}
+      {% if not row.in_leg %}<span class="status-pill status-pill-inactive">nicht in der LEG</span>{% endif %}
+      {% if row.unconfirmed %}<span class="status-pill status-pill-inactive">Netzbetreiber noch nicht bestätigt</span>{% endif %}
+    </div>
+    <span class="status-pill {{ 'status-pill-active' if row.live_status == 'active' else 'status-pill-inactive' }}">{{ row.live_status_label }}</span>
+  </div>
+  {% if not row.in_leg and row.excluded_reason %}<div class="ts">{{ row.excluded_reason }}</div>{% endif %}
+  {% if row.live_status in ('none', 'no_measurement') %}
+  <div class="ts">Bleibt vollständig in der offiziellen Verwaltung und Abrechnung. Ohne Live-Messung wird nichts als 0 W gerechnet.</div>
+  {% endif %}
+  {% for reason in row.open_reasons %}<div class="ts">Für die vollständige Bilanz fehlt: {{ reason }}</div>{% endfor %}
+  {% if row.active %}<div style="margin-top:10px">{{ source_block(row.active, row) }}</div>{% endif %}
+  {% for s in row.testing %}
+  <div style="margin-top:12px;padding-top:10px;border-top:1px solid #e5e7eb">
+    <div class="ts"><b>In Prüfung</b>, zählt nicht zur Bilanz</div>
+    {{ source_block(s, row) }}
+  </div>
+  {% endfor %}
+  {% if row.active %}
+  <details style="margin-top:10px">
+    <summary class="ts">Quellenidentität nachweisen</summary>
+    <form method="post" class="form-card" action="{{ url_for('live_energy', suffix='/sources/' ~ row.active.id ~ '/identity') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="field">
+        <label for="identity_note_{{ row.active.id }}">Womit nachgewiesen (Negativtest der Broker-ACL)</label>
+        <input type="text" id="identity_note_{{ row.active.id }}" name="identity_note" maxlength="300" required value="{{ row.active.identity_note }}">
+        <div class="field-hint">Nur eintragen, wenn getestet ist, dass ein fremdes Login nicht unter dieser Kennung senden kann.</div>
+      </div>
+      <button type="submit" class="btn-small">Nachweis eintragen</button>
+    </form>
+    {% if row.active.identity_verified %}
+    <form method="post" style="margin-top:8px" action="{{ url_for('live_energy', suffix='/sources/' ~ row.active.id ~ '/identity-clear') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-small btn-danger">Nachweis entfernen</button>
+    </form>
+    {% endif %}
+  </details>
+  {% endif %}
+  <div class="actions-row" style="margin-top:10px">
+    <a class="btn btn-small" href="{{ url_for('live_energy', suffix='/' ~ (row.meter_id | path_segment) ~ '/assign') }}">Live-Messquelle zuordnen</a>
+  </div>
+</div>
+{% else %}
+<div class="card"><p class="ts">Noch keine Messpunkte angelegt.</p></div>
+{% endfor %}
+{% endif %}
+{% endblock %}

@@ -36,8 +36,9 @@ COMM_ONLINE = "online"
 COMM_OFFLINE = "offline"
 COMM_NEVER = "nie_empfangen"
 
-LIVE_NONE = "none"
-LIVE_PLANNED = "planned"
+LIVE_NONE = "none"                       # nothing decided yet
+LIVE_NO_MEASUREMENT = "no_measurement"   # stored: this meter has no live measurement
+LIVE_TESTING = "testing"                 # a technical source is being checked
 LIVE_ACTIVE = "active"
 
 TIME_ORIGIN_METER = "meter"
@@ -227,5 +228,5 @@ class MeterRow:
     live_status: str = LIVE_NONE
     active_source: object | None = None
     active_reading: SourceReading | None = None
-    planned: list = field(default_factory=list)   # [(LiveSource, SourceReading), ...]
+    testing: list = field(default_factory=list)   # [(LiveSource, SourceReading), ...]
     open_reasons: list = field(default_factory=list)

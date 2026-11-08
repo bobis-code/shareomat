@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from shareomat.database.billing_eligibility import EligibilityResolver
 from shareomat.database.community import get_community
-from shareomat.database.live_sources import list_live_sources
+from shareomat.database.live_sources import list_live_sources, list_meter_live_states
 from shareomat.database.meters import list_meters
 from shareomat.leg_const import METER_ROLE_GRID
 from shareomat.models.live_source import LiveSource
@@ -56,6 +56,11 @@ def load_expected(db_path: Path, moment: datetime) -> ExpectedMeters:
 
 def load_sources(db_path: Path) -> list[LiveSource]:
     return list_live_sources(db_path)
+
+
+def load_meter_states(db_path: Path) -> dict[str, str]:
+    """meter_id -> stored state of meters without a technical live source. For display only."""
+    return list_meter_live_states(db_path)
 
 
 def load_meters(db_path: Path) -> list[Meter]:

@@ -41,6 +41,8 @@ ROUTE_PATHS: dict[str, str] = {
     "automation": "/automation",
     "reports": "/reports",
     "live_energy": "/live-energy",
+    "live_energy_sources": "/live-energy/sources",
+    "live_energy_diagnostics": "/live-energy/diagnostics",
     "reports_download": "/reports/download",
     "settings": "/settings",
     "external_data": "/external-data",
@@ -67,7 +69,6 @@ NAV_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("invoices", "Rechnungen"),
         ("automation", "Automatisierung"),
         ("reports", "Berichte"),
-        ("live_energy", "Live-Energie"),
     ]),
     ("INTEGRATIONEN", [
         ("apps", "Apps & Integrationen"),
@@ -75,6 +76,12 @@ NAV_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("SYSTEM", [
         ("settings", "Einstellungen"),
         ("external_data", "Externe Daten"),
+    ]),
+    # An addition to Shareomat, kept apart from the administration and billing groups above.
+    ("LIVE-ENERGIE", [
+        ("live_energy", "Übersicht"),
+        ("live_energy_sources", "Messquellen"),
+        ("live_energy_diagnostics", "Diagnose"),
     ]),
 ]
 

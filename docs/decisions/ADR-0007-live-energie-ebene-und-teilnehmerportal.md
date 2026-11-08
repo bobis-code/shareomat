@@ -2,11 +2,14 @@
 
 ## Status
 
-Angenommen, 4. Fassung (08.11.2026). Schritt 1 ist freigegeben und
+Angenommen, 5. Fassung (08.11.2026). Schritt 1 ist freigegeben und
 umgesetzt, ein Realtest in Home Assistant steht noch aus (Arbeitsliste LE-05,
 LE-08, LE-09). Die 4. Fassung ergänzt die Unterscheidung von Einzelmessung und
 LEG-Bilanz (3.7), Anschlüsse ohne Einspeisemessung (LE-06) und den umgesetzten
-Stand zu K-1 und K-3.
+Stand zu K-1 und K-3. Die 5. Fassung korrigiert die Navigation: Live-Energie
+ist ein eigener Menübereich und steht nicht mehr unter BETRIEB. Sie ergänzt die
+Ansichten Übersicht, Messquellen und Diagnose sowie den gespeicherten Zustand
+«Keine Live-Messung vorhanden» (Abschnitt 2 und 5.1).
 
 Der Projektverantwortliche hat die Grundarchitektur angenommen: ein
 Shareomat-System mit unveränderter Verwaltung, einem zusätzlichen Live-Modul
@@ -186,6 +189,14 @@ Regeln:
   pauschal dem Teilnehmer. Eine Live-Messquelle ist optional. Ohne sie
   bleibt der Messpunkt für die Abrechnung vollständig nutzbar, verhindert
   aber den Status `VOLLSTÄNDIG` (O-2).
+* **Messpunkt ohne Live-Messung.** Der Verwalter kann festhalten: «Keine
+  Live-Messung vorhanden». Das steht in `live_meter_states` in `shareomat.db`
+  und referenziert nur `meters.id`, die Tabelle `meters` bleibt unverändert.
+  Ohne Eintrag und ohne Quelle gilt «Noch nicht festgelegt». Der Zustand ist
+  jederzeit änderbar: Eine zugeordnete Quelle ersetzt ihn, und wird er gesetzt,
+  werden offene Quellen des Messpunkts in derselben Transaktion deaktiviert.
+  Er wirkt nur auf die Anzeige: Der Messpunkt bleibt in *E(t)*, seine fehlende
+  Messung ist `MISSING`, nie 0 W, und `VOLLSTÄNDIG` ist nicht möglich.
 * **Konfiguration der Live-Messquellen in `shareomat.db`**, in einer neuen
   Tabelle `live_sources`, die der Verwalter pflegt. Ein Fremdschlüssel auf
   `meters.id` sichert die Zuordnung referenziell ab. Weil es
@@ -772,20 +783,35 @@ dieselben Regeln wie bei EA-1 und bei allen anderen Quellen.
 |---|---|---|---|---|
 | I1 | `live.service.LiveStatusService` (Python, im Core) | lesend | `leg_status()` und `meter_values()`. Einzige Quelle für alle Ausgaben. | 1 |
 | I2 | HA-Sensoren über `ha/mqtt_runtime` | Core → HA | `sensor.shareomat_leg_ueberschuss` (kW: im Anzeigezustand `UEBERSCHUSS` die angezeigte Zahl nach 3.5, bei `KEIN_UEBERSCHUSS` 0, bei Status ≠ `VOLLSTÄNDIG` der Zustand `unknown`), `sensor.shareomat_leg_live_status` (Enum `ueberschuss`, `kein_ueberschuss`, `unsicher`, `keine_daten`), `sensor.shareomat_leg_vollstaendigkeit` (%), dazu für die eigene aktive Emsomat-Quelle `sensor.shareomat_live_netzbezug`, `_netzeinspeisung`, `_messwert_qualitaet`, `_verbindung`, `_messzeitpunkt`, `_zeitquelle`. Retained, mit Availability, ohne Befehlskanal und ohne Daten anderer Teilnehmer (`ha/live_sensors.py`). | 1 |
-| I3 | Admin-Seite «Betrieb → Live-Energie» | Verwalter ↔ Core | Übersicht pro offiziellem Messpunkt und «Live-Messquelle zuordnen» (5.1) | 1 (Übersicht, Zuordnen für `emsomat_local` und `wan_sparkplug`), 2 (Arten B und C-Gateway) |
+| I3 | Admin-Bereich «LIVE-ENERGIE» | Verwalter ↔ Core | Übersicht, Messquellen mit «Live-Messquelle zuordnen» und Diagnose (5.1) | 1 (Übersicht, Zuordnen für `emsomat_local` und `wan_sparkplug`), 2 (Arten B und C-Gateway) |
 | I4 | Rücksignal an Emsomat | Core → Emsomat | bestehender Coordinator-NCMD-Mechanismus mit `ValidUntil`, nur bei `VOLLSTÄNDIG`. Emsomat-seitig eigene Umsetzung. | später |
 | I5 | Portal-API v1 | Portal → Core | siehe unten | 4 |
 | I6 | Gateway-Ingest | Gateway bzw. HA-Sender → Broker → Core | ein gemeinsamer Vertrag für Art C und Art B (4.3, 4.4) | 2 |
 
-#### 5.1 Bedienung «Betrieb → Live-Energie»
+#### 5.1 Bedienung «Live-Energie»
 
-**Übersicht.** Eine Zeile pro offiziellem Messpunkt der LEG, also *E(t)*.
+**Navigation (Korrektur der 5. Fassung).** Live-Energie erweitert Shareomat
+und ist ein eigener Menübereich **LIVE-ENERGIE**. Er steht nach den bestehenden
+Gruppen VERWALTUNG, BETRIEB, INTEGRATIONEN und SYSTEM, vor dem Kontobereich.
+Bestehende Menüpunkte werden nicht verschoben, umbenannt oder neu gruppiert.
+Die frühere Einordnung unter BETRIEB ist aufgehoben.
+
+| Ansicht | Inhalt |
+|---|---|
+| Übersicht | LEG-Bilanz, eigene Einzelmessung, eine Zeile pro Messpunkt mit Live-Zustand, Bezug, Einspeisung und Qualität |
+| Messquellen | Zustand und Quellen pro Messpunkt, «Live-Messquelle zuordnen», Prüfen, Aktivieren, Ändern, Deaktivieren, Identitätsnachweis |
+| Diagnose | Empfang pro Quelle, verworfene Nachrichten, nicht zugeordnete WAN-Standorte, Parameter, letzte Statuswechsel |
+
+Die folgende Tabelle beschreibt die Angaben pro Messpunkt, verteilt auf diese
+Ansichten.
+
+**Angaben pro Messpunkt.** Eine Zeile pro offiziellem Messpunkt der LEG, also *E(t)*.
 Messpunkte, die nicht in der LEG sind, stehen grau mit Grund darunter.
 
 | Spalte | Inhalt |
 |---|---|
 | Messpunkt, Teilnehmer | aus den Stammdaten, nicht kopiert |
-| Live-Messquelle | Art und Kennung, oder «keine Live-Messquelle: verhindert die vollständige Bilanz» mit der Schaltfläche **«Live-Messquelle zuordnen»** |
+| Live-Zustand und -Messquelle | Art und Kennung, «Keine Live-Messung vorhanden» oder «Noch nicht festgelegt». Ohne aktive Quelle ist keine vollständige Bilanz möglich. Unter **Messquellen** mit der Schaltfläche **«Live-Messquelle zuordnen»** änderbar. |
 | Kommunikation | `online`, `offline` oder `nie empfangen`, mit Zeitpunkt der letzten Nachricht |
 | Qualität | `OK`, `MISSING`, `INVALID`, `STALE` oder `CONFLICT` mit Grund in Klartext |
 | Bezug / Einspeisung | letzter Wert in W |
@@ -800,16 +826,18 @@ die Summe.
 
 1. **Offiziellen Messpunkt wählen.** Meist ist er schon gewählt, weil der
    Ablauf aus seiner Zeile startet.
-2. **Art wählen:** Emsomat / Sparkplug, Home Assistant / HA-Sensoren oder
-   Externe Quelle / Gateway.
+2. **Auswahl treffen:** Keine Live-Messung vorhanden, Emsomat / Sparkplug,
+   Home Assistant / HA-Sensoren, Externe Quelle / Gateway oder Externer
+   Standort / WAN-Sparkplug. «Keine Live-Messung vorhanden» wird sofort
+   gespeichert, die weiteren Schritte entfallen.
 3. **Nur die Felder dieser Art ausfüllen:**
-   * Emsomat: einen der bereits empfangenen Sparkplug-Knoten aus einer
-     Liste wählen. Eine freie Eingabe ist nicht nötig.
+   * Emsomat: keine Eingabe. Es gilt der lokale Knoten aus der Konfiguration
+     (Add-on-Optionen, Abschnitt `sparkplug`).
    * Home Assistant: die Entity-IDs für Bezug und Einspeisung (oder eine
      mit Vorzeichen und Vorzeichenregel), optional eine Nachweis-Entity.
      Shareomat zeigt danach die passende Blueprint-Einstellung an.
-   * Externe Quelle: ein registriertes Gerät bzw. einen WAN-Standort mit
-     Device wählen.
+   * Externe Quelle / Gateway: die Kennung eines registrierten Geräts.
+   * Externer Standort / WAN-Sparkplug: Standort und Device.
    * Bei jeder Art: `max_power_w` und die Nachweisstufe.
 4. **Prüfen:** Gespeichert wird zuerst als `testing`. Die Seite zeigt live,
    was ankommt: Werte, Qualität, Alter, Gründe. In die Bilanz geht nichts.
@@ -818,7 +846,7 @@ die Summe.
    Messpunkt bereits eine aktive Quelle zugeordnet, nennt die Bestätigung
    sie. Der Wechsel läuft in einer Transaktion (Abschnitt 2).
 
-Weitere Aktionen: **«Live-Messquelle lösen»** (wird `retired`) und
+Weitere Aktionen: **«Deaktivieren»** (wird `retired`) und
 **«Identität als nachgewiesen eintragen»** mit Datum und Verweis auf den
 Negativtest.
 
@@ -975,8 +1003,8 @@ Schritt 1:
 **Schritt 1 bleibt vollständig lokal.** Es gibt keinen zusätzlichen
 Internetzugang und keine neue Verbindung nach aussen. Eine bereits
 konfigurierte WAN-Verbindung (ADR-0005) wird nur gehärtet, nicht erweitert.
-Die Verwaltung bleibt unverändert, abgesehen vom neuen Menüpunkt
-«Live-Energie» unter BETRIEB.
+Die Verwaltung bleibt unverändert, abgesehen vom neuen, abgetrennten
+Menübereich LIVE-ENERGIE nach den bestehenden Gruppen.
 
 **Änderung gegenüber der 2. Fassung:** Das Zuordnen einer Live-Messquelle
 war in Schritt 2 vorgesehen, Schritt 1 war nur lesend. Neu gehört das
@@ -1217,13 +1245,13 @@ Schritt 1 (geplant):
   Weitergabe an den Live-Adapter)
 * geändert: `shareomat/ha/mqtt_discovery.py`, `shareomat/ha/mqtt_runtime.py`
   (Sensoren I2)
-* neu: Admin-Seite `web/pages/live_energy.py` mit Template, Eintrag in
-  `web/navigation.py` unter BETRIEB, Recht in `security/permissions.py`
+* neu: Admin-Seite `web/pages/live_energy.py` mit Templates, eigener Bereich
+  in `web/navigation.py`, Recht in `security/permissions.py`
 * `main.py` (Verdrahtung), `ha_addon/` (Synchronisierung)
 * Tests nach Abschnitt 8
 * nur gelesen, nicht geändert: `shareomat/database/billing_eligibility.py`
-* **nicht** geändert: `ha_addon/config.yaml` (`homeassistant_api` bleibt
-  `false`)
+* `ha_addon/config.yaml`: nur der Options-Abschnitt `sparkplug`,
+  `homeassistant_api` bleibt `false`
 
 Schritt 2 (geplant): `live/adapters/gateway_mqtt.py`,
 `live/adapters/ha_mqtt.py`, Gateway-Vertrag als eigenes Dokument,

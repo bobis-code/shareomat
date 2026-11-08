@@ -10,12 +10,22 @@
     Eine neue Quelle läuft zuerst in Prüfung. Beim Aktivieren löst sie die bisherige aktive Quelle ab.</p>
   {% endif %}
   {% if not adapter %}
-  <p>Art der Live-Messquelle wählen:</p>
+  <p class="ts">Aktueller Zustand: <b>{{ current_status_label }}</b></p>
+  <p>Was gilt für diesen Messpunkt?</p>
   <div class="actions-row">
+    {% for value, label in state_choices %}
+    <form method="post" style="display:inline" action="{{ url_for('live_energy', suffix='/' ~ (meter.meter_id | path_segment) ~ '/state') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="state" value="{{ value }}">
+      <button type="submit" class="btn btn-muted"{% if current_status == value %} disabled{% endif %}>{{ label }}</button>
+    </form>
+    {% endfor %}
     {% for value, label in source_choices %}
     <a class="btn btn-muted" href="{{ url_for('live_energy', suffix='/' ~ (meter.meter_id | path_segment) ~ '/assign') }}?adapter={{ value }}">{{ label }}</a>
     {% endfor %}
   </div>
+  <p class="ts" style="margin-top:8px">Der Messpunkt bleibt in jedem Fall vollständig in der offiziellen Verwaltung und Abrechnung. Ohne Live-Messung wird nichts als 0 W gerechnet, eine vollständige LEG-Bilanz ist dann nicht möglich.
+    {% if existing %}Bei «Keine Live-Messung vorhanden» wird die oben genannte Quelle deaktiviert.{% endif %}</p>
   {% else %}
   <h3>{{ adapter_label }}</h3>
   <form class="form-card" method="post" action="{{ url_for('live_energy', suffix='/' ~ (meter.meter_id | path_segment) ~ '/assign') }}">
@@ -44,7 +54,7 @@
     </div>
     <div class="field-hint">Vertrauenswürdig ist die Quelle erst, wenn die Broker-ACL dieses Login an den Standort bindet. Der Name im Topic allein beweist nichts.</div>
     {% elif adapter == 'ha_mqtt' %}
-    <div class="notice-warn">Der Eingang für Home-Assistant-Sender ist noch nicht in Betrieb. Die Quelle kann bereits als geplant eingetragen werden.</div>
+    <div class="notice-warn">Der Eingang für Home-Assistant-Sender ist noch nicht in Betrieb. Die Quelle kann bereits eingetragen werden.</div>
     <div class="field">
       <label for="device_id">Kennung des Senders</label>
       <input type="text" id="device_id" name="device_id" required maxlength="64">
@@ -54,7 +64,7 @@
     <div class="field"><label for="signed_entity">Entity mit Vorzeichen (statt der beiden oben)</label><input type="text" id="signed_entity" name="signed_entity"></div>
     <div class="field"><label for="evidence_entity">Nachweis-Entity (optional, z. B. Telegrammzeit)</label><input type="text" id="evidence_entity" name="evidence_entity"></div>
     {% else %}
-    <div class="notice-warn">Der Eingang für Gateways ist noch nicht in Betrieb. Die Quelle kann bereits als geplant eingetragen werden.</div>
+    <div class="notice-warn">Der Eingang für Gateways ist noch nicht in Betrieb. Die Quelle kann bereits eingetragen werden.</div>
     <div class="field">
       <label for="device_id">Registrierte Geräte-Kennung</label>
       <input type="text" id="device_id" name="device_id" required maxlength="64">
@@ -99,8 +109,8 @@
       <div class="field-hint">Emsomat erreicht heute Stufe C: Einzelwerte sind sichtbar, eine vollständige LEG-Bilanz ist damit nicht möglich.</div>
     </div>
     <div class="actions-row">
-      <button type="submit" class="btn">Als geplant eintragen und prüfen</button>
-      <a class="btn btn-muted" href="{{ url_for('live_energy') }}">Abbrechen</a>
+      <button type="submit" class="btn">Eintragen und prüfen</button>
+      <a class="btn btn-muted" href="{{ url_for('live_energy_sources') }}">Abbrechen</a>
     </div>
   </form>
   {% endif %}
