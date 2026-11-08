@@ -31,6 +31,7 @@ Notes:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -39,11 +40,61 @@ import yaml
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_OUTPUT = Path("/config/shareomat/leg_config.yaml")
 ENV_OUTPUT = Path("/tmp/shareomat_env")
+EMSOMAT_MANIFEST = Path("/config/custom_components/emsomat/manifest.json")
+
+# Emsomat's own defaults: what mode "auto" connects to.
+_SPARKPLUG_DEFAULT_NODE = "emsomat-node"
+_SPARKPLUG_DEFAULT_GROUP = "emsomat"
+# Both values become MQTT topic levels: no wildcards, separators or spaces.
+_SPARKPLUG_ID = re.compile(r"^[^/+#\s\x00-\x1f\x7f]{1,64}$")
 
 # Runtime (technical) keys this script owns; every other top-level key in an
 # existing CONFIG_OUTPUT file (legacy "leg"/"participants"/"meters"/"tariffs")
 # is preserved as-is until Shareomat's one-time database import consumes it.
 _RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web"}
+
+
+def _sparkplug_section(opts: dict, existing: dict) -> dict | None:
+    """The local Emsomat channel, or None to leave a hand-written block in place.
+
+    Add-on option section `sparkplug`, field `mode`:
+      auto    Emsomat on this Home Assistant is connected with its default IDs.
+      manual  the entered node_id and group_id are used.
+      off     no connection.
+
+    Any problem switches only Sparkplug off (fail closed), never the add-on:
+    billing and the admin page keep working.
+    """
+    raw = opts.get("sparkplug")
+    chosen = raw if isinstance(raw, dict) else {}
+    mode = str(chosen.get("mode", "auto"))
+    block = existing.get("sparkplug")
+    if mode == "auto" and isinstance(block, dict) and not block.get("managed_by_addon"):
+        print(f"[INFO] Keeping the sparkplug section written by hand in {CONFIG_OUTPUT}.")
+        return None
+
+    group_id, node_id = _SPARKPLUG_DEFAULT_GROUP, _SPARKPLUG_DEFAULT_NODE
+    if mode == "manual":
+        group_id = str(chosen.get("group_id", "")).strip()
+        node_id = str(chosen.get("node_id", "")).strip()
+        enabled = bool(_SPARKPLUG_ID.match(group_id) and _SPARKPLUG_ID.match(node_id))
+        if not enabled:
+            print("[ERROR] sparkplug node_id or group_id is not valid - Sparkplug stays off.", file=sys.stderr)
+            group_id, node_id = _SPARKPLUG_DEFAULT_GROUP, ""
+    else:
+        enabled = mode == "auto" and EMSOMAT_MANIFEST.is_file()
+        if mode == "auto" and not enabled:
+            print("[INFO] Emsomat is not installed on this Home Assistant - Sparkplug stays off.")
+    if enabled:
+        print(f"[INFO] Sparkplug on ({mode}): group_id={group_id} node_id={node_id}")
+    return {
+        "enabled": enabled,
+        "group_id": group_id,
+        "primary_host_id": "shareomat",
+        "emsomat_edge_node_id": node_id,
+        "participant_edge_node_id": "shareomat-relay",
+        "managed_by_addon": True,
+    }
 
 
 def main() -> None:
@@ -112,6 +163,9 @@ def main() -> None:
     }
 
     config = {**legacy_sections, **runtime_config}
+    sparkplug = _sparkplug_section(opts, existing)
+    if sparkplug is not None:
+        config["sparkplug"] = sparkplug
 
     CONFIG_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     with CONFIG_OUTPUT.open("w", encoding="utf-8") as f:

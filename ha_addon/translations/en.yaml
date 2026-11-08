@@ -1,0 +1,16 @@
+configuration:
+  sparkplug:
+    name: Connection to Emsomat
+    description: >-
+      Default is "auto": the Emsomat on this Home Assistant is connected automatically.
+      Node ID and group only apply with "manual".
+    fields:
+      mode:
+        name: Mode
+        description: "auto = automatic, manual = own values below, off = no connection"
+      node_id:
+        name: Node ID (manual only)
+        description: No effect with "auto". Must match the node ID in Emsomat.
+      group_id:
+        name: Group (manual only)
+        description: No effect with "auto". Must match the Sparkplug group in Emsomat.
