@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, Callable, Optional
 
 from shareomat.config import MqttConfig, SparkplugConfig
@@ -37,6 +38,11 @@ METRIC_NODE_REBIRTH = "Node Control/Rebirth"
 
 _QOS_NON_STATE = 0
 _QOS_STATE = 1
+
+# Upper bound for one local Sparkplug message (NBIRTH carries the forecasts).
+MAX_LOCAL_PAYLOAD_BYTES = 1_048_576
+# At most one Rebirth request per interval after a sequence gap.
+_REBIRTH_MIN_INTERVAL_S = 60.0
 
 try:
     import paho.mqtt.client as mqtt
@@ -74,6 +80,7 @@ class SparkplugHost:
         *,
         client: Optional["_mqtt_type.Client"] = None,
         on_metrics_changed: Optional[Callable[[], None]] = None,
+        live_sink: Optional[object] = None,
     ):
         self._sp_config = sp_config
         self._mqtt_config = mqtt_config
@@ -84,6 +91,11 @@ class SparkplugHost:
         self._emsomat_birth: Optional[NBirth] = None
         self._last_known_bdseq: Optional[int] = None
         self._metrics: dict[str, Metric] = {}
+        # Live-Ingest (shareomat.live.adapters): on_birth/on_data/on_death/on_connection
+        self._live_sink = live_sink
+        self._ever_connected = False
+        self._expected_seq: Optional[int] = None
+        self._last_rebirth_request: Optional[float] = None
 
     # ------------------------------------------------------------------
     # topics
@@ -116,6 +128,7 @@ class SparkplugHost:
 
         self._client.will_set(self._state_topic, State(online=False).encode(), qos=_QOS_STATE, retain=True)
         self._client.on_connect = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
         if self._mqtt_config.username:
             self._client.username_pw_set(self._mqtt_config.username, self._mqtt_config.password or None)
@@ -164,9 +177,52 @@ class SparkplugHost:
         for message_type in (MessageType.NBIRTH, MessageType.NDATA, MessageType.NDEATH):
             client.subscribe(self._node_topic(message_type), qos=_QOS_NON_STATE)
         logger.info("SparkplugHost connected, STATE=ONLINE published, subscribed to Emsomat node topics")
+        self._notify_live_connection(True)
+        if self._ever_connected:
+            # A death or birth may have been missed while disconnected.
+            self.request_rebirth()
+        self._ever_connected = True
+
+    def _on_disconnect(self, client, userdata, rc=0, properties=None) -> None:
+        """Lost the broker: nothing we hold can still be trusted as current."""
+        self._connected.clear()
+        self._forget_emsomat_session()
+        logger.warning("SparkplugHost disconnected from broker (rc=%s) - Emsomat values invalidated", rc)
+        self._notify_live_connection(False)
+        self._notify_metrics_changed()
+
+    def _forget_emsomat_session(self) -> None:
+        self._emsomat_online = False
+        self._emsomat_birth = None
+        self._metrics.clear()
+        self._expected_seq = None
+
+    def _notify_live_connection(self, connected: bool) -> None:
+        if self._live_sink is None:
+            return
+        try:
+            self._live_sink.on_connection(connected)
+        except Exception:
+            logger.debug("SparkplugHost live sink on_connection failed", exc_info=True)
+
+    def _notify_live(self, method: str, *args) -> None:
+        if self._live_sink is None:
+            return
+        try:
+            getattr(self._live_sink, method)(*args)
+        except Exception:
+            logger.debug("SparkplugHost live sink %s failed", method, exc_info=True)
 
     def _on_message(self, client, userdata, msg) -> None:
         topic = msg.topic
+        # Sparkplug data is never retained: a retained copy would be an old
+        # value that looks new after a restart (ADR-0007, 4.1 rule 7).
+        if getattr(msg, "retain", False):
+            logger.warning("SparkplugHost: discarded retained message on %r", topic)
+            return
+        if len(msg.payload) > MAX_LOCAL_PAYLOAD_BYTES:
+            logger.warning("SparkplugHost: discarded oversized message on %r (%d bytes)", topic, len(msg.payload))
+            return
         try:
             if topic == self._node_topic(MessageType.NBIRTH):
                 self._handle_nbirth(msg.payload)
@@ -183,6 +239,9 @@ class SparkplugHost:
     def _handle_nbirth(self, raw: bytes) -> None:
         birth = NBirth.decode(raw)
         self._emsomat_birth = birth
+        # A new session: nothing from the previous one may survive.
+        self._metrics.clear()
+        self._expected_seq = (birth.seq + 1) % 256
         for metric in birth.metrics:
             if metric.name:
                 self._metrics[metric.name] = metric
@@ -190,14 +249,39 @@ class SparkplugHost:
         self._last_known_bdseq = bdseq_metric.value if bdseq_metric else None
         self._emsomat_online = True
         logger.info("Emsomat NBIRTH received (bdSeq=%s)", self._last_known_bdseq)
+        self._notify_live("on_birth", birth, self._last_known_bdseq)
         self._notify_metrics_changed()
 
     def _handle_ndata(self, raw: bytes) -> None:
+        if self._emsomat_birth is None:
+            # Data outside a session cannot be interpreted reliably.
+            logger.debug("SparkplugHost: NDATA without NBIRTH ignored, requesting Rebirth")
+            self._request_rebirth_limited()
+            return
         data = NData.decode(raw, birth=self._emsomat_birth)
+        self._check_sequence(data.seq)
         for metric in data.metrics:
             if metric.name:
                 self._metrics[metric.name] = metric
+        self._notify_live("on_data", data)
         self._notify_metrics_changed()
+
+    def _check_sequence(self, seq: int) -> None:
+        """A gap is logged and answered with a Rebirth. It never decides
+        whether a value is valid: losses are normal at QoS 0."""
+        expected = self._expected_seq
+        self._expected_seq = (seq + 1) % 256
+        if expected is not None and seq != expected:
+            logger.info("SparkplugHost: Sparkplug seq gap (expected %s, got %s)", expected, seq)
+            self._request_rebirth_limited()
+
+    def _request_rebirth_limited(self) -> None:
+        now = time.monotonic()
+        last = self._last_rebirth_request
+        if last is not None and now - last < _REBIRTH_MIN_INTERVAL_S:
+            return
+        self._last_rebirth_request = now
+        self.request_rebirth()
 
     def _notify_metrics_changed(self) -> None:
         if not self._on_metrics_changed:
@@ -218,8 +302,10 @@ class SparkplugHost:
                 received_bdseq, self._last_known_bdseq,
             )
             return
-        self._emsomat_online = False
+        self._forget_emsomat_session()
         logger.warning("Emsomat NDEATH received (bdSeq=%s) - marked offline", received_bdseq)
+        self._notify_live("on_death", received_bdseq)
+        self._notify_metrics_changed()
 
     # ------------------------------------------------------------------
     # outgoing: Rebirth request

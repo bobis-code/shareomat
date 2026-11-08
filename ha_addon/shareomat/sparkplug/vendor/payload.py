@@ -173,7 +173,7 @@ class NDeath:
     ) -> Self:
         payload = protobuf.Payload.FromString(raw)
         return cls(
-            timestamp=payload.timestamp if not payload.HasField("timestamp") else None,
+            timestamp=payload.timestamp if payload.HasField("timestamp") else None,
             bd_seq_metric=Metric.from_pb(payload.metrics[0]),
         )
 

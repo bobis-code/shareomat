@@ -2,7 +2,11 @@
 
 ## Status
 
-Vorgeschlagen, 3. Fassung (07.11.2026). Noch nicht umgesetzt.
+Angenommen, 4. Fassung (08.11.2026). Schritt 1 ist freigegeben und
+umgesetzt, ein Realtest in Home Assistant steht noch aus (Arbeitsliste LE-05,
+LE-08, LE-09). Die 4. Fassung ergänzt die Unterscheidung von Einzelmessung und
+LEG-Bilanz (3.7), Anschlüsse ohne Einspeisemessung (LE-06) und den umgesetzten
+Stand zu K-1 und K-3.
 
 Der Projektverantwortliche hat die Grundarchitektur angenommen: ein
 Shareomat-System mit unveränderter Verwaltung, einem zusätzlichen Live-Modul
@@ -17,8 +21,6 @@ Bedienung «Live-Messquelle zuordnen». H-1, H-2 und der Umfang von
 Schritt 1 (Zuordnen in der Oberfläche) sind am 07.11.2026 entschieden
 (Abschnitt 10). Die Aufgaben stehen in der zentralen Arbeitsliste
 [`docs/Live-Energie-Arbeitsliste.md`](../Live-Energie-Arbeitsliste.md).
-Mit der separaten Freigabe von
-Schritt 1 (Abschnitt 9) wird der Status auf «Angenommen» gesetzt.
 
 Bezug: [`docs/Zukunft.md`](../Zukunft.md) (Zielbild, §12 Entscheide vom
 07.11.2026), Architekturzeichnung
@@ -69,7 +71,7 @@ Bei der Prüfung gefundene Schwächen, die eine Live-Bilanz verfälschen würden
   HA-Sensor sieht deshalb immer frisch aus.
 
   S-L2 und S-L3 sind in Emsomat mit dem Auftrag EA-1 behoben (07.11.2026,
-  noch nicht committet, siehe Abschnitt 10). Emsomat bleibt danach Stufe C.
+  Commit `e6be1c7`, siehe Abschnitt 10). Emsomat bleibt danach Stufe C.
 * **S-L4** Der Downlink nimmt für jede `device_id` unter jedem fremden
   `edge_node_id` der Gruppe Werte an. Welcher Standort für welchen
   Teilnehmer sprechen darf, ist nirgends hinterlegt. Die Broker-ACL ist
@@ -197,12 +199,13 @@ Regeln:
   | `source_type` | fachliche Art, wie sie der Verwalter wählt: `emsomat`, `home_assistant`, `external` (Abschnitt 4) |
   | `adapter` | technischer Weg darunter: `emsomat_local`, `ha_mqtt`, `wan_sparkplug`, `gateway_mqtt`. Kein `ha_api` (H-1). Die erlaubten Paare aus Art und Adapter sind fest im Code und per `CHECK` abgesichert. |
   | `source_key` | kanonische technische Identität, eindeutig je Adapter, z. B. `emsomat_local:<edge_node_id>`, `wan_sparkplug:<edge_node_id>/<device_id>`, `gateway_mqtt:<geräte-id>`, `ha_mqtt:<publisher-id>` |
-  | `measurement_mode` | `import_export` (zwei Werte) oder `signed` (ein vorzeichenbehafteter Wert) |
+  | `measurement_mode` | `import_export` (zwei Werte), `signed` (ein vorzeichenbehafteter Wert) oder `import_only` (nur Bezug) |
+  | `no_export_note` | Pflicht bei `import_only`: Begründung, warum Einspeisung ausgeschlossen ist. Nur für Messpunkte mit der Rolle Verbraucher zulässig. |
   | `sign_convention` | Pflicht bei `signed`: `positive_is_import` oder `positive_is_export`. **Keine Vorgabe.** Bei `import_export` leer. |
   | `adapter_config` | adapterspezifische Einstellungen als JSON, z. B. bei `home_assistant` die Entity-IDs für Bezug und Einspeisung. Wird beim Speichern gegen ein festes Schema des Adapters geprüft. Enthält keine Geheimnisse. |
   | `max_power_w` | Plausibilitätsgrenze, Pflicht (aus der Anschlussleistung) |
   | `freshness_evidence` | Nachweisstufe der Messaktualität `A`, `B` oder `C` (Abschnitt 3.2). Wird vom Verwalter gesetzt, nie von der Quelle. |
-  | `identity_basis`, `identity_verified_at` | Womit die Identität der Quelle durchgesetzt wird (z. B. `broker_acl`) und wann das zuletzt nachgewiesen wurde (Abschnitt 4.2) |
+  | `identity_basis`, `identity_note`, `identity_verified_at` | Womit die Identität der Quelle durchgesetzt wird (z. B. `broker_acl`) und wann das zuletzt nachgewiesen wurde (Abschnitt 4.2) |
   | `state` | `testing`, `active` oder `retired` (siehe unten). Ersetzt das Feld `enabled` der 2. Fassung. |
   | `activated_at`, `retired_at`, `created_at`, `updated_at` | |
   | später: `credential_hash`, `revoked_at` | Gerätezugang für `gateway_mqtt` und `ha_mqtt` (Schritt 2) |
@@ -470,7 +473,7 @@ Messreihen festgelegt (3.6).
 
 #### 3.6 Parameter (Entscheid O-4)
 
-Alle Parameter sind **überprüfbare Startwerte**: `max_age` 60 s (mindestens
+Alle Parameter sind **überprüfbare Startwerte**: `max_age` 90 s (mindestens
 das Dreifache des Publikationsintervalls), `max_skew` 30 s, `conflict_w`
 50 W, dazu die Hysterese aus 3.5.
 
@@ -482,6 +485,34 @@ das Dreifache des Publikationsintervalls), `max_skew` 30 s, `conflict_w`
 * Festgelegt werden sie anhand realer Messreihen. Dafür protokolliert die
   Admin-Seite in Schritt 1 Statuswechsel, Anzeigewechsel und Alter der
   Proben, mit kurzer Aufbewahrung in `live.db`.
+
+#### 3.7 Einzelmessung und LEG-Bilanz
+
+Zwei getrennte Aussagen mit verschiedenen Bedingungen:
+
+| | Einzelmessung | Vollständige LEG-Bilanz |
+|---|---|---|
+| Inhalt | Bezug und Einspeisung **eines** Messpunkts, Qualität, Zeitstempel, Verbindung, Herkunft | Summe über alle erwarteten Messpunkte *E(t)* |
+| Anzeigbar, wenn | der Wert dieser Quelle `OK` ist | alle Bedingungen von `VOLLSTÄNDIG` erfüllt sind (3.4) |
+| Nachweisstufe und Identität | werden angezeigt, sind aber keine Bedingung | Stufe A/B und nachgewiesene Identität nötig |
+| Fehlende andere Messpunkte | ohne Einfluss | verhindern `VOLLSTÄNDIG` |
+
+* Eine gültige Einzelmessung wird angezeigt, auch wenn andere Teilnehmer noch
+  keine Live-Messquelle haben. Auf HA Second darf die eigene gültige
+  Netzeinspeisung sichtbar sein.
+* Eine Einzelmessung ist **keine Empfehlung**: Sie sagt nichts darüber, ob in
+  der LEG Überschuss vorhanden ist.
+* Messpunkte ohne Live-Messung werden nie als 0 W gerechnet. Eine Teilsumme
+  gibt es nur in der Verwaltung, eindeutig als unvollständig markiert.
+* Nur die aktive Live-Messquelle zählt. Eine Quelle in `testing` wird
+  angezeigt, erscheint aber weder in der Bilanz noch in den HA-Sensoren.
+
+**Anschlüsse ohne separate Einspeisemessung (LE-06):** `import_export` verlangt
+beide Werte, eine fehlende Einspeisung ist `MISSING`. Ein reiner Bezugssensor
+ist nur als `import_only` zulässig: ausdrücklich gewählt, begründet und nur bei
+einem Messpunkt mit der Rolle Verbraucher. Die Einspeisung gilt dann als 0 W.
+Meldet die Quelle trotzdem Einspeisung über `conflict_w`, ist die Probe
+`INVALID`. Ein Wert mit Vorzeichen braucht die Vorzeichenregel.
 
 ### 4. Live-Messquellen: drei Arten, austauschbare Adapter, eine zentrale Prüfung
 
@@ -586,11 +617,10 @@ heute schon gemeinsam in einer Nachricht mit gleichem Zeitstempel
    **sofort** `MISSING`, nicht erst nach `max_age` (S-L5). Nach dem
    Wiederverbinden wird eine Quelle erst mit einem neuen BIRTH wieder
    gültig, weil ein DEATH oder BIRTH während der Unterbrechung verpasst
-   worden sein kann. Lokal fordert Shareomat dazu einen Rebirth an. Für
-   WAN-Quellen wird in Schritt 1 geklärt, wie nach einem Wiederverbinden
-   ein neues DBIRTH kommt (Abschnitt 10, K-1). Bis dahin bleiben sie nach
-   einem Unterbruch `MISSING`, bis die Gegenseite von sich aus ein DBIRTH
-   sendet.
+   worden sein kann. Lokal fordert Shareomat dazu einen Rebirth an. Eine
+   WAN-Quelle bleibt nach einem Unterbruch `MISSING`, bis ein neues DBIRTH
+   kommt. Der Uplink der Gegenseite wiederholt seine Births alle 5 Minuten
+   (Abschnitt 10, K-1).
 7. **Retained:** Sparkplug-Daten werden nicht retained publiziert. Eine
    BIRTH-, DATA- oder DEATH-Nachricht mit Retain-Flag wird verworfen. Sonst
    könnte nach einem Neustart ein alter Wert als neu erscheinen. Nur `STATE`
@@ -642,10 +672,11 @@ heute schon gemeinsam in einer Nachricht mit gleichem Zeitstempel
 * **Home Assistant:** Shareomat erhält kein HA-Token (4.3). Die Identität
   eines HA-Senders ist sein Broker-Login, nicht die Entity-ID in der
   Nachricht.
-* **Weitergabe an Emsomat:** Der `ParticipantRelay` führt fremde Werte
-  künftig unter dem Paar (`edge_node_id`, `device_id`) und gibt nur
-  hinterlegte Paare weiter. Ein zweiter Standort mit derselben `device_id`
-  überschreibt den ersten dann nicht mehr.
+* **Weitergabe an Emsomat:** Der `WanDownlink` gibt nur hinterlegte Paare
+  (`edge_node_id`, `device_id`) weiter. Eine `device_id` kann nur einem
+  Standort zugeordnet sein (`database/live_sources.py`), weil Emsomat einen
+  fremden Teilnehmer nur unter der `device_id` kennt. So überschreibt ein
+  zweiter Standort den ersten nicht.
 
 #### 4.3 Art B: Home-Assistant-Sensoren (Schritt 2, noch nicht umgesetzt)
 
@@ -740,7 +771,7 @@ dieselben Regeln wie bei EA-1 und bei allen anderen Quellen.
 | ID | Schnittstelle | Richtung | Inhalt | Schritt |
 |---|---|---|---|---|
 | I1 | `live.service.LiveStatusService` (Python, im Core) | lesend | `leg_status()` und `meter_values()`. Einzige Quelle für alle Ausgaben. | 1 |
-| I2 | HA-Sensoren über `ha/mqtt_runtime` | Core → HA | `sensor.shareomat_leg_ueberschuss` (kW: im Anzeigezustand `UEBERSCHUSS` die angezeigte Zahl nach 3.5, bei `KEIN_UEBERSCHUSS` 0, bei Status ≠ `VOLLSTÄNDIG` der Zustand `unknown`), `sensor.shareomat_leg_live_status` (Enum `ueberschuss`, `kein_ueberschuss`, `unsicher`, `keine_daten`), Attribute `coverage`, `updated_at`. Retained, mit Availability. | 1 |
+| I2 | HA-Sensoren über `ha/mqtt_runtime` | Core → HA | `sensor.shareomat_leg_ueberschuss` (kW: im Anzeigezustand `UEBERSCHUSS` die angezeigte Zahl nach 3.5, bei `KEIN_UEBERSCHUSS` 0, bei Status ≠ `VOLLSTÄNDIG` der Zustand `unknown`), `sensor.shareomat_leg_live_status` (Enum `ueberschuss`, `kein_ueberschuss`, `unsicher`, `keine_daten`), `sensor.shareomat_leg_vollstaendigkeit` (%), dazu für die eigene aktive Emsomat-Quelle `sensor.shareomat_live_netzbezug`, `_netzeinspeisung`, `_messwert_qualitaet`, `_verbindung`, `_messzeitpunkt`, `_zeitquelle`. Retained, mit Availability, ohne Befehlskanal und ohne Daten anderer Teilnehmer (`ha/live_sensors.py`). | 1 |
 | I3 | Admin-Seite «Betrieb → Live-Energie» | Verwalter ↔ Core | Übersicht pro offiziellem Messpunkt und «Live-Messquelle zuordnen» (5.1) | 1 (Übersicht, Zuordnen für `emsomat_local` und `wan_sparkplug`), 2 (Arten B und C-Gateway) |
 | I4 | Rücksignal an Emsomat | Core → Emsomat | bestehender Coordinator-NCMD-Mechanismus mit `ValidUntil`, nur bei `VOLLSTÄNDIG`. Emsomat-seitig eigene Umsetzung. | später |
 | I5 | Portal-API v1 | Portal → Core | siehe unten | 4 |
@@ -1010,7 +1041,7 @@ Ob Stufe A oder B erreichbar ist, hängt von den Zählern und Lesegeräten der
 Haushalte ab (TODO «Zähler-Schnittstellen prüfen»). Bis EA-1 umgesetzt ist,
 bleibt jede Emsomat-Quelle bei `UNSICHER`.
 
-**Stand EA-1 (07.11.2026, in Emsomat umgesetzt, noch nicht committet):**
+**Stand EA-1 (07.11.2026, in Emsomat umgesetzt, Commit `e6be1c7`):**
 
 * Punkte 1–3 umgesetzt: `is_null` statt 0 W (auch im NBIRTH vor dem ersten
   Messwert), beide Werte immer gemeinsam, Metric-Zeitstempel =
@@ -1057,19 +1088,18 @@ bleibt jede Emsomat-Quelle bei `UNSICHER`.
 
 **Zu klären in Schritt 1, ohne Änderung an fremden Systemen:**
 
-* **K-1 Neues DBIRTH über WAN nach einem Wiederverbinden.** ADR-0005 sieht
-  keine Befehle zwischen Standorten vor. Zu prüfen ist, ob der Uplink der
-  Gegenseite nach einem eigenen Wiederverbinden oder in Abständen ein
-  DBIRTH sendet, oder ob ein eng begrenzter Rebirth-Wunsch innerhalb der
-  LEG-Gruppe zulässig sein soll (eigener Entscheid). Bis dahin gilt 4.1
-  Regel 6.
+* **K-1 Neues DBIRTH über WAN nach einem Wiederverbinden (umgesetzt).**
+  ADR-0005 sieht keine Befehle zwischen Standorten vor. Darum wiederholt der
+  WAN-Uplink NBIRTH und DBIRTHs alle 5 Minuten, mit den ursprünglichen
+  Zeitstempeln. Ein Standort, der die Verbindung verlor, hat damit nach
+  höchstens 5 Minuten wieder eine gültige Sitzung.
 * **K-2 Lokale Broker-ACL für Emsomat.** Ein eigenes Mosquitto-Login mit
   ACL für Emsomat ist eine Änderung am produktiven HA-Broker. Sie wird nur
   beschrieben und vom Projektverantwortlichen separat entschieden, nicht in
   Schritt 1 ausgeführt.
-* **K-3 Nachweis über WAN weitergeben.** `ParticipantRelay` und
-  `bridge.py` geben heute nur zwei Zahlen weiter. `is_null` und
-  `Market/PowerTimeSource` müssen mitgehen. Eine WAN-Quelle ist nie besser
+* **K-3 Nachweis über WAN weitergeben (umgesetzt).** `ParticipantRelay`,
+  `bridge.py` und `WanDownlink` geben `is_null`, den Quellenzeitstempel und
+  `Market/PowerTimeSource` weiter. Eine WAN-Quelle ist nie besser
   belegt als ihre Herkunft. Fehlt die Angabe, gilt Stufe C.
 * **K-4 Falsche Zuordnung erkennen.** Wird die Quelle von Haus X dem
   Messpunkt von Haus Y zugeordnet, ist das technisch nicht sicher

@@ -20,7 +20,9 @@ participant is registered unless a real caller does so.
 from __future__ import annotations
 
 import logging
+import math
 import threading
+import time
 from typing import TYPE_CHECKING, Optional
 
 from shareomat.config import MqttConfig, SparkplugConfig
@@ -40,7 +42,13 @@ logger = logging.getLogger(__name__)
 METRIC_BDSEQ = "bdSeq"
 METRIC_EXPORT_POWER_NOW = "Market/ExportPowerNow"
 METRIC_IMPORT_POWER_NOW = "Market/ImportPowerNow"
+METRIC_POWER_TIME_SOURCE = "Market/PowerTimeSource"
 METRIC_NODE_REBIRTH = "Node Control/Rebirth"
+
+# The WAN has no command channel (no Rebirth request across sites), so a
+# remote Downlink that lost its connection can only recover from a new DBIRTH.
+# The WAN Uplink therefore repeats its births at this interval (ADR-0007 K-1).
+WAN_REBIRTH_INTERVAL_S = 300.0
 
 _QOS_NON_STATE = 0
 
@@ -54,6 +62,17 @@ try:
 except ImportError:
     _PAHO_AVAILABLE = False
     _CB_API_V1 = None
+
+
+def _finite_or_none(value: Optional[float]) -> Optional[float]:
+    """A finite, non-negative number, otherwise None (is_null on the wire)."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) and number >= 0 else None
 
 
 def _make_client(client_id: str) -> "_mqtt_type.Client":
@@ -89,7 +108,11 @@ class ParticipantRelay:
         self._connected = threading.Event()
         self._bdseq = 0
         self._seq = 0
-        self._participants: dict[str, tuple[float, float]] = {}
+        # device_id -> (export_w, import_w); None = invalid/unknown, never 0 W
+        self._participants: dict[str, tuple[Optional[float], Optional[float]]] = {}
+        # device_id -> (original metric timestamp, origin of that timestamp)
+        self._participant_meta: dict[str, tuple[Optional[int], Optional[str]]] = {}
+        self._last_birth_monotonic: Optional[float] = None
 
     @property
     def edge_node_id(self) -> str:
@@ -125,6 +148,7 @@ class ParticipantRelay:
         self._client.will_set(self._node_topic(MessageType.NDEATH), ndeath.encode(), qos=_QOS_NON_STATE, retain=False)
 
         self._client.on_connect = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
         self._client.on_message = self._on_message
         if self._mqtt_config.username:
             self._client.username_pw_set(self._mqtt_config.username, self._mqtt_config.password or None)
@@ -173,6 +197,10 @@ class ParticipantRelay:
         self._publish_birth()
         logger.info("ParticipantRelay connected as edge_node_id=%s (ncmd=%s)", self.edge_node_id, self._enable_ncmd)
 
+    def _on_disconnect(self, client, userdata, rc=0, properties=None) -> None:
+        """Nothing can be published until _on_connect() has sent a new birth."""
+        self._connected.clear()
+
     def _on_message(self, client, userdata, msg) -> None:
         if not self._enable_ncmd:
             return
@@ -199,16 +227,59 @@ class ParticipantRelay:
         birth = NBirth(timestamp=now_ms, seq=self._seq, metrics=(bdseq_metric, rebirth_metric))
         self._client.publish(self._node_topic(MessageType.NBIRTH), birth.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
         self._seq = 1
+        self._last_birth_monotonic = time.monotonic()
 
         for device_id, (export_w, import_w) in self._participants.items():
-            self._publish_dbirth(device_id, export_w, import_w)
+            timestamp_ms, time_source = self._participant_meta.get(device_id, (None, None))
+            self._publish_dbirth(device_id, export_w, import_w, timestamp_ms=timestamp_ms, time_source=time_source)
 
-    def _publish_dbirth(self, device_id: str, export_now_w: float, import_now_w: float, *, timestamp_ms: Optional[int] = None) -> None:
-        metric_ts = timestamp_ms if timestamp_ms is not None else get_current_timestamp()
+    def republish_births_if_due(self, *, interval_s: float = WAN_REBIRTH_INTERVAL_S) -> bool:
+        """Repeat NBIRTH + DBIRTHs when the last birth is older than `interval_s`.
+
+        Only for the WAN variant (no NCMD): a remote Downlink cannot request a
+        Rebirth there. The original metric timestamps are kept, so a repeated
+        birth never makes a value look fresher than it is."""
+        if self._enable_ncmd or self._client is None or not self._connected.is_set():
+            return False
+        last = self._last_birth_monotonic
+        if last is not None and time.monotonic() - last < interval_s:
+            return False
+        self._publish_birth()
+        return True
+
+    @staticmethod
+    def _power_metrics(
+        export_now_w: Optional[float],
+        import_now_w: Optional[float],
+        timestamp_ms: Optional[int],
+        time_source: Optional[str],
+    ) -> tuple[Metric, ...]:
+        """Both power metrics together, an invalid value as is_null - never 0 W.
+
+        Without any valid value there is no measurement time to report. A
+        caller without a timestamp is a genuinely local participant: "now"."""
+        export_w = _finite_or_none(export_now_w)
+        import_w = _finite_or_none(import_now_w)
+        if export_w is None and import_w is None:
+            metric_ts = None
+        else:
+            metric_ts = timestamp_ms if timestamp_ms is not None else get_current_timestamp()
         metrics = (
-            Metric(timestamp=metric_ts, name=METRIC_EXPORT_POWER_NOW, datatype=DataType.DOUBLE, value=float(export_now_w)),
-            Metric(timestamp=metric_ts, name=METRIC_IMPORT_POWER_NOW, datatype=DataType.DOUBLE, value=float(import_now_w)),
+            Metric(timestamp=metric_ts, name=METRIC_EXPORT_POWER_NOW, datatype=DataType.DOUBLE,
+                   value=export_w, is_null=export_w is None),
+            Metric(timestamp=metric_ts, name=METRIC_IMPORT_POWER_NOW, datatype=DataType.DOUBLE,
+                   value=import_w, is_null=import_w is None),
         )
+        if time_source is not None:
+            metrics += (Metric(timestamp=metric_ts, name=METRIC_POWER_TIME_SOURCE, datatype=DataType.STRING,
+                               value=time_source),)
+        return metrics
+
+    def _publish_dbirth(
+        self, device_id: str, export_now_w: Optional[float], import_now_w: Optional[float], *,
+        timestamp_ms: Optional[int] = None, time_source: Optional[str] = None,
+    ) -> None:
+        metrics = self._power_metrics(export_now_w, import_now_w, timestamp_ms, time_source)
         birth = DBirth(timestamp=get_current_timestamp(), seq=self._seq, metrics=metrics)
         self._client.publish(self._device_topic(MessageType.DBIRTH, device_id), birth.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
         self._seq = (self._seq + 1) % 256
@@ -217,7 +288,8 @@ class ParticipantRelay:
     # public API - register/update/deregister participants
     # ------------------------------------------------------------------
     def register_participant(
-        self, device_id: str, export_now_w: float, import_now_w: float, *, timestamp_ms: Optional[int] = None,
+        self, device_id: str, export_now_w: Optional[float], import_now_w: Optional[float], *,
+        timestamp_ms: Optional[int] = None, time_source: Optional[str] = None,
     ) -> None:
         """Publishes DBIRTH for a new participant. If already registered,
         updates values via DDATA instead (idempotent, no duplicate birth).
@@ -231,27 +303,26 @@ class ParticipantRelay:
         vs. Metric timestamp distinction from Emsomat_Shareomat_MQTT_Vertrag.md
         Abschnitt 27 applied across the WAN hop too."""
         if device_id in self._participants:
-            self.update_participant(device_id, export_now_w, import_now_w, timestamp_ms=timestamp_ms)
+            self.update_participant(device_id, export_now_w, import_now_w, timestamp_ms=timestamp_ms, time_source=time_source)
             return
         self._participants[device_id] = (export_now_w, import_now_w)
+        self._participant_meta[device_id] = (timestamp_ms, time_source)
         if self._connected.is_set():
-            self._publish_dbirth(device_id, export_now_w, import_now_w, timestamp_ms=timestamp_ms)
+            self._publish_dbirth(device_id, export_now_w, import_now_w, timestamp_ms=timestamp_ms, time_source=time_source)
 
     def update_participant(
-        self, device_id: str, export_now_w: float, import_now_w: float, *, timestamp_ms: Optional[int] = None,
+        self, device_id: str, export_now_w: Optional[float], import_now_w: Optional[float], *,
+        timestamp_ms: Optional[int] = None, time_source: Optional[str] = None,
     ) -> None:
         """Publishes DDATA for an already-registered participant. See
         register_participant() for `timestamp_ms`."""
         if device_id not in self._participants:
             raise ValueError(f"participant {device_id!r} is not registered - call register_participant() first")
         self._participants[device_id] = (export_now_w, import_now_w)
+        self._participant_meta[device_id] = (timestamp_ms, time_source)
         if not self._connected.is_set():
             return
-        metric_ts = timestamp_ms if timestamp_ms is not None else get_current_timestamp()
-        metrics = (
-            Metric(timestamp=metric_ts, name=METRIC_EXPORT_POWER_NOW, datatype=DataType.DOUBLE, value=float(export_now_w)),
-            Metric(timestamp=metric_ts, name=METRIC_IMPORT_POWER_NOW, datatype=DataType.DOUBLE, value=float(import_now_w)),
-        )
+        metrics = self._power_metrics(export_now_w, import_now_w, timestamp_ms, time_source)
         data = DData(timestamp=get_current_timestamp(), seq=self._seq, metrics=metrics)
         self._client.publish(self._device_topic(MessageType.DDATA, device_id), data.encode(include_dtypes=True), qos=_QOS_NON_STATE, retain=False)
         self._seq = (self._seq + 1) % 256
@@ -261,6 +332,7 @@ class ParticipantRelay:
         if device_id not in self._participants:
             return
         del self._participants[device_id]
+        self._participant_meta.pop(device_id, None)
         if not self._connected.is_set():
             return
         now_ms = get_current_timestamp()

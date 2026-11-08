@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Live-Messquelle zuordnen{% endblock %}
+{% block heading %}Live-Messquelle zuordnen{% endblock %}
+{% block content %}
+<div class="card">
+  <p>Offizieller Messpunkt: <b>{{ meter.label }}</b> · <span style="font-family:monospace">{{ meter.meter_id }}</span> · {{ meter.participant_id }}</p>
+  {% if existing %}
+  <p class="ts">Bereits zugeordnet:
+    {% for s in existing %}{{ s.source_key.split(':', 1)[-1] }} ({{ state_labels[s.state] }}){{ ', ' if not loop.last }}{% endfor %}.
+    Eine neue Quelle läuft zuerst in Prüfung. Beim Aktivieren löst sie die bisherige aktive Quelle ab.</p>
+  {% endif %}
+  {% if not adapter %}
+  <p>Art der Live-Messquelle wählen:</p>
+  <div class="actions-row">
+    {% for value, label in source_choices %}
+    <a class="btn btn-muted" href="{{ url_for('live_energy', suffix='/' ~ (meter.meter_id | path_segment) ~ '/assign') }}?adapter={{ value }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <h3>{{ adapter_label }}</h3>
+  <form class="form-card" method="post" action="{{ url_for('live_energy', suffix='/' ~ (meter.meter_id | path_segment) ~ '/assign') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="adapter" value="{{ adapter }}">
+
+    {% if adapter == 'emsomat_local' %}
+    <div class="field">
+      <label>Sparkplug-Knoten</label>
+      {% if configured_edge_node %}
+      <div style="font-family:monospace">{{ configured_edge_node }}</div>
+      <div class="field-hint">Der in der Konfiguration eingetragene lokale Emsomat.</div>
+      {% else %}
+      <div class="notice-warn">In der Konfiguration ist kein lokaler Emsomat-Knoten eingetragen.</div>
+      {% endif %}
+    </div>
+    {% elif adapter == 'wan_sparkplug' %}
+    <div class="field">
+      <label for="edge_node_id">Standort (edge_node_id)</label>
+      <input type="text" id="edge_node_id" name="edge_node_id" required maxlength="64">
+    </div>
+    <div class="field">
+      <label for="device_id">Gerät (device_id)</label>
+      <input type="text" id="device_id" name="device_id" required maxlength="64">
+      {% if unknown_pairs %}<div class="field-hint">Zuletzt gesehen, noch nicht zugeordnet: {% for e, d in unknown_pairs %}{{ e }} / {{ d }}{{ ', ' if not loop.last }}{% endfor %}</div>{% endif %}
+    </div>
+    <div class="field-hint">Vertrauenswürdig ist die Quelle erst, wenn die Broker-ACL dieses Login an den Standort bindet. Der Name im Topic allein beweist nichts.</div>
+    {% elif adapter == 'ha_mqtt' %}
+    <div class="notice-warn">Der Eingang für Home-Assistant-Sender ist noch nicht in Betrieb. Die Quelle kann bereits als geplant eingetragen werden.</div>
+    <div class="field">
+      <label for="device_id">Kennung des Senders</label>
+      <input type="text" id="device_id" name="device_id" required maxlength="64">
+    </div>
+    <div class="field"><label for="import_entity">Entity Netzbezug</label><input type="text" id="import_entity" name="import_entity" placeholder="sensor.grid_import_power"></div>
+    <div class="field"><label for="export_entity">Entity Netzeinspeisung</label><input type="text" id="export_entity" name="export_entity" placeholder="sensor.grid_export_power"></div>
+    <div class="field"><label for="signed_entity">Entity mit Vorzeichen (statt der beiden oben)</label><input type="text" id="signed_entity" name="signed_entity"></div>
+    <div class="field"><label for="evidence_entity">Nachweis-Entity (optional, z. B. Telegrammzeit)</label><input type="text" id="evidence_entity" name="evidence_entity"></div>
+    {% else %}
+    <div class="notice-warn">Der Eingang für Gateways ist noch nicht in Betrieb. Die Quelle kann bereits als geplant eingetragen werden.</div>
+    <div class="field">
+      <label for="device_id">Registrierte Geräte-Kennung</label>
+      <input type="text" id="device_id" name="device_id" required maxlength="64">
+    </div>
+    {% endif %}
+
+    <div class="field">
+      <label for="measurement_mode">Messart</label>
+      <select id="measurement_mode" name="measurement_mode">
+        <option value="import_export">Bezug und Einspeisung getrennt</option>
+        {% if adapter in ('ha_mqtt', 'gateway_mqtt') %}<option value="signed">Ein Wert mit Vorzeichen</option>{% endif %}
+        {% if can_be_import_only %}<option value="import_only">Nur Bezug (Einspeisung ausgeschlossen)</option>{% endif %}
+      </select>
+      <div class="field-hint">Fehlende Einspeisung wird nie als 0 W gewertet, ausser «Nur Bezug» ist hier ausdrücklich gewählt und begründet.</div>
+    </div>
+    {% if adapter in ('ha_mqtt', 'gateway_mqtt') %}
+    <div class="field">
+      <label for="sign_convention">Vorzeichenregel (nur bei einem Wert mit Vorzeichen)</label>
+      <select id="sign_convention" name="sign_convention">
+        <option value="">bitte wählen</option>
+        <option value="positive_is_import">positiv = Bezug</option>
+        <option value="positive_is_export">positiv = Einspeisung</option>
+      </select>
+    </div>
+    {% endif %}
+    {% if can_be_import_only %}
+    <div class="field">
+      <label for="no_export_note">Begründung bei «Nur Bezug»</label>
+      <input type="text" id="no_export_note" name="no_export_note" maxlength="300" placeholder="z. B. keine Erzeugung und kein Speicher am Anschluss">
+    </div>
+    {% endif %}
+    <div class="field">
+      <label for="max_power_w">Maximale Leistung am Anschluss (W)</label>
+      <input type="number" id="max_power_w" name="max_power_w" min="1" max="1000000" step="1" required value="{{ default_max_power }}">
+      <div class="field-hint">Höhere Werte gelten als ungültig.</div>
+    </div>
+    <div class="field">
+      <label for="freshness_evidence">Nachweisstufe der Messaktualität</label>
+      <select id="freshness_evidence" name="freshness_evidence">
+        {% for value, label in evidence_labels.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+      </select>
+      <div class="field-hint">Emsomat erreicht heute Stufe C: Einzelwerte sind sichtbar, eine vollständige LEG-Bilanz ist damit nicht möglich.</div>
+    </div>
+    <div class="actions-row">
+      <button type="submit" class="btn">Als geplant eintragen und prüfen</button>
+      <a class="btn btn-muted" href="{{ url_for('live_energy') }}">Abbrechen</a>
+    </div>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
