@@ -594,6 +594,14 @@ def test_cookie_path_is_the_ingress_path_only_behind_the_supervisor(server):
 def test_public_forms_are_size_limited(server):
     """Round 6 P2-04: /login and /first-login refuse oversized bodies with 413 before reading them."""
     b = Browser(server["port"])
-    status, _, _ = b.request("POST", "/login", body=b"x" * 20000,
-                             headers={"Content-Type": "application/x-www-form-urlencoded"})
+    # The server answers without reading the body, so under load the client can
+    # lose the race while still sending. A transport retry, the expected status stays.
+    for attempt in range(3):
+        try:
+            status, _, _ = b.request("POST", "/login", body=b"x" * 20000,
+                                     headers={"Content-Type": "application/x-www-form-urlencoded"})
+            break
+        except ConnectionError:
+            if attempt == 2:
+                raise
     assert status == 413

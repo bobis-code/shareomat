@@ -52,7 +52,6 @@ from shareomat.web.pages import (
     dashboard,
     external_data,
     invoices,
-    live_energy,
     meter_data,
     meters,
     participants,
@@ -61,7 +60,7 @@ from shareomat.web.pages import (
     setup,
     tariffs,
 )
-from shareomat.web.rendering import FormError, Redirect, RequestContext, check_csrf, upload_flash_message
+from shareomat.web.rendering import FormError, Redirect, RequestContext, check_csrf, render_page, upload_flash_message
 from shareomat.web.reports import report_path
 from shareomat.web.state import get_state
 
@@ -81,6 +80,31 @@ _MAX_UPLOAD_SECONDS = 120  # Total time budget per upload
 _MAX_FORM_BYTES = 2 * 1024 * 1024        # normal admin forms (logged in)
 _MAX_PUBLIC_FORM_BYTES = 16 * 1024       # login / first-login / logout (reachable without a session)
 
+
+class _LiveEnergyUnavailable:
+    """Stands in for the Live-Energie page if it cannot be loaded."""
+
+    @staticmethod
+    def handle_get(ctx: RequestContext) -> str:
+        return render_page(
+            "placeholders/coming_soon.html", ctx, "live_energy", title="Live-Energie nicht verfügbar",
+            description="Live-Energie konnte nicht geladen werden. Details stehen im Add-on-Log. Verwaltung und Abrechnung sind nicht betroffen.",
+        )
+
+    @staticmethod
+    def handle_post(ctx: RequestContext) -> None:
+        raise FormError("Live-Energie ist derzeit nicht verfügbar.")
+
+
+def _load_live_energy_page():
+    try:
+        from shareomat.web.pages import live_energy
+    except Exception:
+        logger.exception("Live-Energie page could not be loaded; the rest of the administration continues")
+        return _LiveEnergyUnavailable
+    return live_energy
+
+
 _PAGE_MODULES = {
     "": dashboard,
     "account": account,
@@ -96,7 +120,7 @@ _PAGE_MODULES = {
     "invoices": invoices,
     "automation": automation,
     "reports": reports_page,
-    "live_energy": live_energy,
+    "live_energy": _load_live_energy_page(),
     "settings": settings_page,
     "external_data": external_data,
     "apps": apps,
@@ -763,24 +787,85 @@ class _Handler(BaseHTTPRequestHandler):
                 temp_dest.unlink()
 
 
+class _TrackingHTTPServer(ThreadingHTTPServer):
+    """Knows how many requests are still running, so a shutdown can wait for them."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._active = 0
+        self._idle = threading.Condition()
+
+    def process_request(self, request, client_address) -> None:
+        with self._idle:
+            self._active += 1
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_ended()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_ended()
+
+    def _request_ended(self) -> None:
+        with self._idle:
+            self._active -= 1
+            self._idle.notify_all()
+
+    def wait_until_idle(self, timeout: float) -> int:
+        """Wait for running requests; returns how many are still running at the end."""
+        with self._idle:
+            self._idle.wait_for(lambda: self._active == 0, timeout=timeout)
+            return self._active
+
+
 class WebServer(threading.Thread):
     """Daemon thread running the admin web server (standalone or behind HA Ingress)."""
 
     def __init__(self, port: int = 8099) -> None:
         super().__init__(name="shareomat-web", daemon=True)
         self._port = port
-        self._server: ThreadingHTTPServer | None = None
+        self._server: _TrackingHTTPServer | None = None
+        self._state_lock = threading.Lock()
+        self._stop_requested = False
 
-    def stop(self) -> None:
-        """Gracefully shut down the HTTP server."""
-        if self._server:
-            self._server.shutdown()
+    def stop(self, timeout: float = 15.0) -> bool:
+        """Accept nothing new, then let running requests finish, for at most `timeout` seconds.
+
+        Handler threads are daemons: one still running at the deadline, for
+        example because of a blocked client, ends with the process, and SQLite
+        rolls back its open transaction. Returns True if all requests finished.
+        Safe to call twice and before the server has started.
+        """
+        with self._state_lock:
+            if self._stop_requested:
+                return True
+            self._stop_requested = True
+            server = self._server
+        if server is None:
+            return True
+        server.shutdown()
+        server.server_close()
+        still_running = server.wait_until_idle(timeout)
+        if still_running:
+            logger.warning("Web server stopped with %d request(s) still running after %.0f s", still_running, timeout)
+            return False
+        logger.info("Web server stopped, no request running")
+        return True
 
     def run(self) -> None:
         """Start the HTTP server and serve until stop() shuts it down."""
         try:
-            self._server = ThreadingHTTPServer(("0.0.0.0", self._port), _Handler)
+            server = _TrackingHTTPServer(("0.0.0.0", self._port), _Handler)
+            with self._state_lock:
+                if self._stop_requested:
+                    server.server_close()
+                    return
+                self._server = server
             logger.info("Web server listening on port %d", self._port)
-            self._server.serve_forever()
+            server.serve_forever()
         except Exception as exc:
             logger.error("Web server error: %s", exc)

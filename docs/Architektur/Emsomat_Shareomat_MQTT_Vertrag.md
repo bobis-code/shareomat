@@ -7,6 +7,11 @@ abgeschlossen (Abschnitt 1-30). **Implementiert und per echtem lokalen
 Broker-Test verifiziert (2026-08-22):** Emsomat-Seite (`Emsomat/sparkplug/`,
 Emsomat-Repo) und Shareomat-Seite (`shareomat/sparkplug/`, dieses Repo,
 Primary Host Application + eigene Edge-Node-Identität für Marktteilnehmer).
+**Nachtrag 08.11.2026 (ADR-0007; am echten Broker noch nicht geprüft):** Emsomat
+sendet ungültige Leistungswerte als `is_null`, nie als 0 W, und mit
+`Market/PowerTimeSource`. Shareomat prüft die `seq`, fordert bei Lücken begrenzt
+einen Rebirth an und sendet Coordinator-Daten nur an einen verbundenen Emsomat.
+Die Daten dafür liegen in `coordinator.db`.
 **Cross-House** (Shareomat↔Internet/Relay↔fremder Shareomat) hat eine eigene,
 inzwischen verbindliche Spezifikation:
 `docs/Architektur/Shareomat_CrossHouse_Sparkplug_Vertrag.md` — implementiert

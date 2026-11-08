@@ -44,7 +44,7 @@ def test_setup_live_publishes_discovery_and_runs(tmp_path):
 def test_live_failure_does_not_stop_the_application(tmp_path, monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("kaputt")
-    monkeypatch.setattr(app, "LiveStatusService", boom)
+    monkeypatch.setattr("shareomat.live.service.LiveStatusService", boom)
     assert app._setup_live(tmp_path / "x.db", _runtime(), None) is None
 
 
@@ -82,7 +82,7 @@ def test_without_live_layer_wan_accepts_nothing(monkeypatch):
     monkeypatch.setattr(app, "SparkplugHost", FakeHost)
     monkeypatch.setattr(app, "build_wan_uplink", lambda *a, **k: FakeRelay())
     monkeypatch.setattr(app, "WanDownlink", FakeDownlink)
-    runtime = _runtime(sparkplug=SparkplugConfig(enabled=True, emsomat_edge_node_id="EMS"), wan=WanConfig(enabled=True))
+    runtime = _runtime(sparkplug=SparkplugConfig(enabled=True, emsomat_edge_node_id="EMS"), wan=WanConfig(enabled=True, broker="b", group_id="g", edge_node_id="e", own_participant_id="P1"))
     app._setup_sparkplug(runtime, None)
     assert captured["allowed_source"]("ANY", "ANY") is False
     assert WanDownlink is not FakeDownlink

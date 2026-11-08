@@ -269,7 +269,7 @@ def _active(service, db_path):
 def test_discovery_defines_expected_read_only_entities():
     client = FakeClient()
     publish_live_discovery(client, _config())
-    config = {t: json.loads(p) for t, p, _, _ in client.published}
+    config = {t: json.loads(p) for t, p, _, _ in client.published if t.endswith("/config")}
     assert len(config) == len(LIVE_SENSORS)
     ids = {c["default_entity_id"] for c in config.values()}
     assert {"sensor.shareomat_live_netzbezug", "sensor.shareomat_live_netzeinspeisung", "sensor.shareomat_live_messwert_qualitaet",
@@ -343,7 +343,7 @@ def test_status_attributes_contain_no_other_participants(service, db_path):
     assert "P2" not in text and "M2" not in text and attributes["messpunkte_erwartet"] == 2
 
 
-def test_publisher_retains_and_only_republishes_changes(service, db_path):
+def test_publisher_does_not_retain_and_only_republishes_changes(service, db_path):
     _active(service, db_path)
     _deliver(service)
     client = FakeClient()
@@ -351,7 +351,7 @@ def test_publisher_retains_and_only_republishes_changes(service, db_path):
     status = service.tick()
     publisher(service, status)
     first = len(client.published)
-    assert first > 0 and all(retain for *_, retain in client.published)
+    assert first > 0 and not any(retain for *_, retain in client.published)
     publisher(service, status)
     assert len(client.published) == first
 

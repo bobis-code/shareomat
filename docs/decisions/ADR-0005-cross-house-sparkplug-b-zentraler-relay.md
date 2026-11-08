@@ -7,6 +7,10 @@ Broker-Test verifiziert). Zentraler Relay-Broker selbst noch nicht
 produktiv betrieben — siehe
 `docs/Architektur/Zentraler_WAN_Broker_Deployment_Vorschlag.md`.
 
+Nachtrag 08.11.2026: Die Aussage «nicht aus einer separaten Registrierung» gilt
+für die Eigentümerschaft am Broker. Zusätzlich nimmt der Downlink seit ADR-0007
+nur zugeordnete Paare an. Vor produktiver Nutzung offen: AUD-03, AUD-04, AUD-07.
+
 ## Kontext
 
 Eine LEG kann mehrere Standorte (Häuser) mit je eigenem Shareomat umfassen

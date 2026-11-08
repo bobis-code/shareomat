@@ -37,8 +37,10 @@ Notes:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
+import signal
 import sys
 import threading
 import time
@@ -47,7 +49,7 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from shareomat.config import LegConfig, RuntimeConfig, load_runtime_config, validate_leg_config
+from shareomat.config import LegConfig, RuntimeConfig, SparkplugConfig, WanConfig, load_runtime_config, validate_leg_config
 from shareomat.core.leg_runner import run
 from shareomat.core.pipeline.consumption_forecast import LOOKBACK_WEEKS, compute_leg_demand_forecast
 from shareomat.core.pipeline.export_price_forecast import fetch_and_persist_day_ahead_prices
@@ -60,13 +62,10 @@ from shareomat.database.meter_readings import list_meter_readings
 from shareomat.database.settings import OperationSettings, get_operation_settings
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
-from shareomat.ha.live_sensors import LiveHaPublisher, publish_live_discovery
 from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
-from shareomat.live.adapters.sparkplug import EmsomatLocalAdapter, WanSparkplugAdapter
-from shareomat.live.service import LiveStatusService
-from shareomat.models.live_source import ADAPTER_EMSOMAT_LOCAL
 from shareomat.sparkplug import coordinator_mapping
 from shareomat.sparkplug.bridge import mirror_host_to_uplink
+from shareomat.sparkplug.coordinator_store import coordinator_db_path, ensure_separate_from, init_coordinator_db
 from shareomat.sparkplug.host import SparkplugHost
 from shareomat.sparkplug.participant_relay import ParticipantRelay
 from shareomat.sparkplug.wan_downlink import WanDownlink
@@ -83,8 +82,32 @@ _TZ = ZoneInfo(os.environ.get("SHAREOMAT_TZ", "Europe/Zurich"))
 _MIN_RECOMPUTE_INTERVAL_SECONDS = 1800  # weekday/time-of-day patterns don't change minute to minute
 _MIN_EXPORT_PRICE_FETCH_INTERVAL_SECONDS = 3600  # ENTSO-E day-ahead publishes ~once/day around noon CET
 
+# How long the coordinator tasks wait for Emsomat's NBIRTH after the first cycle of a start.
+_COORDINATOR_ONLINE_WAIT_SECONDS = 30.0
+# How long a shutdown waits for running coordinator tasks. Home Assistant stops an add-on after 10 s.
+_COORDINATOR_STOP_TIMEOUT_SECONDS = 5.0
+# Web requests and a running settlement together. With the coordinator (5 s), Sparkplug and the
+# live layer this stays below the 30 s in ha_addon/config.yaml, after which Home Assistant kills the add-on.
+_SHUTDOWN_DRAIN_SECONDS = 15.0
+
 logger = logging.getLogger(__name__)
 _RUN_LOCK = threading.Lock()
+_COORDINATOR_LOCK = threading.Lock()
+_COORDINATOR_STOP = threading.Event()
+_COORDINATOR_THREAD_LOCK = threading.Lock()
+_coordinator_thread: threading.Thread | None = None
+_SHUTDOWN = threading.Event()
+_CLEANUP_STARTED = threading.Event()
+_shutdown_deadline = 0.0
+_reported_communication_problem = ""
+
+
+def _coordinator_store(db_path: Path) -> Path:
+    """coordinator.db, created on first use. Forecasts and prices are never written to shareomat.db."""
+    store = coordinator_db_path(db_path)
+    ensure_separate_from(db_path, store)
+    init_coordinator_db(store)
+    return store
 
 
 def _maybe_recompute_demand_forecast(db_path: Path) -> None:
@@ -96,12 +119,13 @@ def _maybe_recompute_demand_forecast(db_path: Path) -> None:
     every cycle would be wasted work — publish always reflects the most
     recently stored forecast regardless of whether this call recomputed it.
     """
+    store = _coordinator_store(db_path)
     now = datetime.now(timezone.utc)
-    last = latest_computed_at(db_path, scope="leg")
+    last = latest_computed_at(store, scope="leg")
     if last is None or (now - last).total_seconds() >= _MIN_RECOMPUTE_INTERVAL_SECONDS:
         readings = list_meter_readings(db_path, start=now - timedelta(weeks=LOOKBACK_WEEKS), end=now)
         points = compute_leg_demand_forecast(readings, now=now, horizon_days=7, tz=_TZ)
-        save_consumption_forecast(db_path, points)
+        save_consumption_forecast(store, points)
 
 
 def _maybe_recompute_export_price_forecast(db_path: Path) -> None:
@@ -113,10 +137,11 @@ def _maybe_recompute_export_price_forecast(db_path: Path) -> None:
     token = get_external_data_settings(db_path).entsoe_api_token
     if not token:
         return
+    store = _coordinator_store(db_path)
     now = datetime.now(timezone.utc)
-    last = latest_fetched_at(db_path)
+    last = latest_fetched_at(store)
     if last is None or (now - last).total_seconds() >= _MIN_EXPORT_PRICE_FETCH_INTERVAL_SECONDS:
-        fetch_and_persist_day_ahead_prices(db_path, api_token=token)
+        fetch_and_persist_day_ahead_prices(store, api_token=token)
 
 
 def _publish_coordinator_sparkplug(sparkplug_host: SparkplugHost, config: LegConfig, db_path: Path) -> None:
@@ -139,13 +164,14 @@ def _publish_coordinator_sparkplug(sparkplug_host: SparkplugHost, config: LegCon
     # findet Emsomats slot_for(now) ("letzter Slot <= ts") keinen Treffer
     # fuer den aktuellen Zeitpunkt (siehe Testfund beim Bau dieser Abfrage).
     query_start = now - timedelta(days=1)
-    demand_points = list_consumption_forecasts(db_path, scope="leg", start=query_start)
+    store = _coordinator_store(db_path)
+    demand_points = list_consumption_forecasts(store, scope="leg", start=query_start)
     near_term = [p for p in demand_points if now <= p.slot_start < now + timedelta(days=2)]
     ok_count = sum(1 for p in near_term if p.quality == "ok")
     demand_quality = "ok" if near_term and ok_count / len(near_term) >= 0.5 else "insufficient_data"
     demand_method = demand_points[0].method if demand_points else ""
 
-    price_points = list_day_ahead_prices(db_path, start=query_start, end=now + timedelta(days=7))
+    price_points = list_day_ahead_prices(store, start=query_start, end=now + timedelta(days=7))
 
     feed_in_series = resolve_producer_rate_series(
         config.tariff, config.processing, start=now, horizon_hours=48, tz=_TZ,
@@ -205,6 +231,121 @@ def _update_web_state(runtime: RuntimeConfig, status: str, error: str = "") -> N
         logger.warning("Web state update failed: %s", exc)
 
 
+def _report_communication_problem(message: str) -> None:
+    """Log a communication configuration problem once and show it on the dashboard."""
+    global _reported_communication_problem
+    if message == _reported_communication_problem:
+        return
+    _reported_communication_problem = message
+    logger.error("Sparkplug/WAN configuration is invalid, billing continues without it: %s", message)
+    try:
+        get_web_state().add_warning(f"Sparkplug-/WAN-Konfiguration ungültig, die Abrechnung läuft weiter: {message}")
+    except Exception as exc:
+        logger.debug("Could not publish the communication warning to the web UI: %s", exc)
+
+
+def _validate_for_billing(config: LegConfig) -> None:
+    """Validate a settlement configuration; only billing errors stop the run.
+
+    The rules stay in validate_leg_config() unchanged. Sparkplug and WAN are not
+    needed to settle: an invalid combination is reported, and the affected
+    connection is not started (_setup_sparkplug), but billing goes on.
+    """
+    try:
+        validate_leg_config(config)
+    except ValueError as exc:
+        validate_leg_config(dataclasses.replace(config, sparkplug=SparkplugConfig(), wan=WanConfig()))
+        _report_communication_problem(str(exc))
+
+
+def _coordinator_step(name: str, step: Callable[[], None]) -> None:
+    """One coordinator step: its failure is logged and affects no other step."""
+    if _COORDINATOR_STOP.is_set():
+        logger.info("Sparkplug coordinator step skipped, shutting down: %s", name)
+        return
+    try:
+        step()
+    except Exception:
+        logger.exception("Sparkplug coordinator step failed: %s", name)
+
+
+def _publish_coordinator_if_running(sparkplug_host: SparkplugHost, config: LegConfig, db_path: Path) -> None:
+    """The check here ends the normal case; SparkplugHost itself closes the race with its stop()."""
+    if _COORDINATOR_STOP.is_set():
+        logger.info("LEG data for Emsomat not sent, shutting down")
+        return
+    _publish_coordinator_sparkplug(sparkplug_host, config, db_path)
+
+
+def _run_coordinator_tasks(sparkplug_host: SparkplugHost, config: LegConfig, db_path: Path) -> None:
+    """Forecast, price fetch and LEG data for Emsomat (automatic, only with Emsomat online).
+
+    Runs outside _RUN_LOCK: a slow price server or a failing forecast can neither
+    delay nor block a settlement run. Forecast and prices are only ever used for
+    this message, so without an Emsomat session there is nothing to do.
+    """
+    if not _COORDINATOR_LOCK.acquire(blocking=False):
+        logger.debug("Sparkplug coordinator tasks already running, skipped")
+        return
+    try:
+        deadline = time.monotonic() + _COORDINATOR_ONLINE_WAIT_SECONDS
+        while not sparkplug_host.emsomat_online and time.monotonic() < deadline:
+            if _COORDINATOR_STOP.wait(0.2):
+                return
+        if not sparkplug_host.emsomat_online:
+            logger.info("Emsomat is not online: no forecast, price fetch or LEG data in this cycle")
+            return
+        _coordinator_step("demand forecast", lambda: _maybe_recompute_demand_forecast(db_path))
+        _coordinator_step("export price forecast", lambda: _maybe_recompute_export_price_forecast(db_path))
+        _coordinator_step("LEG data to Emsomat", lambda: _publish_coordinator_if_running(sparkplug_host, config, db_path))
+    finally:
+        _COORDINATOR_LOCK.release()
+
+
+def _start_coordinator_tasks(sparkplug_host: SparkplugHost, config: LegConfig, db_path: Path) -> None:
+    """At most one worker; none once a shutdown has begun. Daemon, so that a
+    request that cannot be aborted can never keep the process alive."""
+    global _coordinator_thread
+    with _COORDINATOR_THREAD_LOCK:
+        if _COORDINATOR_STOP.is_set() or _SHUTDOWN.is_set():
+            logger.info("Sparkplug coordinator tasks not started, shutting down")
+            return
+        if _coordinator_thread is not None and _coordinator_thread.is_alive():
+            logger.debug("Sparkplug coordinator tasks still running, not started again")
+            return
+        try:
+            thread = threading.Thread(
+                target=_run_coordinator_tasks, args=(sparkplug_host, config, db_path),
+                name="shareomat-coordinator", daemon=True,
+            )
+            thread.start()
+        except Exception:
+            logger.exception("Sparkplug coordinator tasks could not be started")
+            return
+        _coordinator_thread = thread
+
+
+def _stop_coordinator() -> None:
+    """Stop the coordinator before the Sparkplug clients go away.
+
+    A running forecast or HTTP request cannot be interrupted. After the
+    timeout it is left behind: it can still finish writing to coordinator.db,
+    but SparkplugHost refuses anything it tries to send once it is stopped.
+    """
+    with _COORDINATOR_THREAD_LOCK:
+        _COORDINATOR_STOP.set()
+        thread = _coordinator_thread
+    if thread is None or not thread.is_alive():
+        return
+    logger.info("Waiting for the Sparkplug coordinator tasks to finish")
+    thread.join(_COORDINATOR_STOP_TIMEOUT_SECONDS)
+    if thread.is_alive():
+        logger.warning(
+            "Sparkplug coordinator task still running after %.0f s (forecast or price request cannot be "
+            "aborted); left behind, it sends nothing more", _COORDINATOR_STOP_TIMEOUT_SECONDS,
+        )
+
+
 def _run_safe_cycle(
     runtime: RuntimeConfig, db_path: Path, mqtt_client: object | None,
     sparkplug_host: SparkplugHost | None = None,
@@ -216,6 +357,9 @@ def _run_safe_cycle(
     protects the inbox, archive, reports, and processed-file state from
     concurrent settlement runs.
     """
+    if _SHUTDOWN.is_set():
+        logger.info("Settlement run skipped: shutting down")
+        return False
     if not _RUN_LOCK.acquire(blocking=False):
         logger.warning("Settlement run skipped: another run is already active")
         try:
@@ -229,7 +373,7 @@ def _run_safe_cycle(
     try:
         try:
             config = build_leg_config(db_path, runtime)
-            validate_leg_config(config)
+            _validate_for_billing(config)
         except IncompleteConfigError as exc:
             logger.info("Settlement run skipped: %s", exc)
             _update_web_state(runtime, "starting", str(exc))
@@ -255,34 +399,67 @@ def _run_safe_cycle(
             # Coordinator-/Market-data stays fresh on the normal cron
             # cadence even on cycles where the inbox had nothing new. Only
             # the local Sparkplug channel (ADR-0004) - no plain-MQTT
-            # fallback if Sparkplug is unavailable (Hard Cut).
+            # fallback if Sparkplug is unavailable (Hard Cut). The work itself
+            # runs in the background, outside the settlement lock.
             if sparkplug_host is not None:
-                try:
-                    _maybe_recompute_demand_forecast(db_path)
-                    _maybe_recompute_export_price_forecast(db_path)
-                    _publish_coordinator_sparkplug(sparkplug_host, config, db_path)
-                except Exception as exc:
-                    logger.error("Sparkplug coordinator publish failed: %s", exc)
+                _start_coordinator_tasks(sparkplug_host, config, db_path)
     finally:
         _RUN_LOCK.release()
 
 
-def _setup_live(db_path: Path, runtime: RuntimeConfig, mqtt_client: object | None) -> LiveStatusService | None:
-    """Start the live layer (ADR-0007). A failure here never touches billing or the admin UI."""
+def _setup_live(db_path: Path, runtime: RuntimeConfig, mqtt_client: object | None) -> object | None:
+    """Start the live layer (ADR-0007). Any failure, including a defect in the
+    package itself, leaves Live-Energie unavailable and everything else running."""
     try:
+        from shareomat.ha.live_sensors import LiveHaPublisher, publish_live_discovery
+        from shareomat.live.service import LiveStatusService
+
         service = LiveStatusService(db_path)
         if mqtt_client is not None:
             publish_live_discovery(mqtt_client, runtime.mqtt)
             service.add_listener(LiveHaPublisher(mqtt_client, runtime.mqtt))
         service.start()
-    except Exception as exc:
-        logger.error("Live layer could not be started: %s", exc)
+    except Exception:
+        logger.exception("Live-Energie is not available; administration and billing continue without it")
         return None
     return service
 
 
+def _live_adapters() -> tuple[type, type, str] | None:
+    """(local adapter, WAN adapter, local adapter name), or None if they cannot be loaded."""
+    try:
+        from shareomat.live.adapters.sparkplug import EmsomatLocalAdapter, WanSparkplugAdapter
+        from shareomat.models.live_source import ADAPTER_EMSOMAT_LOCAL
+    except Exception:
+        logger.exception("Live adapters could not be loaded; Sparkplug runs without Live-Energie")
+        return None
+    return EmsomatLocalAdapter, WanSparkplugAdapter, ADAPTER_EMSOMAT_LOCAL
+
+
+def _wan_config_gaps(wan: WanConfig) -> list[str]:
+    fields = {"wan.broker": wan.broker, "wan.group_id": wan.group_id,
+              "wan.edge_node_id": wan.edge_node_id, "wan.own_participant_id": wan.own_participant_id}
+    return [name for name, value in fields.items() if not value.strip()]
+
+
+def _log_automatic_functions(runtime: RuntimeConfig, db_path: Path, sparkplug_host: object | None) -> None:
+    """State plainly what runs by itself, so that nothing is switched on unnoticed."""
+    if sparkplug_host is None:
+        logger.info("Automatic functions: Sparkplug is not active, no LEG data to Emsomat, no forecast, no price fetch")
+        return
+    try:
+        price_fetch = "active (ENTSO-E/SNB)" if get_external_data_settings(db_path).entsoe_api_token else "off (no ENTSO-E token)"
+    except Exception:
+        price_fetch = "unknown"
+    logger.info(
+        "Automatic functions: Sparkplug receives Emsomat node %s; while Emsomat is online each settlement "
+        "cycle also computes the demand forecast, sends LEG data to Emsomat; price fetch: %s",
+        runtime.sparkplug.emsomat_edge_node_id, price_fetch,
+    )
+
+
 def _setup_sparkplug(
-    runtime: RuntimeConfig, live_service: LiveStatusService | None = None,
+    runtime: RuntimeConfig, live_service: object | None = None,
 ) -> tuple[object | None, object | None, object | None, object | None]:
     """Start the Sparkplug B local channel (Emsomat<->Shareomat) and, if configured, the
     Cross-House WAN channel (Shareomat<->Shareomat). Returns
@@ -295,6 +472,14 @@ def _setup_sparkplug(
     """
     if not runtime.sparkplug.enabled:
         return None, None, None, None
+    if not runtime.sparkplug.emsomat_edge_node_id.strip():
+        _report_communication_problem("sparkplug.emsomat_edge_node_id is empty - Sparkplug is not started")
+        return None, None, None, None
+
+    adapters = _live_adapters() if live_service is not None else None
+    if adapters is None:
+        live_service = None
+    local_adapter, wan_adapter, local_adapter_name = adapters or (None, None, "")
 
     sparkplug_relay = ParticipantRelay(runtime.sparkplug, runtime.mqtt)
     if not sparkplug_relay.start():
@@ -303,7 +488,10 @@ def _setup_sparkplug(
 
     wan_uplink = None
     wan_downlink = None
-    if runtime.wan.enabled and sparkplug_relay is not None:
+    wan_gaps = _wan_config_gaps(runtime.wan) if runtime.wan.enabled else []
+    if wan_gaps:
+        _report_communication_problem(f"missing {', '.join(wan_gaps)} - the WAN connection is not started")
+    if runtime.wan.enabled and not wan_gaps and sparkplug_relay is not None:
         wan_uplink = build_wan_uplink(runtime.wan, client_id=f"{runtime.mqtt.client_id}-wan-uplink")
         if not wan_uplink.start():
             logger.warning("WAN Uplink could not connect — Cross-House uplink disabled")
@@ -313,7 +501,7 @@ def _setup_sparkplug(
         wan_downlink = WanDownlink(
             runtime.wan, sparkplug_relay, client_id=f"{runtime.mqtt.client_id}-wan-downlink",
             allowed_source=live_service.is_registered_wan if live_service is not None else (lambda edge, device: False),
-            live_sink=WanSparkplugAdapter(live_service) if live_service is not None else None,
+            live_sink=wan_adapter(live_service) if live_service is not None else None,
         )
         if live_service is not None:
             live_service.register_unknown_pairs_getter(lambda: wan_downlink.unknown_pairs if wan_downlink else ())
@@ -329,13 +517,10 @@ def _setup_sparkplug(
     sparkplug_host = SparkplugHost(
         runtime.sparkplug, runtime.mqtt,
         on_metrics_changed=_on_emsomat_metrics_changed if wan_uplink is not None else None,
-        live_sink=(
-            EmsomatLocalAdapter(live_service, runtime.sparkplug.emsomat_edge_node_id)
-            if live_service is not None else None
-        ),
+        live_sink=local_adapter(live_service, runtime.sparkplug.emsomat_edge_node_id) if live_service is not None else None,
     )
     if live_service is not None:
-        live_service.register_rebirth_handler(ADAPTER_EMSOMAT_LOCAL, sparkplug_host.request_rebirth)
+        live_service.register_rebirth_handler(local_adapter_name, sparkplug_host.request_rebirth)
     if not sparkplug_host.start():
         logger.warning("Sparkplug Host could not connect — cannot read Emsomat's local Sparkplug data")
         sparkplug_host = None
@@ -344,7 +529,8 @@ def _setup_sparkplug(
 
 
 def _stop_sparkplug(components: tuple[object | None, ...]) -> None:
-    """Stop Sparkplug components in reverse-of-start order (host, then WAN, then relay)."""
+    """Stop the coordinator, then the Sparkplug components (host, then WAN, then relay)."""
+    _stop_coordinator()
     for component in components:
         if component is None:
             continue
@@ -354,15 +540,85 @@ def _stop_sparkplug(components: tuple[object | None, ...]) -> None:
             logger.warning("Sparkplug component stop failed: %s", exc)
 
 
+class _ShutdownSequence:
+    """Stops what was actually started, exactly once and newest first.
+
+    Start order gives the right stop order: daemon threads, web server, running
+    settlement, coordinator and Sparkplug, live layer, MQTT. A failing step does
+    not keep the others from running. Whatever is still alive at the end is
+    logged; the process then exits, and SQLite rolls back unfinished transactions.
+    """
+
+    def __init__(self) -> None:
+        self._steps: list[tuple[str, Callable[[], None]]] = []
+        self._lock = threading.Lock()
+        self._ran = False
+
+    def add(self, name: str, stop: Callable[[], None]) -> None:
+        self._steps.append((name, stop))
+
+    def run(self) -> None:
+        global _shutdown_deadline
+        with self._lock:
+            if self._ran:
+                return
+            self._ran = True
+        _shutdown_deadline = time.monotonic() + _SHUTDOWN_DRAIN_SECONDS
+        _SHUTDOWN.set()
+        _CLEANUP_STARTED.set()
+        _COORDINATOR_STOP.set()
+        for name, stop in reversed(self._steps):
+            try:
+                stop()
+            except Exception:
+                logger.exception("Shutdown step failed: %s", name)
+        others = [t.name for t in threading.enumerate() if t is not threading.current_thread() and t.is_alive()]
+        logger.info("shareomat stopped; threads still alive at exit: %s", ", ".join(others) or "none")
+
+
+def _drain_seconds_left() -> float:
+    return max(0.0, _shutdown_deadline - time.monotonic())
+
+
+def _wait_for_running_settlement() -> None:
+    """A cycle started by the scheduler, the watcher or the web UI may finish, within the deadline."""
+    if not _RUN_LOCK.acquire(timeout=_drain_seconds_left()):
+        logger.warning("A settlement run is still active at the end of the shutdown deadline")
+        return
+    _RUN_LOCK.release()
+
+
+def _request_shutdown(signum, frame) -> None:
+    """SIGTERM and Ctrl+C ask for the shutdown; running work is not torn apart.
+
+    A second signal ends a start that is stuck. During the cleanup itself it is ignored.
+    """
+    if not _SHUTDOWN.is_set():
+        logger.info("Signal %s received, shutting down", signum)
+        _SHUTDOWN.set()
+    elif not _CLEANUP_STARTED.is_set():
+        raise KeyboardInterrupt
+
+
+def _install_signal_handlers() -> None:
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    signal.signal(signal.SIGINT, _request_shutdown)
+
+
+def _wait_for_shutdown() -> None:
+    while not _SHUTDOWN.wait(1):
+        pass
+
+
 def _run_daemon(
     runtime: RuntimeConfig,
     mqtt_client: object | None,
     settings: OperationSettings,
     on_run: Callable[[], None],
     *,
-    sparkplug_components: tuple[object | None, ...] = (),
+    shutdown: _ShutdownSequence,
 ) -> None:
-    """Start all background daemon services and block until stopped."""
+    """Start all background daemon services and block until a shutdown is requested."""
     threads = []
 
     if mqtt_client is not None and runtime.mqtt.command_topic_enabled:
@@ -374,6 +630,7 @@ def _run_daemon(
         t = SchedulerThread(settings.cron_schedule, on_run)
         t.start()
         threads.append(t)
+        shutdown.add("cron scheduler", t.stop)
         logger.info("Cron scheduler started: %s", settings.cron_schedule)
 
     if runtime.paths.share_inbox:
@@ -385,6 +642,7 @@ def _run_daemon(
         )
         share_t.start()
         threads.append(share_t)
+        shutdown.add("share importer", share_t.stop)
         logger.info("Share importer started: %s", runtime.paths.share_inbox)
 
     if runtime.email.enabled:
@@ -408,6 +666,7 @@ def _run_daemon(
         )
         email_t.start()
         threads.append(email_t)
+        shutdown.add("email importer", email_t.stop)
         logger.info("Email importer started: %s@%s", runtime.email.username, runtime.email.imap_host)
 
     watcher = None
@@ -420,6 +679,7 @@ def _run_daemon(
         )
         watcher.start()
         threads.append(watcher)
+        shutdown.add("file watcher", watcher.stop)
         if mqtt_client is not None:
             from shareomat.ha.mqtt_runtime import register_watcher
             register_watcher(watcher)
@@ -435,17 +695,7 @@ def _run_daemon(
         return
 
     logger.info("Daemon mode active — %d service(s) running", service_count)
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Daemon stopped by user")
-    finally:
-        for t in threads:
-            t.stop()
-        if mqtt_client is not None:
-            shutdown_mqtt(mqtt_client)
-        _stop_sparkplug(sparkplug_components)
+    _wait_for_shutdown()
 
 
 def _prepare_login(db_path, runtime) -> None:
@@ -456,7 +706,7 @@ def _prepare_login(db_path, runtime) -> None:
     issue_setup_code(db_path)
 
 
-def _serve_degraded(message: str, *, port: int = 8099) -> None:
+def _serve_degraded(message: str, *, port: int = 8099, shutdown: _ShutdownSequence) -> None:
     """Start the admin web server without a working runtime config, showing the fatal error.
 
     Even a broken technical configuration should not leave the operator
@@ -466,6 +716,7 @@ def _serve_degraded(message: str, *, port: int = 8099) -> None:
     logger.error("Startup failed; serving degraded web UI: %s", message)
     web_server = WebServer(port=port)
     web_server.start()
+    shutdown.add("web server", lambda: web_server.stop(timeout=_drain_seconds_left()))
 
     state = get_web_state()
     state.update(status="error", last_run="-", inbox_count=0, report_count=0, last_error=message)
@@ -474,28 +725,19 @@ def _serve_degraded(message: str, *, port: int = 8099) -> None:
         "fehlerhaft oder unvollständig ist. Bitte die Add-on-Konfiguration bzw. "
         "leg_config.yaml prüfen und Shareomat neu starten."
     )
-
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        web_server.stop()
-        logger.info("Degraded web UI stopped")
+    _wait_for_shutdown()
 
 
-def main() -> None:
-    """Start the Shareomat application."""
-    setup_logging()
-    logger.info("shareomat starting up")
-
+def _start_and_serve(shutdown: _ShutdownSequence) -> None:
+    """Start the components one by one. Each is registered for the shutdown as soon as it runs."""
     if not _RUNTIME_CONFIG_PATH.exists():
-        _serve_degraded(f"Config file not found: {_RUNTIME_CONFIG_PATH}")
+        _serve_degraded(f"Config file not found: {_RUNTIME_CONFIG_PATH}", shutdown=shutdown)
         return
 
     try:
         runtime = load_runtime_config(_RUNTIME_CONFIG_PATH)
     except Exception as exc:
-        _serve_degraded(str(exc))
+        _serve_degraded(str(exc), shutdown=shutdown)
         return
 
     for directory in (runtime.paths.inbox, runtime.paths.archive, runtime.paths.reports, runtime.paths.state):
@@ -508,8 +750,12 @@ def main() -> None:
             logger.info("Legacy configuration imported into %s", db_path)
     except Exception as exc:
         logger.error("Legacy YAML import failed (continuing with an empty database): %s", exc)
+    if _SHUTDOWN.is_set():
+        return
 
     mqtt_client = setup_mqtt(runtime.mqtt)
+    if mqtt_client is not None:
+        shutdown.add("MQTT", lambda: shutdown_mqtt(mqtt_client))
     startup_warnings: list[str] = []
     if runtime.mqtt.enabled and mqtt_client is None:
         startup_warnings.append(
@@ -517,15 +763,31 @@ def main() -> None:
             f"Check mqtt_host '{runtime.mqtt.broker}', port {runtime.mqtt.port}, "
             "credentials, and whether the broker is running."
         )
+    if _SHUTDOWN.is_set():
+        return
 
     live_service = _setup_live(db_path, runtime, mqtt_client)
+    if live_service is None:
+        startup_warnings.append("Live-Energie ist nicht verfügbar. Details stehen im Add-on-Log. Verwaltung und Abrechnung laufen weiter.")
+    else:
+        shutdown.add("live layer", live_service.stop)
+    if _SHUTDOWN.is_set():
+        return
+
     sparkplug_host, sparkplug_relay, wan_uplink, wan_downlink = _setup_sparkplug(runtime, live_service)
-    sparkplug_components = (sparkplug_host, wan_uplink, wan_downlink, sparkplug_relay, live_service)
+    sparkplug_components = tuple(c for c in (sparkplug_host, wan_uplink, wan_downlink, sparkplug_relay) if c is not None)
+    if sparkplug_components:
+        shutdown.add("coordinator and Sparkplug", lambda: _stop_sparkplug(sparkplug_components))
+    _log_automatic_functions(runtime, db_path, sparkplug_host)
+    shutdown.add("running settlement", _wait_for_running_settlement)
+    if _SHUTDOWN.is_set():
+        return
 
     web_server = None
     if runtime.web.enabled:
         web_server = WebServer(port=runtime.web.port)
         web_server.start()
+        shutdown.add("web server", lambda: web_server.stop(timeout=_drain_seconds_left()))
         state = get_web_state()
         state.register_db(db_path)
         state.register_runtime(runtime)
@@ -536,8 +798,13 @@ def main() -> None:
             state.register_emsomat_online(lambda: sparkplug_host.emsomat_online)
         for warning in startup_warnings:
             state.add_warning(warning)
+    if _SHUTDOWN.is_set():
+        return
 
+    # A signal during this cycle only sets the flag: the cycle ends normally, then the shutdown runs.
     _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host)
+    if _SHUTDOWN.is_set():
+        return
 
     settings = get_operation_settings(db_path)
     if should_run_daemon(
@@ -547,23 +814,26 @@ def main() -> None:
         _run_daemon(
             runtime, mqtt_client, settings,
             on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host),
-            sparkplug_components=sparkplug_components,
+            shutdown=shutdown,
         )
     elif web_server is not None:
         # No daemon services, but the admin web UI must keep running.
         logger.info("No daemon services configured — web UI stays up")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            web_server.stop()
-            shutdown_mqtt(mqtt_client)
-            _stop_sparkplug(sparkplug_components)
-            logger.info("shareomat stopped")
-    else:
-        shutdown_mqtt(mqtt_client)
-        _stop_sparkplug(sparkplug_components)
-        logger.info("shareomat done")
+        _wait_for_shutdown()
+
+
+def main() -> None:
+    """Start the Shareomat application and always leave through the same shutdown."""
+    setup_logging()
+    logger.info("shareomat starting up")
+    _install_signal_handlers()
+    shutdown = _ShutdownSequence()
+    try:
+        _start_and_serve(shutdown)
+    except KeyboardInterrupt:
+        logger.info("Start interrupted")
+    finally:
+        shutdown.run()
 
 
 if __name__ == "__main__":

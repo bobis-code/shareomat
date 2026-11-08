@@ -1,6 +1,6 @@
 # Shareomat – Zukunft: vernetzte LEG-Liveplattform
 
-**Status:** Konzept / Ideenstand, noch keine Implementierungsfreigabe  
+**Status:** Konzept. Nur die lokale Live-Ebene (ADR-0007, Schritt 1) ist umgesetzt, alles Weitere bleibt Ideenstand  
 **Datum:** 07.11.2026  
 **Projekt:** Shareomat (LEG-Verwaltung und -Abrechnung)  
 **Verwandtes Projekt:** Emsomat (lokales Energiemanagement)
@@ -306,8 +306,7 @@ Verwechslung mit den „Phasen“ im
 
 > Architektur, Schnittstellen und Sicherheitsgrenzen:
 > [ADR-0007](decisions/ADR-0007-live-energie-ebene-und-teilnehmerportal.md)
-> (angenommen, 5. Fassung; Schritt 1 umgesetzt, Realtest in Home Assistant
-> ausstehend). Darin u. a.: Nachweisstufen der Messaktualität,
+> (angenommen, 6. Fassung; Schritt 1 umgesetzt, Realtests ausstehend). Darin u. a.: Nachweisstufen der Messaktualität,
 > Hysterese für die Anzeige, Regeln für Sparkplug-Messproben,
 > Quellenidentität über Broker-ACL, drei Arten von Live-Messquellen
 > (Emsomat, Home Assistant, externes Gateway) mit höchstens einer aktiven
@@ -326,6 +325,10 @@ Zielbild der App: [`Architektur/Ziel/Shareomat_ Lokale Energie clever nutzen.png
    kein Verbrauch, keine Einzelwerte anderer Haushalte. Bei Defizit erscheint
    «kein Überschuss». Das ersetzt die breitere Anzeige aus Abschnitt 5 und
    beantwortet Frage E3 weitgehend.
+   *Offen (O-3):* Im Pilot sind auf HA Second auch die eigenen Einzelwerte des
+   Betreibers als Sensoren verfügbar (ADR-0007, 3.7). Für den Nachbarn sind das
+   fremde Einzelwerte. Vor dem Pilot ist zu entscheiden, ob sie freigegeben
+   werden oder nur der LEG-Status.
    *Restrisiko:* In einer LEG mit nur zwei Haushalten kann der eine aus dem
    Überschuss und seinem eigenen Wert den Saldo des anderen ausrechnen. Im
    Pilot akzeptiert, im Teilnehmervertrag erwähnen.
@@ -358,6 +361,13 @@ Voraussetzungen und offene Punkte:
 - Die Entity Bridge transportiert nur **Main → Second**. Für den
   **Rückweg** (Messwert des Nachbarn → Shareomat) braucht es einen eigenen
   Eingang, siehe 12.3.
+
+**Tatsächlicher Aufbau des ersten Pilots:** Shareomat → HA Main → HA Entity
+Bridge → HA Second. HA Second läuft beim Betreiber am lokalen Broker. Der Nachbar
+erreicht per Tailscale nur die Oberfläche von HA Second, er bekommt keinen
+Broker-Zugang, zunächst auch ohne eigene Messquelle. Der Entwurf der
+MQTT-Rechte steht in `docs/development/MQTT-Sicherheitskonzept_AUD-02.md` und ist
+noch nicht umgesetzt.
 
 Für viele Teilnehmer später: kein Home Assistant pro Teilnehmer, sondern ein
 Teilnehmerportal (PWA) mit eigenem Login.

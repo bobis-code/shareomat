@@ -2,14 +2,18 @@
 
 ## Status
 
-Angenommen, 5. Fassung (08.11.2026). Schritt 1 ist freigegeben und
-umgesetzt, ein Realtest in Home Assistant steht noch aus (Arbeitsliste LE-05,
-LE-08, LE-09). Die 4. Fassung ergänzt die Unterscheidung von Einzelmessung und
+Angenommen, 6. Fassung (08.11.2026). Schritt 1 ist freigegeben, im Code
+umgesetzt und mit automatischen Tests geprüft. **Realtests mit echtem Broker,
+Home Assistant, WAN und Add-on stehen aus** (Arbeitsliste LE-05, LE-08, LE-09).
+Die 4. Fassung ergänzt die Unterscheidung von Einzelmessung und
 LEG-Bilanz (3.7), Anschlüsse ohne Einspeisemessung (LE-06) und den umgesetzten
 Stand zu K-1 und K-3. Die 5. Fassung korrigiert die Navigation: Live-Energie
 ist ein eigener Menübereich und steht nicht mehr unter BETRIEB. Sie ergänzt die
 Ansichten Übersicht, Messquellen und Diagnose sowie den gespeicherten Zustand
-«Keine Live-Messung vorhanden» (Abschnitt 2 und 5.1).
+«Keine Live-Messung vorhanden» (Abschnitt 2 und 5.1). Die 6. Fassung bildet
+den Stand nach dem Audit vom 08.11.2026 ab. Die folgenden Abschnitte beschreiben
+die Entscheidungen; Abweichungen und offene Punkte stehen unter
+«Umsetzungsstand» am Ende.
 
 Der Projektverantwortliche hat die Grundarchitektur angenommen: ein
 Shareomat-System mit unveränderter Verwaltung, einem zusätzlichen Live-Modul
@@ -28,7 +32,7 @@ Schritt 1 (Zuordnen in der Oberfläche) sind am 07.11.2026 entschieden
 Bezug: [`docs/Zukunft.md`](../Zukunft.md) (Zielbild, §12 Entscheide vom
 07.11.2026), Architekturzeichnung
 `docs/Architektur/Diagramm/Shareomat_Architecture_Whitepaper_light_v4_LEG_Live_App.drawio`
-(Entwurf), [ADR-0004](ADR-0004-sparkplug-b-lokale-emsomat-shareomat-kommunikation.md),
+(Entwurf, nur lokal, nicht im Repository), [ADR-0004](ADR-0004-sparkplug-b-lokale-emsomat-shareomat-kommunikation.md),
 [ADR-0005](ADR-0005-cross-house-sparkplug-b-zentraler-relay.md),
 [ADR-0006](ADR-0006-mqtt-3-1-1-fuer-sparkplug.md).
 
@@ -136,7 +140,7 @@ Bei der Prüfung gefundene Schwächen, die eine Live-Bilanz verfälschen würden
 
 | Zone | Vertrauen | Darf | Darf nie |
 |---|---|---|---|
-| Z1 Verwaltung (Admin-Webserver) | hoch, nur Verwalter | alles wie heute, plus Menü «Live-Energie» | aus dem Internet direkt erreichbar sein |
+| Z1 Verwaltung (Admin-Webserver) | hoch, nur Verwalter | alles wie heute, plus Menübereich LIVE-ENERGIE | aus dem Internet direkt erreichbar sein |
 | Z2 Live-Ingest (im Core) | Eingaben **nicht vertrauenswürdig** | Live-Werte prüfen und in `live.db` schreiben, Stammdaten lesen | in `shareomat.db` schreiben, Abrechnungscode aufrufen |
 | Z3 Portal-API (im Core, eigener Listener) | prüft jede Anfrage | fest definierte, schreibgeschützte Antworten pro Teilnehmer | allgemeine Abfragen, Admin-Funktionen, fremde Teilnehmer |
 | Z4 Teilnehmerportal (eigener Prozess/Container) | niedrig, internetseitig | Seiten ausliefern, Anfragen an die Portal-API weiterreichen | Datenbankdateien, MQTT-Zugang, Admin-Geheimnisse, Netzwerkzugriff ausser zur Portal-API |
@@ -264,6 +268,19 @@ Regeln:
 * **Live-Messwerte in `live.db`**, einer eigenen SQLite-Datei mit kurzer
   Aufbewahrung. In Schritt 1 nur der letzte Wert pro Quelle. Ein Verlauf mit
   Aufbewahrungsfrist kommt später.
+* **Drei Datenbanken im selben Datenverzeichnis:**
+
+  | Datei | Inhalt | Geschrieben von |
+  |---|---|---|
+  | `shareomat.db` | Stammdaten, offizielle Messdaten, Abrechnung, Live-Konfiguration (`live_sources`, `live_source_channels`, `live_meter_states`) | Verwaltung und Abrechnung |
+  | `live.db` | letzter Live-Wert pro Quelle, Statuswechsel | Live-Ebene |
+  | `coordinator.db` | Lastprognose und Day-Ahead-Preise für Emsomat | Coordinator-Aufgaben (ADR-0004) |
+
+  `coordinator.db` ist nötig, weil die Rechnungsfreigabe bei jeder fremden
+  Änderung an `shareomat.db` abbricht (`PRAGMA data_version`), auch bei einer
+  fachlich unbeteiligten Tabelle. Die Inhalte lassen sich jederzeit neu
+  erzeugen, darum gibt es keine Übernahme aus `shareomat.db`. Alte Zeilen dort
+  bleiben unberührt und ungenutzt.
 * **Die Verbindung ist einseitig und eng:**
   * Das Live-Modul liest Stammdaten nur über ein schmales Lesemodul
     `live/masterdata.py`: erwartete Messpunkte, Live-Messquellen,
@@ -497,6 +514,12 @@ das Dreifache des Publikationsintervalls), `max_skew` 30 s, `conflict_w`
   Admin-Seite in Schritt 1 Statuswechsel, Anzeigewechsel und Alter der
   Proben, mit kurzer Aufbewahrung in `live.db`.
 
+**Umsetzungsstand:** Die Parameter stehen zentral in `LiveParams`, aber fest im
+Code, und werden beim Start nicht protokolliert. Der Wert `max_age` 90 s ist
+eine Annahme aus der Umsetzung (Publikationsintervall von Emsomat), kein Entscheid.
+Anzeige von `S` und Wartezeit sowie das Protokoll des Probenalters fehlen
+(Audit AUD-11).
+
 #### 3.7 Einzelmessung und LEG-Bilanz
 
 Zwei getrennte Aussagen mit verschiedenen Bedingungen:
@@ -606,7 +629,7 @@ heute schon gemeinsam in einer Nachricht mit gleichem Zeitstempel
    NDEATH/DDEATH. Mit jedem neuen BIRTH beginnt eine neue Sitzung. Proben der
    alten Sitzung verfallen sofort (`MISSING`). Werte im BIRTH sind eine neue
    Probe und werden wie jede andere geprüft, insbesondere auf ihr Alter. Ein
-   NDEATH mit veraltetem `bdSeq` wird wie heute ignoriert. DDATA ohne
+   NDEATH mit veraltetem `bdSeq` wird lokal ignoriert; über WAN fehlt diese Prüfung noch (Audit AUD-07). DDATA ohne
    bekanntes DBIRTH wird verworfen, ebenfalls wie heute. Die Prüfung von
    `sample_seq` beginnt in jeder Sitzung neu, `measured_at` muss trotzdem
    frisch sein.
@@ -687,7 +710,9 @@ heute schon gemeinsam in einer Nachricht mit gleichem Zeitstempel
   (`edge_node_id`, `device_id`) weiter. Eine `device_id` kann nur einem
   Standort zugeordnet sein (`database/live_sources.py`), weil Emsomat einen
   fremden Teilnehmer nur unter der `device_id` kennt. So überschreibt ein
-  zweiter Standort den ersten nicht.
+  zweiter Standort den ersten nicht. **Offen vor produktiver WAN-Nutzung:**
+  Eine Quelle in `testing` erreicht Emsomat bereits (AUD-04), und nach dem
+  Deaktivieren bleibt ihr letzter Wert dort stehen (AUD-03).
 
 #### 4.3 Art B: Home-Assistant-Sensoren (Schritt 2, noch nicht umgesetzt)
 
@@ -781,10 +806,10 @@ dieselben Regeln wie bei EA-1 und bei allen anderen Quellen.
 
 | ID | Schnittstelle | Richtung | Inhalt | Schritt |
 |---|---|---|---|---|
-| I1 | `live.service.LiveStatusService` (Python, im Core) | lesend | `leg_status()` und `meter_values()`. Einzige Quelle für alle Ausgaben. | 1 |
-| I2 | HA-Sensoren über `ha/mqtt_runtime` | Core → HA | `sensor.shareomat_leg_ueberschuss` (kW: im Anzeigezustand `UEBERSCHUSS` die angezeigte Zahl nach 3.5, bei `KEIN_UEBERSCHUSS` 0, bei Status ≠ `VOLLSTÄNDIG` der Zustand `unknown`), `sensor.shareomat_leg_live_status` (Enum `ueberschuss`, `kein_ueberschuss`, `unsicher`, `keine_daten`), `sensor.shareomat_leg_vollstaendigkeit` (%), dazu für die eigene aktive Emsomat-Quelle `sensor.shareomat_live_netzbezug`, `_netzeinspeisung`, `_messwert_qualitaet`, `_verbindung`, `_messzeitpunkt`, `_zeitquelle`. Retained, mit Availability, ohne Befehlskanal und ohne Daten anderer Teilnehmer (`ha/live_sensors.py`). | 1 |
-| I3 | Admin-Bereich «LIVE-ENERGIE» | Verwalter ↔ Core | Übersicht, Messquellen mit «Live-Messquelle zuordnen» und Diagnose (5.1) | 1 (Übersicht, Zuordnen für `emsomat_local` und `wan_sparkplug`), 2 (Arten B und C-Gateway) |
-| I4 | Rücksignal an Emsomat | Core → Emsomat | bestehender Coordinator-NCMD-Mechanismus mit `ValidUntil`, nur bei `VOLLSTÄNDIG`. Emsomat-seitig eigene Umsetzung. | später |
+| I1 | `live.service.LiveStatusService` (Python, im Core) | lesend | `leg_status()`, `own_reading()`, `source_reading()` und `meter_rows()`. Einzige Quelle für alle Ausgaben. | 1 |
+| I2 | HA-Sensoren über `ha/live_sensors.py` | Core → HA | `sensor.shareomat_leg_ueberschuss` (kW: im Anzeigezustand `UEBERSCHUSS` die angezeigte Zahl nach 3.5, bei `KEIN_UEBERSCHUSS` 0, bei Status ≠ `VOLLSTÄNDIG` der Zustand `unknown`), `sensor.shareomat_leg_live_status` (Enum `ueberschuss`, `kein_ueberschuss`, `unsicher`, `keine_daten`), `sensor.shareomat_leg_vollstaendigkeit` (%), dazu für die eigene aktive Emsomat-Quelle `sensor.shareomat_live_netzbezug`, `_netzeinspeisung`, `_messwert_qualitaet`, `_verbindung`, `_messzeitpunkt`, `_zeitquelle`. Nur die Discovery ist retained, die Werte nicht. Mit Availability und `expire_after` (180 s), ohne Befehlskanal und ohne Daten anderer Teilnehmer. | 1 |
+| I3 | Admin-Bereich «LIVE-ENERGIE» | Verwalter ↔ Core | Übersicht, Messquellen mit «Live-Messquelle zuordnen» und Diagnose (5.1) | 1 (Übersicht, Messquellen, Diagnose; Empfang für `emsomat_local` und `wan_sparkplug`; `ha_mqtt` und `gateway_mqtt` lassen sich eintragen, haben aber noch keinen Eingang), 2 (Eingänge der Arten B und C-Gateway) |
+| I4 | LEG-Status an Emsomat | Core → Emsomat | über den Coordinator-NCMD-Mechanismus mit `ValidUntil`, nur bei `VOLLSTÄNDIG`. Noch nicht umgesetzt. Davon zu unterscheiden sind die bestehenden Coordinator-Daten aus ADR-0004 (Abschnitt 9). | später |
 | I5 | Portal-API v1 | Portal → Core | siehe unten | 4 |
 | I6 | Gateway-Ingest | Gateway bzw. HA-Sender → Broker → Core | ein gemeinsamer Vertrag für Art C und Art B (4.3, 4.4) | 2 |
 
@@ -835,7 +860,7 @@ die Summe.
      (Add-on-Optionen, Abschnitt `sparkplug`).
    * Home Assistant: die Entity-IDs für Bezug und Einspeisung (oder eine
      mit Vorzeichen und Vorzeichenregel), optional eine Nachweis-Entity.
-     Shareomat zeigt danach die passende Blueprint-Einstellung an.
+     Shareomat soll danach die passende Blueprint-Einstellung anzeigen (Schritt 2, noch nicht umgesetzt).
    * Externe Quelle / Gateway: die Kennung eines registrierten Geräts.
    * Externer Standort / WAN-Sparkplug: Standort und Device.
    * Bei jeder Art: `max_power_w` und die Nachweisstufe.
@@ -843,8 +868,8 @@ die Summe.
    was ankommt: Werte, Qualität, Alter, Gründe. In die Bilanz geht nichts.
 5. **Zuordnen und aktivieren:** Das geht nur, wenn in den letzten Minuten
    gültige Proben angekommen sind und kein Kanal schon belegt ist. Ist dem
-   Messpunkt bereits eine aktive Quelle zugeordnet, nennt die Bestätigung
-   sie. Der Wechsel läuft in einer Transaktion (Abschnitt 2).
+   Messpunkt bereits eine aktive Quelle zugeordnet, weist die Schaltfläche
+   darauf hin. Ein eigener Bestätigungsschritt fehlt noch (Audit AUD-12). Der Wechsel läuft in einer Transaktion (Abschnitt 2).
 
 Weitere Aktionen: **«Deaktivieren»** (wird `retired`) und
 **«Identität als nachgewiesen eintragen»** mit Datum und Verweis auf den
@@ -899,6 +924,9 @@ fremder Standort ─► Relay ─► WanDownlink ───┘       ▲         
 Abrechnung (unverändert): EBL/VNB-Dateien ─► Import ─► meter_readings ─► Matching ─► Billing
                           (keine Verbindung zu live.db)
 
+Coordinator (ADR-0004):   shareomat.db (nur lesen), ENTSO-E/SNB ─► coordinator.db ─► NCMD an Emsomat
+                          (nur bei verbundenem Emsomat, ausserhalb der Abrechnungssperre)
+
 Schritt 2: Gateway / AMS Reader ─┐
            HA-Sender (Blueprint) ┴─MQTT/TLS─► Broker ─► gateway_mqtt / ha_mqtt ─► dieselbe Prüfung
 Später:    Portal ─► Portal-API (I5) ─► LiveStatusService
@@ -907,7 +935,7 @@ Später:    Portal ─► Portal-API (I5) ─► LiveStatusService
 ### 7. Was ausdrücklich nicht gemacht wird
 
 * Shareomat **steuert keine Geräte**: keine Schalter in Portal oder App, keine
-  Befehle an Emsomat ausser dem informativen LEG-Status (I4).
+  Befehle an Emsomat ausser den informativen LEG-Daten (ADR-0004, I4).
 * Live-Werte ersetzen, ergänzen oder korrigieren **nie** offizielle
   Messwerte, Matching, Rechnungen oder Gutschriften.
 * Der Browser bekommt **keinen** MQTT-Zugang.
@@ -1003,6 +1031,15 @@ Schritt 1:
 **Schritt 1 bleibt vollständig lokal.** Es gibt keinen zusätzlichen
 Internetzugang und keine neue Verbindung nach aussen. Eine bereits
 konfigurierte WAN-Verbindung (ADR-0005) wird nur gehärtet, nicht erweitert.
+
+**Automatik (Entscheid vom 08.11.2026):** Seit Add-on 0.6.8 verbindet sich
+Shareomat automatisch mit einem Emsomat auf demselben Home Assistant
+(Add-on-Optionen, Abschnitt `sparkplug`). Solange Emsomat online ist, laufen
+damit auch die bestehenden Funktionen aus ADR-0004: Lastprognose, LEG-Daten an
+Emsomat und, nur mit hinterlegtem Token, der Preisabruf bei ENTSO-E und SNB.
+Diese Arbeiten laufen ausserhalb der Abrechnungssperre, schreiben nur in
+`coordinator.db` und können einen Abrechnungslauf nicht aufhalten.
+
 Die Verwaltung bleibt unverändert, abgesehen vom neuen, abgetrennten
 Menübereich LIVE-ENERGIE nach den bestehenden Gruppen.
 
@@ -1116,16 +1153,17 @@ bleibt jede Emsomat-Quelle bei `UNSICHER`.
 
 **Zu klären in Schritt 1, ohne Änderung an fremden Systemen:**
 
-* **K-1 Neues DBIRTH über WAN nach einem Wiederverbinden (umgesetzt).**
+* **K-1 Neues DBIRTH über WAN nach einem Wiederverbinden (umgesetzt, Realtest offen).**
   ADR-0005 sieht keine Befehle zwischen Standorten vor. Darum wiederholt der
-  WAN-Uplink NBIRTH und DBIRTHs alle 5 Minuten, mit den ursprünglichen
-  Zeitstempeln. Ein Standort, der die Verbindung verlor, hat damit nach
+  WAN-Uplink NBIRTH und DBIRTHs alle 5 Minuten, mit dem Zeitstempel des letzten bekannten
+  Werts. Ein Standort, der die Verbindung verlor, hat damit nach
   höchstens 5 Minuten wieder eine gültige Sitzung.
 * **K-2 Lokale Broker-ACL für Emsomat.** Ein eigenes Mosquitto-Login mit
   ACL für Emsomat ist eine Änderung am produktiven HA-Broker. Sie wird nur
   beschrieben und vom Projektverantwortlichen separat entschieden, nicht in
-  Schritt 1 ausgeführt.
-* **K-3 Nachweis über WAN weitergeben (umgesetzt).** `ParticipantRelay`,
+  Schritt 1 ausgeführt. Ein Entwurf liegt vor
+  (`docs/development/MQTT-Sicherheitskonzept_AUD-02.md`), umgesetzt ist nichts.
+* **K-3 Nachweis über WAN weitergeben (umgesetzt, Realtest offen).** `ParticipantRelay`,
   `bridge.py` und `WanDownlink` geben `is_null`, den Quellenzeitstempel und
   `Market/PowerTimeSource` weiter. Eine WAN-Quelle ist nie besser
   belegt als ihre Herkunft. Fehlt die Angabe, gilt Stufe C.
@@ -1228,37 +1266,61 @@ bleibt jede Emsomat-Quelle bei `UNSICHER`.
 
 ## Betroffene Dateien
 
-Schritt 1 (geplant):
+Schritt 1 (umgesetzt):
 
 * neu: `shareomat/live/` (`model.py`, `quality.py`, `balance.py`,
   `hysteresis.py`, `store.py` für `live.db`, `masterdata.py`, `service.py`,
-  `adapters/` mit `emsomat_local.py` und `wan_sparkplug.py`, Paar- und
-  Sitzungslogik aus 4.1)
-* neu: Tabellen `live_sources` und `live_source_channels` mit
+  `adapters/sparkplug.py`)
+* neu: Tabellen `live_sources`, `live_source_channels`, `live_meter_states` mit
   Unique-Indizes in `shareomat/database/sqlite.py` plus
-  `shareomat/database/live_sources.py` (Zuordnen, Aktivieren, Wechseln,
-  Lösen, jeweils mit Audit)
+  `shareomat/database/live_sources.py`
 * geändert: `shareomat/sparkplug/wan_downlink.py`,
   `shareomat/sparkplug/host.py`, `shareomat/sparkplug/participant_relay.py`,
-  `shareomat/sparkplug/bridge.py` (Härtung, Verbindungsverlust, `seq`,
-  Retain-Flag, Schlüssel nach Paar, `is_null` und Zeitquelle weitergeben,
-  Weitergabe an den Live-Adapter)
-* geändert: `shareomat/ha/mqtt_discovery.py`, `shareomat/ha/mqtt_runtime.py`
-  (Sensoren I2)
+  `shareomat/sparkplug/bridge.py`, `shareomat/sparkplug/vendor/payload.py`
+* neu: `shareomat/sparkplug/coordinator_store.py` (`coordinator.db`)
+* neu: `shareomat/ha/live_sensors.py` (Sensoren I2);
+  `ha/mqtt_discovery.py` und `ha/mqtt_runtime.py` sind unverändert
 * neu: Admin-Seite `web/pages/live_energy.py` mit Templates, eigener Bereich
   in `web/navigation.py`, Recht in `security/permissions.py`
-* `main.py` (Verdrahtung), `ha_addon/` (Synchronisierung)
+* geändert: `main.py` (Verdrahtung, Coordinator, geordneter Stopp),
+  `web/server.py` (Seite, Stopp), `web/state.py`, `ha_addon/` (Kopie, Optionen,
+  `timeout`, Generator)
 * Tests nach Abschnitt 8
 * nur gelesen, nicht geändert: `shareomat/database/billing_eligibility.py`
-* `ha_addon/config.yaml`: nur der Options-Abschnitt `sparkplug`,
-  `homeassistant_api` bleibt `false`
+* `homeassistant_api` bleibt `false`
 
 Schritt 2 (geplant): `live/adapters/gateway_mqtt.py`,
 `live/adapters/ha_mqtt.py`, Gateway-Vertrag als eigenes Dokument,
 HA-Blueprint, Gerätezugänge.
 
-Nicht betroffen: Abrechnung, Matching, Rechnungen, Zahlungen, Login,
-bestehende Admin-Seiten und Emsomat.
+Unverändert gegenüber `23bf860`: Abrechnung, Matching, Tarife, Rechnungen,
+Zahlungen, Login und bestehende Admin-Seiten. Der Code von Emsomat wird von
+diesem ADR nicht geändert; Emsomat erhält aber bei aktivem Sparkplug die
+LEG-Daten aus ADR-0004.
+
+## Umsetzungsstand und offene Punkte (08.11.2026)
+
+**Geprüft durch automatische Tests, nicht real:** Live-Ebene, Verwaltung,
+HA-Sensoren, Sparkplug-Härtung, `coordinator.db` und der geordnete Stopp.
+
+**Programmende:** SIGTERM und Ctrl+C lösen denselben Ablauf aus: keine neuen
+Läufe, Daemon-Threads stoppen, Webserver nimmt nichts Neues an und lässt laufende
+Anfragen fertig werden, laufende Abrechnung abwarten (zusammen höchstens 15 s),
+Coordinator (5 s), Sparkplug, Live-Ebene, MQTT. Das Add-on hat dafür 30 s
+(`timeout` in `ha_addon/config.yaml`). Was bei Fristablauf noch läuft, endet mit
+dem Prozess. SQLite verwirft dann die offene Transaktion.
+
+**Offene Audit-Befunde** (`docs/development/Live-Energie-Audit_2026-11-08.md`):
+
+* AUD-02: Broker-Logins und ACL sind nur ein Entwurf. Solange sie fehlen, gilt
+  die Identität einer Quelle als nicht nachgewiesen.
+* AUD-03, AUD-04, AUD-07: vor produktiver WAN-Nutzung zu beheben.
+* AUD-08 bis AUD-12, AUD-16: nachrangig.
+
+**Realtests offen:** Broker-ACL, echtes Home Assistant mit HA-Sensoren und
+`expire_after`, Entity Bridge und HA Second, Ingress, WAN zwischen zwei Standorten,
+Add-on-Maske, SIGTERM und `coordinator.db` beim echten Add-on, Wirkung der
+LEG-Daten auf Emsomat, 90 s gegen reale Meldeintervalle.
 
 ## Überprüfung
 

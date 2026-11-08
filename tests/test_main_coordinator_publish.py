@@ -49,7 +49,7 @@ def test_publish_coordinator_sparkplug_sends_all_three_metric_groups(tmp_path) -
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
     now = datetime.now(timezone.utc)
-    save_consumption_forecast(db_path, [
+    save_consumption_forecast(app_main._coordinator_store(db_path), [
         ConsumptionForecastPoint(
             scope="leg", participant_id="", slot_start=now, forecast_kwh=1.5, quality="ok",
             method="weekday_time_weighted_recency_v1", sample_count=5,
@@ -91,7 +91,7 @@ def test_publish_coordinator_sparkplug_uses_native_resolution_export_price(tmp_p
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
     now = datetime.now(timezone.utc)
-    save_day_ahead_prices(db_path, [
+    save_day_ahead_prices(app_main._coordinator_store(db_path), [
         DayAheadPricePoint(slot_start=now, price_chf_kwh=Decimal("0.15")),
         DayAheadPricePoint(slot_start=now.replace(hour=(now.hour + 1) % 24), price_chf_kwh=Decimal("0.25")),
     ])
@@ -138,7 +138,7 @@ def test_recompute_export_price_throttles_within_interval(tmp_path, monkeypatch)
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
     save_external_data_settings(db_path, ExternalDataSettings(entsoe_api_token="real-token"))
-    save_day_ahead_prices(db_path, [DayAheadPricePoint(slot_start=datetime.now(timezone.utc), price_chf_kwh=Decimal("0.1"))])
+    save_day_ahead_prices(app_main._coordinator_store(db_path), [DayAheadPricePoint(slot_start=datetime.now(timezone.utc), price_chf_kwh=Decimal("0.1"))])
 
     calls = []
     monkeypatch.setattr(app_main, "fetch_and_persist_day_ahead_prices", lambda db_path, api_token: calls.append(1))
