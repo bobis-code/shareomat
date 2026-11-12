@@ -1111,7 +1111,7 @@ bleibt jede Emsomat-Quelle bei `UNSICHER`.
 * Punkte 1–3 umgesetzt: `is_null` statt 0 W (auch im NBIRTH vor dem ersten
   Messwert), beide Werte immer gemeinsam, Metric-Zeitstempel =
   `last_reported` des HA-Sensors (Fallback `last_updated`), bei zwei
-  Sensoren der ältere. Das ist eine Obergrenze für das Alter, kein Nachweis
+  Sensoren der neuere (seit 09.11.2026, die Seite ohne Leistungsfluss meldet sich sonst nicht mehr). Das ist eine Obergrenze für das Alter, kein Nachweis
   einer Messung.
 * Punkt 4 angepasst: `Market/PowerTimeSource` mit den Werten
   `ha_last_reported`, `ha_last_updated`, `none` (statt `meter`,
