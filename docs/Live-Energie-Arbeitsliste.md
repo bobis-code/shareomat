@@ -48,6 +48,12 @@ und HA Second ermöglichen. Reihenfolge:
 Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 (Sensorprüfer). Alle übrigen Aufgaben bleiben unverändert bestehen.
 
+**Danach:** LE-22 (externes Webportal) ist die fest vorgesehene nächste Erweiterung.
+Sie beginnt unmittelbar, sobald der bestehende Plan einschliesslich der offenen
+Aufgaben, Tests und Audits (auch AUD-02) abgeschlossen ist. LE-22 verändert weder
+die Reihenfolge noch die Priorität der übrigen Aufgaben und wird nicht parallel
+begonnen.
+
 ## Übersicht
 
 | ID | Projekt | Aufgabe | Priorität | Status | Abhängig von |
@@ -72,6 +78,11 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 | LE-18 | Emsomat | `grid_power_max_age_s` nicht konfigurierbar | NIEDRIG | OFFEN | LE-20 |
 | LE-19 | Emsomat | EV-Regelung mit PID, Phasen aus OUT, ROUT-Stufen ohne Messung | HOCH | OFFEN | – |
 | LE-20 | Emsomat | Sensorprüfer als Library-Objekt mit Ausgang IO BAD | MITTEL | OFFEN | – |
+| LE-21 | Emsomat | Vendor-Code: NDEATH-Zeitstempel beim Lesen vertauscht (wie LE-14) | NIEDRIG | OFFEN | – |
+| LE-23 | Emsomat | EV-Schutz schaltet ab, wenn der Bezugssensor bei PV-Überschuss auf 0 W stehen bleibt | HOCH | OFFEN | LE-20 prüfen |
+| LE-24 | Shareomat | LEG-Daten an Emsomat nur im Abrechnungszyklus, ohne Zeitplan nur beim Start | MITTEL | OFFEN | – |
+| LE-25 | Shareomat | EUR/CHF-Kurs der SNB fehlt, Umrechnung ohne Warnung mit 1.0 | MITTEL | OFFEN | – |
+| LE-22 | Shareomat + neues Portal | Externes Webportal per Push, nur Anzeige (Phase 1 Shareomat, Phase 2 Portal) | nächste Erweiterung nach dem bestehenden Plan | OFFEN | Abschluss des bestehenden Plans inkl. AUD-02 |
 
 ---
 
@@ -186,6 +197,10 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Abhängigkeiten:** echte HA-Testumgebung (nicht produktiv).
 * **Prüfkriterien:** Realtest dokumentiert; `bdSeq`-Entscheid festgehalten.
 * **ADR:** ADR-0007 §10 «Stand EA-1».
+* **Nachtrag (09.11.2026, Realtest):** Bei zwei gültigen Sensoren zählt jetzt der
+  neuere Zeitstempel (`power_sample.py`). Vorher sperrte Shareomat die Werte, sobald
+  eine Seite auf 0 W stehen blieb. Emsomat-Tests: 1400 bestanden. Nicht committet.
+  Am 09.11.2026 im echten HA bestätigt: abends 6232 W Bezug, 0 W Einspeisung, gültig.
 
 ## LE-04 – Shareomat: Ungültige Werte über die Bridge erhalten
 
@@ -524,6 +539,174 @@ Für später vorgemerkt: LE-19 (EV-PID-Regelung, enthält LE-16) und LE-20
 * **Prüfkriterien:** Tests des Library-Objekts; das Verhalten aus LE-01
   (Laden stoppt bei ungültigem oder veraltetem Bezug) bleibt nachgewiesen;
   vollständige Testsuite grün.
+
+## LE-21 – Emsomat: NDEATH-Zeitstempel im Vendor-Code
+
+* **Projekt:** Emsomat · **Priorität:** NIEDRIG · **Status:** OFFEN
+* **Ursache:** derselbe Fehler wie LE-14. `Emsomat/sparkplug/vendor/payload.py:176`:
+  Die Bedingung ist vertauscht (`… if not payload.HasField("timestamp") else None`).
+  Behoben wurde er bisher nur in Shareomat.
+* **Auswirkung:** heute keine. Emsomat erzeugt NDEATH-Nachrichten nur und liest
+  keine ein.
+* **Ziel:** Bedingung korrigieren, Regressionstest, Änderung in
+  `vendor/NOTICE.md` festhalten (Apache 2.0).
+* **Prüfkriterien:** Test für NDEATH mit und ohne Zeitstempel; vollständige
+  Emsomat-Testsuite grün.
+
+## LE-23 – Emsomat: EV-Schutz bei stehendem Bezugssensor
+
+* **Projekt:** Emsomat · **Priorität:** HOCH · **Status:** OFFEN
+* **Befund (09.11.2026, Realtest):** Der EV-Schutz (LE-01) verlangt einen
+  Bezugswert, der höchstens 120 s alt ist. `sensor.import_power` und
+  `sensor.export_power` sind Vorlage-Sensoren aus einem Zählerwert. Die Seite ohne
+  Leistungsfluss bleibt auf 0 W und meldet sich vermutlich nicht mehr. Bei
+  PV-Überschuss gilt der Bezug dann als veraltet. Am Code nachgestellt: Bezug seit
+  200 s unverändert 0 W, 3500 W Einspeisung ergibt `protection: fault`, also EV aus.
+* **Auswirkung:** sichere Richtung, verhindert aber das PV-Laden.
+* **Noch zu bestätigen:** `last_reported` der beiden Sensoren im echten HA.
+* **Lösungsweg:** gehört zum Sensorprüfer (LE-20) oder wird zusammen mit ihm
+  gelöst. Der Schutz darf bei einem wirklich ausgefallenen Zähler nicht schwächer
+  werden.
+
+## LE-24 – Shareomat: eigener Takt für die LEG-Daten an Emsomat
+
+* **Projekt:** Shareomat · **Priorität:** MITTEL · **Status:** OFFEN
+* **Befund (09.11.2026, Realtest):** Prognose, Preise und LEG-Daten laufen nur am
+  Ende eines Abrechnungszyklus. Ohne Zeitplan oder Auto-Scan ist das nur beim
+  Start. Die Daten gelten 6 Stunden, danach hat Emsomat keine gültigen LEG-Daten
+  mehr. Auch nach einem Neustart von Emsomat kommt nichts Neues.
+* **Ziel:** eigener automatischer Takt, unabhängig vom Abrechnungszyklus. Der
+  Abrechnungslauf und seine Sperre bleiben unverändert.
+* **Prüfkriterien:** Tests für Takt, Emsomat-Neustart, Stopp in der
+  Shutdown-Sequenz; vollständige Testsuite grün.
+
+## LE-25 – Shareomat: fehlender EUR/CHF-Kurs
+
+* **Projekt:** Shareomat · **Priorität:** MITTEL · **Status:** OFFEN
+* **Befund (09.11.2026, Realtest):** Log `SNB: fetched 0 EUR/CHF rate(s)`. Bei einer
+  leeren Antwort rechnet `export_price_forecast.py` ohne Warnung mit 1.0.
+  Börsenpreise an Emsomat sind dann um einige Prozent falsch. Wirkt nur, wenn in
+  Emsomat `leg.price_source` auf Shareomat steht. Die Abrechnung ist nicht betroffen.
+* **Noch zu prüfen:** Ursache. Vermutlich gibt die SNB den Monatskurs erst nach
+  Monatsende heraus.
+* **Ziel:** letzten verfügbaren Kurs verwenden oder den Zustand sichtbar melden.
+  Kein stiller Ersatzwert.
+
+## LE-22 – Externes Webportal per Push
+
+* **Projekt:** Shareomat und neues Webportal
+* **Status:** OFFEN, nicht begonnen. Festlegungen vom 09.11.2026.
+* **Einordnung:** Fest vorgesehene nächste Erweiterung **nach** vollständigem
+  Abschluss des bestehenden Plans (offene Aufgaben, Tests, Audits, auch AUD-02).
+  Keine Umpriorisierung, kein paralleler Beginn, keine Arbeiten daraus im
+  laufenden Ablauf. Nach Abschluss des Plans beginnt LE-22 sofort mit der lokalen
+  Shareomat-Push-Anbindung.
+* **Ziel:** LEG-Teilnehmer sehen auf Smartphone oder Computer aktuelle
+  Energiedaten. Das Portal dient **ausschliesslich der Anzeige**. Shareomat sendet
+  freigegebene Werte standardmässig alle 30 Sekunden per HTTPS-POST. Es braucht
+  keine eingehende Verbindung zum lokalen Shareomat und kein HA Second pro
+  Teilnehmer.
+
+### Strikte Trennung von Shareomat
+
+Shareomat bleibt das zentrale Verwaltungssystem. Das Portal ist nur eine zusätzliche
+Anzeige für freigegebene Daten. Nichts davon wird durch das Portal oder ein CMS
+ersetzt, verlagert oder unnötig umgebaut: Benutzerverwaltung, Kunden- und
+Teilnehmerverwaltung, LEG-Verwaltung, Oberflächen und Administration, Messdaten und
+Datenhaltung, Energieberechnung und Abrechnung, vorhandene Schnittstellen und
+Integrationen. Die Überlegungen zu Drupal, WordPress oder eigenem PHP betreffen
+ausschliesslich das Portal. Keine Abhängigkeit von HA Second oder der Entity Bridge.
+
+### Offene Plattformentscheidung
+
+Portal mit **Drupal**, **WordPress mit eigenem Shareomat-Plugin** oder **eigenständiger
+schlanker PHP-Anwendung**. Noch nicht entschieden, die Wahl fällt in Phase 2. Drupal
+ist wegen Datenmodell und Rechteverwaltung interessant, WordPress wäre eventuell
+einfacher zu administrieren. Hosting: hosttech und Infomaniak kommen grundsätzlich
+infrage. Die Schnittstelle von Shareomat wird plattformunabhängig entwickelt, ein
+Wechsel darf keine grundlegenden Änderungen am lokalen Shareomat erfordern.
+
+### Phase 1: Shareomat vorbereiten und lokal testen
+
+* Eigenständiges, optional aktivierbares Portal-Modul
+* Push per HTTPS-POST, Standardintervall 30 Sekunden, konfigurierbare Ziel-URL
+* Authentifizierung über API-Schlüssel
+* Verbindungsüberwachung und Diagnose, letzte erfolgreiche Übertragung,
+  nachvollziehbare Fehler
+* Timeouts, geeignete Wiederholung, keine unbegrenzte Warteschlange
+* Keine Beeinträchtigung von Verwaltung oder Abrechnung, Einbindung in die
+  bestehende Shutdown-Sequenz
+* Versionierte, dokumentierte JSON-API, erweiterbar auf mehrere Messwerte und
+  mehrere unabhängige Shareomat-Installationen
+
+**Testbetrieb:** auf der bestehenden Proxmox-Infrastruktur. Bei der Umsetzung prüfen,
+ob ein isolierter Docker-Compose-Stack auf einem vorhandenen Docker-Host genügt. Eine
+zusätzliche VM oder ein LXC nur, wenn technisch oder sicherheitstechnisch sinnvoll.
+Auf dem Windows-PC wird nichts installiert. Kein SSH-Zugriff auf Proxmox oder
+produktive Systeme ohne ausdrückliche Freigabe. Für den ersten Test reicht ein
+einfacher Empfänger mit kleiner Webseite: letzter Messwert und
+Aktualisierungszeitpunkt. Keine umfangreiche Benutzerverwaltung oder
+Portaladministration.
+
+### Phase 2: Eigenständiges Webportal
+
+Erst nach erfolgreichem lokalem Übertragungstest. Hier fällt die Plattformentscheidung.
+Spätere Funktionen: Benutzeranmeldung, persönliche Teilnehmeransichten, LEG-Zuordnung,
+sichere Trennung mehrerer LEG, Live-Leistungswerte, Aktualisierungsstatus, später
+persönliche Auswertungen, eventuell Abrechnungsansichten. Die Benutzerverwaltung des
+Portals ist unabhängig von der Shareomat-Benutzerverwaltung. Keine zweite vollständige
+Benutzerverwaltung, bevor die Plattform festgelegt ist. Die Anwendung muss auf normalem
+PHP-/MariaDB-Shared-Hosting ohne Docker lauffähig sein.
+
+### Messwerte der ersten Version
+
+Nur tatsächlich vorhandene, nachvollziehbare Werte. `own_reading()` liefert aktuelle
+Einspeisung, Datenqualität, Messzeitpunkt und Verbindungsstatus. Anzeigetext:
+**«Aktuelle Netzeinspeisung»**, mit dem Hinweis, dass es die Einspeisung am
+Erzeugeranschluss ist und nicht automatisch der gesamte LEG-Überschuss. Keine
+PV-Erzeugung und kein LEG-Gesamtüberschuss aus unvollständigen Messdaten. Spätere
+Messquellen muss die Schnittstelle unterstützen können.
+
+### Betriebsarten und Sicherheit
+
+| Modus | Daten | Verbindung |
+|---|---|---|
+| OFF (Standard) | keine Übertragung | – |
+| TEST | ausschliesslich künstliche, eindeutig gekennzeichnete Testdaten, keine echten Messwerte | HTTP nur innerhalb einer ausdrücklich zugelassenen privaten Testumgebung |
+| LIVE | tatsächliche, freigegebene Messwerte | bei öffentlichem Betrieb zwingend HTTPS mit gültiger Zertifikatsprüfung |
+
+Für spätere lokale Integrationsprüfungen mit echten Messwerten ist ein ausdrücklich
+freizugebender, abgesicherter Testweg vorzusehen.
+
+* API-Schlüssel nie protokollieren, Zugangsdaten sicher speichern
+* Schutz gegen SSRF und unerlaubte Weiterleitungen
+* Keine Home-Assistant-Zugangsdaten übertragen
+* Keine Steuerbefehle vom Portal zurück zu Shareomat
+* Nur ausdrücklich freigegebene Daten übertragen
+* Serverseitige Trennung der LEG-Gemeinschaften
+* Unabhängiges Security-Review vor dem produktiven Internetbetrieb ist verpflichtend
+
+### Datenschutz
+
+Erste Version: nur freigegebene aktuelle Leistungswerte. Keine Namen, Adressen,
+individuellen Verbrauchshistorien oder Rechnungsdaten. Spätere persönliche Daten werden
+gesondert auf Datenschutz, Zugriffsrechte, Aufbewahrung und Löschung geprüft. Die
+Vorgaben aus O-3 bleiben bestehen.
+
+### Fehlerbehandlung
+
+Shareomat bleibt bei Problemen mit dem Portal voll funktionsfähig: Timeout beachten,
+Fehler protokollieren, später erneut versuchen, keine unbegrenzte Warteschlange, andere
+Funktionen nicht blockieren. Für die erste Live-Anzeige reicht der aktuelle Wert, eine
+historische Nachlieferung ist vorerst nicht nötig. Für spätere historische Messwerte
+oder Abrechnungsdaten braucht es eine separate, zuverlässige Synchronisierung.
+
+### ADR-0008
+
+Wird bei Beginn von LE-22 erstellt und ersetzt oder ergänzt gezielt die
+Portal-API-Architektur aus ADR-0007. Erhalten bleiben: Trennung von der Verwaltung, keine
+administrativen Funktionen über das Portal, gesicherte Anmeldung, Berechtigungskontrolle,
+Datenschutz, unabhängiges Security-Review vor dem öffentlichen Betrieb.
 
 ## Audit vom 08.11.2026
 
