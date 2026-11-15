@@ -38,6 +38,16 @@ email:
   allowed_senders: []
   poll_interval_seconds: 300
 
+# SDAT-Empfang vom Swisseldex Datahub (FTPES). Nur Empfang und Archivierung.
+swisseldex:
+  enabled: false
+  host: "datahub.swisseldex.ch"
+  port: 21
+  username: ""
+  password: ""
+  auto_sync: false
+  sync_interval_hours: 6
+
 web:
   enabled: true
   port: 8099

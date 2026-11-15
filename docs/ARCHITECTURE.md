@@ -116,6 +116,13 @@ sources").
 * **Eingang:** `data/inbox/` — befüllt durch manuellen Upload, den
   IMAP-E-Mail-Importer, den Share-Ordner-Importer, oder direkt vom
   Betreiber kopiert.
+* **Swisseldex-Empfang (SX-1):** SDAT-Dateien aus dem FTPES-Postfach beim
+  Swisseldex Datahub landen in einem eigenen Empfangsarchiv
+  (`<state>/swisseldex/received/`), **nicht** in der Inbox. Danach prüft
+  der Import (SX-2) die Dateien und legt die offiziellen E66/E31-Zeitreihen
+  dieser LEG in `sdat_documents`/`sdat_series` ab. Mit der Messdaten-Quelle
+  «SDAT» rechnet die Abrechnung mit der Zuteilung des Netzbetreibers, ohne
+  selbst zu verteilen (ADR-0008).
 * **Ausgang:** `data/reports/` (CSV/JSON), Web-UI, optional MQTT-Topics
   unter `{prefix}/...` (siehe `docs/emsomat-integration.md`).
 * **Persistenz:** `data/shareomat.db` (SQLite, Stammdaten + Betriebs­daten),
@@ -198,21 +205,26 @@ core/
     leg_watcher.py            Inbox-Datei-Watcher
     leg_share_importer.py     Share-Ordner → Inbox
     leg_email_importer.py     IMAP-Postfach → Inbox
+    swisseldex_ftpes.py       FTPES-Client für das Swisseldex-Postfach (nur lesen)
+    swisseldex_receiver.py    Swisseldex-Empfang → Empfangsarchiv (nicht Inbox)
+    sdat_import.py            Import empfangener SDAT-Dateien (SX-2)
     leg_storage.py            Verarbeitet-Status (SHA-256-Dedup)
   pipeline/                  Abrechnungsverarbeitung
     leg_parser.py              CSV / S-DAT (experimentell) / Aufruf von raw/
     leg_normalizer.py          Reading-Normalisierung
-    leg_matcher.py             Proportionale Energieteilung
+    leg_matcher.py             Proportionale Energieteilung (Rohdaten)
+    official_allocation.py     Offizielle Zuteilung übernehmen, nicht verteilen (ADR-0008)
     leg_billing.py             Perioden-Aggregation & Kostenberechnung
     raw/                        Ein Modul pro externem Rohformat
       ebl_xlsx.py                 EBL-Excel-Export
-      sdat_ch.py                  SDAT-CH-2025 E31/E66 (Gerüst, siehe docs/sdat_leg_import.md)
+      sdat_ch.py                  SDAT-CH-2025 E31/E66 (VSE-XSDs, siehe docs/sdat_leg_import.md)
   report/
     leg_report.py             CSV-/JSON-Berichte
 
 database/                   SQLite, Quelle der Wahrheit für Stammdaten
   sqlite.py                    Verbindung, Schema, additive Migrationen
   live_sources.py              Zuordnung der Live-Messquellen (ADR-0007)
+  sdat_store.py                Offizielle SDAT-Zeitreihen und ihre Versionen (ADR-0008)
   community.py / participants.py / meters.py / tariffs.py / settings.py
   contract_versions.py         Versionierte Vertragskonditionen (draft/publish/withdraw/end)
   contract_settings.py         Vorbelegung für einen neuen Vertragsentwurf

@@ -53,6 +53,7 @@ from shareomat.config import RuntimeConfig
 from shareomat.core.collector.leg_import import scan_inbox
 from shareomat.core.leg_runner import parse_file
 from shareomat.core.pipeline.leg_billing import compute_billing
+from shareomat.core.pipeline.official_allocation import OfficialSplit, official_match_results
 from shareomat.core.pipeline.leg_matcher import match_all
 from shareomat.core.pipeline.leg_parser import readings_to_slots
 from shareomat.database.audit import record_event
@@ -65,7 +66,13 @@ from shareomat.database.participants import list_participants
 from shareomat.database.tariffs import get_tariff_for_date
 from shareomat.database.settings import get_operation_settings
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
-from shareomat.leg_const import BILLING_STATUS_CANCELLED, BILLING_STATUS_DRAFT, BILLING_STATUS_RELEASED, SLOT_MINUTES
+from shareomat.leg_const import (
+    BILLING_STATUS_CANCELLED,
+    BILLING_STATUS_DRAFT,
+    BILLING_STATUS_RELEASED,
+    METER_DATA_SOURCE_SDAT_LEG,
+    SLOT_MINUTES,
+)
 from shareomat.models.billing_workflow import (
     BillingLineItem,
     BillingPreview,
@@ -256,6 +263,104 @@ def _collect_readings_for_period(
     return readings, sources, issues
 
 
+def _collect_official_for_period(
+    db_path: Path, period_start: date, period_end: date, *, persist_readings: bool = True,
+) -> tuple[list[IntervalReading], list[BillingSourceFile], list[str], list[str], dict]:
+    """Official SDAT data source (ADR-0008): measured totals plus the grid operator's split.
+
+    Returns (total readings, sources, hard issues, soft issues, splits). The
+    totals go through the same eligibility and completeness gates as file
+    readings; the split replaces the internal allocation. A quarter hour is
+    only used when total, LEG and residual energy are all present - a missing
+    part is never assumed to be 0.
+    """
+    from shareomat.database.sdat_store import load_official_values
+
+    start_dt, end_dt = _period_bounds(period_start, period_end)
+    data = load_official_values(db_path, start_dt, end_dt, document_type="E66")
+    hard: list[str] = []
+    soft: list[str] = []
+    if not data.community_id:
+        hard.append("Datenquelle SDAT: Es sind noch keine offiziellen E66-Daten des Netzbetreibers importiert.")
+        return [], [], hard, soft, {}
+
+    meter_id_of = {m.meter_id.strip().upper(): m.meter_id for m in list_meters(db_path)}
+    channels: dict[tuple[str, str, datetime], dict[str, object]] = {}
+    for (point, direction, energy_type, slot), official in data.values.items():
+        channels.setdefault((point, direction, slot), {})[energy_type] = official
+
+    readings: list[IntervalReading] = []
+    splits: dict[tuple[str, str, datetime], OfficialSplit] = {}
+    incomplete: dict[str, int] = {}
+    inconsistent: dict[str, int] = {}
+    temporary = estimated = 0
+    for (point, direction, slot), parts in sorted(channels.items(), key=lambda item: (item[0][0], item[0][1], item[0][2])):
+        meter_id = meter_id_of.get(point, point)
+        if not {"total", "local", "residual"} <= parts.keys():
+            incomplete[meter_id] = incomplete.get(meter_id, 0) + 1
+            continue
+        total, local, residual = parts["total"], parts["local"], parts["residual"]
+        if total.value != local.value + residual.value:
+            inconsistent[meter_id] = inconsistent.get(meter_id, 0) + 1
+            continue
+        conditions = {total.condition, local.condition, residual.condition}
+        temporary += "21" in conditions
+        estimated += "56" in conditions and "21" not in conditions
+        channel = "import" if direction == "consumption" else "export"
+        readings.append(IntervalReading(
+            meter_id=meter_id, slot_start=slot, value_kwh=float(total.value), direction=channel,
+            quality="temporary" if "21" in conditions else ("estimated" if "56" in conditions else "valid"),
+            source_file="SDAT",
+        ))
+        splits[(meter_id, channel, slot)] = OfficialSplit(local_kwh=float(local.value), residual_kwh=float(residual.value))
+
+    for meter_id, count in sorted(incomplete.items()):
+        hard.append(f"Messpunkt {meter_id}: für {count} Viertelstunde(n) fehlt LEG- oder Restenergie des Netzbetreibers.")
+    for meter_id, count in sorted(inconsistent.items()):
+        hard.append(
+            f"Messpunkt {meter_id}: in {count} Viertelstunde(n) ist Total ≠ LEG-Energie + Restenergie "
+            "(Daten des Netzbetreibers widersprüchlich)."
+        )
+    if temporary:
+        hard.append(
+            f"{temporary} Viertelstunde(n) enthalten nur vorläufige, nicht plausibilisierte Werte des Netzbetreibers "
+            "(Qualität 21). Die plausibilisierte Lieferung abwarten."
+        )
+    if estimated:
+        soft.append(f"{estimated} Viertelstunde(n) enthalten Ersatzwerte des Netzbetreibers (Qualität 56).")
+    if data.downgrades:
+        soft.append(f"{data.downgrades} vorläufige Werte kamen nach bereits plausibilisierten an und wurden nicht übernommen.")
+    soft.extend(_e31_crosscheck(db_path, start_dt, end_dt, data))
+
+    sources = [BillingSourceFile(filename=name, sha256=sha, origin="sdat") for sha, name in sorted(data.sources.items())]
+    if persist_readings and readings:
+        save_meter_readings(db_path, readings)
+    return readings, sources, hard, soft, splits
+
+
+def _e31_crosscheck(db_path: Path, start_dt: datetime, end_dt: datetime, e66) -> list[str]:
+    """E31 aggregates against the sum of all E66 series of the LEG (§25). Only a hint, never blocking."""
+    from shareomat.database.sdat_store import load_official_values
+
+    e31 = load_official_values(db_path, start_dt, end_dt, document_type="E31")
+    if not e31.values:
+        return ["Keine E31-Summen des Netzbetreibers für den Zeitraum vorhanden (Kontrolle nicht möglich)."]
+    sums66: dict[tuple[str, str], Decimal] = {}
+    sums31: dict[tuple[str, str], Decimal] = {}
+    for (_, direction, energy_type, _), official in e66.values.items():
+        sums66[(direction, energy_type)] = sums66.get((direction, energy_type), Decimal(0)) + official.value
+    for (_, direction, energy_type, _), official in e31.values.items():
+        sums31[(direction, energy_type)] = sums31.get((direction, energy_type), Decimal(0)) + official.value
+    labels = {"consumption": "Verbrauch", "production": "Einspeisung", "total": "Total", "local": "LEG-Energie",
+              "residual": "Restenergie"}
+    issues = []
+    for key in sorted(set(sums66) | set(sums31)):
+        a, b = sums66.get(key, Decimal(0)), sums31.get(key, Decimal(0))
+        if a != b:
+            issues.append(f"E31-Kontrolle {labels[key[0]]}/{labels[key[1]]}: Summe E66 {a} kWh ≠ E31 {b} kWh.")
+    return issues
+
+
 def _base_config(db_path: Path, runtime: RuntimeConfig, days: list[date]):
     """A LegConfig for labels/processing settings, built for the first day that has a tariff."""
     last_error: IncompleteConfigError | None = None
@@ -293,10 +398,17 @@ def compute_billing_preview(
     days = [period_start + timedelta(days=i) for i in range((period_end - period_start).days + 1)]
     base_config = _base_config(db_path, runtime, days)
     # hard: never releasable (wrong or missing basis); soft: releasable only with a written reason.
-    readings, sources, hard = _collect_readings_for_period(
-        db_path, runtime, period_start, period_end, persist_readings=persist_readings,
-    )
-    soft: list[str] = []
+    official = get_operation_settings(db_path).meter_data_source == METER_DATA_SOURCE_SDAT_LEG
+    splits: dict = {}
+    if official:
+        readings, sources, hard, soft, splits = _collect_official_for_period(
+            db_path, period_start, period_end, persist_readings=persist_readings,
+        )
+    else:
+        readings, sources, hard = _collect_readings_for_period(
+            db_path, runtime, period_start, period_end, persist_readings=persist_readings,
+        )
+        soft: list[str] = []
     resolver = EligibilityResolver(db_path)
 
     configured_meter_ids = {m.meter_id for m in list_meters(db_path)}
@@ -382,7 +494,8 @@ def compute_billing_preview(
     for tariff_id, group in readings_by_tariff.items():
         t = tariff_obj[tariff_id]
         config = replace(base_config, tariff=t, meters=meters_all, participants=participants_all)
-        match_results = match_all(readings_to_slots(group))
+        # Official SDAT data is already allocated by the grid operator: take it over, never distribute again.
+        match_results = official_match_results(group, splits) if official else match_all(readings_to_slots(group))
         records = compute_billing(match_results, config, start_dt, end_dt, source_files=[x.filename for x in sources])
         for rec in records:
             acc = totals.setdefault(rec.participant_id, {
@@ -424,6 +537,8 @@ def compute_billing_preview(
     # Energy clearing: every LEG kWh received was supplied by someone in the same quarter hour.
     received_total = sum(acc["local_received"] for acc in totals.values())
     supplied_total = sum(acc["local_supplied"] for acc in totals.values())
+    if official:
+        hard.extend(_official_energy_outside_billing(readings, billable, splits))
     if abs(received_total - supplied_total) > 1e-6:
         hard.append(
             f"Energie-Clearing stimmt nicht: bezogen {received_total:.4f} kWh ≠ geliefert {supplied_total:.4f} kWh."
@@ -478,6 +593,53 @@ _RUN_SELECT = """
     FROM billing_runs
     JOIN billing_periods ON billing_periods.id = billing_runs.billing_period_id
 """
+
+
+def _official_energy_outside_billing(readings, billable, splits) -> list[str]:
+    """LEG energy the grid operator allocated to meters Shareomat does not bill on that day.
+
+    With the internal allocation such meters are simply left out of the
+    distribution. With the official split they cannot be: the grid operator
+    already gave them their share, so billing only the others would charge
+    or credit energy that was allocated elsewhere. Never silently.
+    """
+    billed = {(r.meter_id, r.direction, r.slot_start) for r in billable}
+    outside: dict[str, float] = {}
+    for r in readings:
+        key = (r.meter_id, r.direction, r.slot_start)
+        if key not in billed and key in splits and splits[key].local_kwh > 0:
+            outside[r.meter_id] = outside.get(r.meter_id, 0.0) + splits[key].local_kwh
+    return [
+        f"Messpunkt {meter_id}: {kwh:.3f} kWh LEG-Energie laut Netzbetreiber, aber an diesen Tagen in Shareomat "
+        "nicht abrechnungsberechtigt (Beitritt/Vertrag/LEG-Preis prüfen)."
+        for meter_id, kwh in sorted(outside.items())
+    ]
+
+
+def released_runs_needing_review(db_path: Path, runtime: RuntimeConfig, start: datetime, end: datetime) -> list[BillingRun]:
+    """Released runs overlapping [start, end) whose recomputation no longer gives the released result.
+
+    Called after new official data was imported. A released run is never
+    changed (ADR-0001); the operator gets a notice to check for a correction
+    billing instead. Only meaningful for the official data source.
+    """
+    if get_operation_settings(db_path).meter_data_source != METER_DATA_SOURCE_SDAT_LEG:
+        return []
+    affected = []
+    for run in list_billing_runs(db_path):
+        if run.status != BILLING_STATUS_RELEASED or run.period_start is None or not run.result_fingerprint:
+            continue
+        run_start, run_end = _period_bounds(run.period_start, run.period_end)
+        if run_end <= start or end <= run_start:
+            continue
+        try:
+            current = compute_billing_preview(db_path, runtime, run.period_start, run.period_end, persist_readings=False)
+        except IncompleteConfigError:
+            affected.append(run)
+            continue
+        if _result_fingerprint(current) != run.result_fingerprint:
+            affected.append(run)
+    return affected
 
 
 def _load_issues(raw: str) -> tuple[list[str], list[str]]:

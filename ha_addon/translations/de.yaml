@@ -14,3 +14,30 @@ configuration:
       group_id:
         name: Gruppe (nur bei manual)
         description: Bei «auto» ohne Wirkung. Muss der Sparkplug-Gruppe in Emsomat entsprechen.
+  swisseldex:
+    name: Swisseldex Datahub (SDAT-Empfang)
+    description: >-
+      Holt SDAT-Dateien aus dem FTPES-Postfach beim Swisseldex Datahub und archiviert sie.
+      Kein Löschen auf Swisseldex, keine Abrechnung. Test und Synchronisation unter Externe Daten.
+    fields:
+      enabled:
+        name: Aktiviert
+        description: Einschalten, sobald Benutzername und Passwort eingetragen sind. Danach Add-on neu starten.
+      host:
+        name: Server
+        description: "Standard: datahub.swisseldex.ch"
+      port:
+        name: Port
+        description: "Standard: 21 (FTPES, explizites TLS)"
+      username:
+        name: Benutzername
+        description: FTPES-Benutzername aus dem Swisseldex-Portal
+      password:
+        name: Passwort
+        description: FTPES-Passwort aus dem Swisseldex-Portal. Wird nicht in der Datenbank gespeichert.
+      auto_sync:
+        name: Automatisch synchronisieren
+        description: Aus lassen, bis der erste manuelle Test erfolgreich war.
+      sync_interval_hours:
+        name: Intervall (Stunden)
+        description: Wie oft automatisch synchronisiert wird. Standard 6.

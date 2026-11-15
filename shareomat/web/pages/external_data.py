@@ -25,11 +25,20 @@ Notes:
     Fetches run synchronously inside the POST request (SPARQL/REST calls
     typically take ~1s); the web server is threaded (ThreadingHTTPServer)
     so this does not block other visitors.
+
+    The Swisseldex card is different: its test and sync run in the
+    SwisseldexReceiver's own thread (one login per minute, see
+    shareomat.core.collector.swisseldex_receiver). The POST only queues the
+    request and waits a bounded time for the result; a request that must wait
+    for the login gate returns at once and shows up in the card's log.
+    Swisseldex writes nothing to the database and nothing to data_imports.
 """
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Callable, TypeVar
 
 from shareomat.core.price_validation import PriceValidationError
@@ -48,6 +57,9 @@ from shareomat.web.state import get_state
 
 _T = TypeVar("_T")
 _SUMMARY_ITEM_LIMIT = 12
+# How long a Swisseldex button waits for its result inside the request.
+_SWISSELDEX_WAIT_SECONDS = 20.0
+_LOCAL_TZ = ZoneInfo(os.environ.get("SHAREOMAT_TZ", "Europe/Zurich"))
 
 
 def _summarize(items: list[_T], formatter: Callable[[_T], str], *, limit: int = _SUMMARY_ITEM_LIMIT) -> str:
@@ -56,6 +68,62 @@ def _summarize(items: list[_T], formatter: Callable[[_T], str], *, limit: int = 
     if len(items) > limit:
         shown += f", … ({len(items) - limit} weitere)"
     return shown
+
+
+def _local_time(value: str | None) -> str:
+    """ISO timestamp (UTC) of the Swisseldex state as local 'dd.mm.yyyy HH:MM', or '–'."""
+    if not value:
+        return "–"
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(_LOCAL_TZ).strftime("%d.%m.%Y %H:%M")
+
+
+def _swisseldex_action(kind: str, label: str) -> None:
+    """Queue a Swisseldex test/sync and flash its result, or that it runs in the background."""
+    receiver = get_state().swisseldex
+    if receiver is None:
+        raise FormError("Swisseldex ist nicht aktiviert (Add-on-Optionen, Abschnitt «Swisseldex»).")
+    outcome = receiver.request(kind)
+    if not outcome.accepted:
+        get_state().set_flash(f"{label}: {outcome.message}", ok=False)
+        return
+    if outcome.starts_in_seconds <= 0:
+        record = receiver.wait_for_run(outcome.run_id, timeout=_SWISSELDEX_WAIT_SECONDS)
+        if record is not None:
+            get_state().set_flash(f"{label}: {record['message']}", ok=record["result"] != "error")
+            return
+    get_state().set_flash(
+        f"{label}: {outcome.message} Das Ergebnis erscheint im Swisseldex-Protokoll (Seite neu laden).", ok=True,
+    )
+
+
+def _swisseldex_view(receiver) -> dict | None:
+    """The receiver's snapshot plus the SX-2 import result per received file (from the database)."""
+    if receiver is None:
+        return None
+    from shareomat.database.sdat_store import documents_by_sha, established_community_id
+    from shareomat.database.settings import get_operation_settings
+    from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
+
+    view = receiver.snapshot()
+    db_path = get_state().db_path
+    if db_path is None:
+        return view
+    documents = documents_by_sha(db_path)
+    for entry in view["files"]:
+        record = documents.get(entry["sha256"])
+        entry["import_outcome"] = record.outcome if record else ""
+        entry["import_message"] = record.message if record else ""
+        entry["import_type"] = record.document_type if record else ""
+    view["pending_import"] = sum(1 for f in view["files"] if f["status"] == "received" and f["import_outcome"] != "imported")
+    view["community_id"] = established_community_id(db_path)
+    view["billing_uses_sdat"] = get_operation_settings(db_path).meter_data_source == METER_DATA_SOURCE_SDAT_LEG
+    return view
 
 
 def handle_get(ctx: RequestContext) -> str:
@@ -74,6 +142,9 @@ def handle_get(ctx: RequestContext) -> str:
         pv_reference_prices=pv_reference_prices,
         exchange_rates=exchange_rates,
         elcom_tariffs=elcom_tariffs,
+        swisseldex=_swisseldex_view(get_state().swisseldex),
+        sx_time=_local_time,
+        sx_errors_only=ctx.query.get("swisseldex") == "fehler",
     )
 
 
@@ -87,6 +158,30 @@ def handle_post(ctx: RequestContext) -> str | None:
 
 def _handle_post(ctx: RequestContext) -> str | None:
     action = ctx.segments[0] if ctx.segments else ""
+
+    if action == "swisseldex_test":
+        _swisseldex_action("test", "Verbindungstest")
+        return None
+
+    if action == "swisseldex_sync":
+        _swisseldex_action("sync", "Synchronisation")
+        return None
+
+    if action == "swisseldex_import":
+        receiver = get_state().swisseldex
+        if receiver is None:
+            raise FormError("Swisseldex ist nicht aktiviert (Add-on-Optionen, Abschnitt «Swisseldex»).")
+        outcomes = [o for o in receiver.import_now() if not o.skipped]
+        imported = sum(1 for o in outcomes if o.imported)
+        refused = len(outcomes) - imported
+        if not outcomes:
+            get_state().set_flash("Import: keine neuen Dateien zu importieren.", ok=True)
+        else:
+            get_state().set_flash(
+                f"Import: {imported} Datei(en) importiert, {refused} nicht importiert (Grund in der Tabelle).",
+                ok=refused == 0,
+            )
+        return None
 
     if action == "settings":
         save_external_data_settings(ctx.db_path, ExternalDataSettings(

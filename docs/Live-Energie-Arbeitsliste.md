@@ -30,6 +30,12 @@ lokale `TODO.md` verweist für die Liveplattform hierher.
 
 Status: `OFFEN`, `IN ARBEIT`, `BLOCKIERT`, `TEST AUSSTEHEND`, `ERLEDIGT`.
 
+> **Vorrang ab 12.11.2026:** Der Swisseldex-SDAT-Empfang (SX-1, danach SX-2 und
+> SX-3) ist eine eigene Spur ausserhalb dieser Liste und hat Vorrang vor LE-23,
+> LE-24, LE-25 und AUD-02. Siehe
+> `docs/development/Swisseldex-SDAT-Auftrag_2026-11-12.md`. Alle Aufgaben dieser
+> Liste bleiben unverändert bestehen.
+
 ## Aktueller Schwerpunkt (ab 08.11.2026)
 
 Es wird ausschliesslich an Shareomat gearbeitet. Ziel: die Verwaltung um
@@ -701,9 +707,11 @@ Funktionen nicht blockieren. Für die erste Live-Anzeige reicht der aktuelle Wer
 historische Nachlieferung ist vorerst nicht nötig. Für spätere historische Messwerte
 oder Abrechnungsdaten braucht es eine separate, zuverlässige Synchronisierung.
 
-### ADR-0008
+### ADR für das Portal (Nummer bei Beginn von LE-22)
 
-Wird bei Beginn von LE-22 erstellt und ersetzt oder ergänzt gezielt die
+Die Nummer ADR-0008 ist seit 12.11.2026 für die offizielle SDAT-Zuteilung vergeben (Swisseldex
+SX-3). Das Portal-ADR bekommt bei Beginn von LE-22 die nächste freie Nummer. Es wird dann
+erstellt und ersetzt oder ergänzt gezielt die
 Portal-API-Architektur aus ADR-0007. Erhalten bleiben: Trennung von der Verwaltung, keine
 administrativen Funktionen über das Portal, gesicherte Anmeldung, Berechtigungskontrolle,
 Datenschutz, unabhängiges Security-Review vor dem öffentlichen Betrieb.

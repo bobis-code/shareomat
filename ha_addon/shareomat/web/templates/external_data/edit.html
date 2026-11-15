@@ -128,6 +128,135 @@
   {% endif %}
 </div>
 
+<div class="card" id="swisseldex">
+  <h2>Swisseldex Datahub (SDAT-Empfang)</h2>
+  {% if not swisseldex %}
+  <p class="ts">Nicht aktiviert. Zum Einschalten in den Add-on-Optionen im Abschnitt «Swisseldex» Benutzername und
+    Passwort des FTPES-Zugangs eintragen, «Aktiviert» einschalten und das Add-on neu starten.</p>
+  {% else %}
+  {% set sx = swisseldex %}
+  {% if sx.state_error %}
+  <div class="notice-err">Die Swisseldex-Zustandsdatei ist beschädigt und wurde nicht verändert. Empfang angehalten.
+    <div class="ts">{{ sx.state_error }}</div></div>
+  {% elif not sx.configured %}
+  <div class="notice-warn">Benutzername oder Passwort fehlt in den Add-on-Optionen (Abschnitt «Swisseldex»).</div>
+  {% endif %}
+  {% if sx.overdue_days %}
+  <div class="notice-warn">Seit {{ sx.overdue_days }} Tagen keine erfolgreiche Synchronisation. Nicht abgeholte Dateien
+    löscht Swisseldex nach 30 Tagen.</div>
+  {% endif %}
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        <tr><th>Verbindung</th><td>
+          {% if sx.last_connection_ok is none %}noch nicht geprüft
+          {% elif sx.last_connection_ok %}<span class="status-pill status-pill-active">erfolgreich</span>
+          {% else %}<span class="status-pill status-pill-inactive">fehlgeschlagen</span>{% endif %}
+          {% if sx.running %} · läuft gerade ({{ 'Verbindungstest' if sx.running == 'test' else 'Synchronisation' }})
+          {% elif sx.pending %} · geplant ({{ 'Verbindungstest' if sx.pending == 'test' else 'Synchronisation' }}){% endif %}
+        </td></tr>
+        <tr><th>Letzter Verbindungsversuch</th><td>{{ sx_time(sx.last_connection_at) }}</td></tr>
+        <tr><th>Letzte erfolgreiche Synchronisation</th><td>{{ sx_time(sx.last_sync_success_at) }}</td></tr>
+        <tr><th>Automatische Synchronisation</th><td>
+          {% if sx.auto_sync %}alle {{ sx.interval_hours }} h · nächste: {{ sx_time(sx.next_auto_at) }}
+          {% else %}aus (in den Add-on-Optionen einschaltbar){% endif %}</td></tr>
+        <tr><th>Dateien auf Swisseldex</th><td>{{ sx.remote_count if sx.remote_count is not none else '–' }}
+          <span class="ts">(Shareomat löscht dort keine Dateien)</span></td></tr>
+        <tr><th>Empfangen (lokal archiviert)</th><td>{{ sx.received_total }}{% if sx.needs_review_total %} ·
+          <span class="status-pill status-pill-inactive">{{ sx.needs_review_total }} benötigt Prüfung</span>{% endif %}</td></tr>
+        <tr><th>Import (offizielle Zeitreihen)</th><td>
+          {% if sx.pending_import %}<span class="status-pill status-pill-inactive">{{ sx.pending_import }} Datei(en) nicht importiert</span>
+          {% else %}alle empfangenen Dateien geprüft{% endif %}
+          {% if sx.community_id %} · CommunityID laut Netzbetreiber: {{ sx.community_id }}{% endif %}</td></tr>
+        <tr><th>Abrechnung</th><td>
+          {% if sx.billing_uses_sdat %}verwendet die offiziellen SDAT-Daten (Einstellungen → Messdaten-Quelle)
+          {% else %}verwendet weiterhin die bisherigen Messdateien. Die offiziellen Daten gelten erst mit
+          «Messdaten-Quelle: SDAT (EBL/Swisseldex)» unter Einstellungen.{% endif %}
+          Abrechnungen werden nie automatisch erstellt oder freigegeben.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="actions-row">
+    <form method="post" action="{{ url_for('external_data', suffix='/swisseldex_test') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-secondary" {{ 'disabled' if sx.state_error or not sx.configured }}>Verbindung testen</button>
+    </form>
+    <form method="post" action="{{ url_for('external_data', suffix='/swisseldex_sync') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" {{ 'disabled' if sx.state_error or not sx.configured }}>Jetzt synchronisieren</button>
+    </form>
+    {% if sx.pending_import %}
+    <form method="post" action="{{ url_for('external_data', suffix='/swisseldex_import') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-secondary">Empfangene Dateien erneut prüfen und importieren</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="field-hint">Verbindung testen liest nur das Verzeichnis. Synchronisieren lädt neue Dateien herunter und
+    archiviert sie lokal. Mit der Messdaten-Quelle «SDAT» werden sie danach automatisch importiert, sonst nur mit dem
+    Button «Empfangene Dateien erneut prüfen und importieren». Swisseldex erlaubt nur eine Anmeldung pro Minute –
+    ein zweiter Vorgang wird automatisch kurz verzögert.</div>
+
+  <h3 style="margin-top:18px">Protokoll
+    <span class="ts" style="font-weight:normal">
+      {% if sx_errors_only %}· nur Fehler · <a href="{{ url_for('external_data') }}#swisseldex">alle anzeigen</a>
+      {% else %}· <a href="{{ url_for('external_data') }}?swisseldex=fehler#swisseldex">nur Fehler</a>{% endif %}
+    </span></h3>
+  {% set runs = sx.runs | selectattr('result', 'equalto', 'error') | list if sx_errors_only else sx.runs %}
+  {% if runs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Nr.</th><th>Start</th><th>Vorgang</th><th>Verbindung</th><th>Download</th><th>Import</th>
+        <th>Dateien</th><th>Ergebnis</th></tr></thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td>{{ r.id }}</td>
+          <td>{{ sx_time(r.started_at) }}</td>
+          <td>{{ 'Test' if r.kind == 'test' else 'Synchronisation' }} ({{ 'manuell' if r.trigger == 'manual' else 'automatisch' }}{% if r.attempt and r.attempt > 1 %}, Versuch {{ r.attempt }}{% endif %})</td>
+          <td>{{ '✓' if r.connection == 'ok' else '✗' }}</td>
+          <td>{{ '–' if r.download == '-' else ('✓' if r.download == 'ok' else '✗') }}</td>
+          <td>{{ {'-': '–', 'ok': '✓', 'warning': '⚠', 'error': '✗'}.get(r.import, '–') }}</td>
+          <td>{{ r.listed }} gefunden · {{ r.downloaded }} neu · {{ r.known }} bekannt{% if r.duplicates %} · {{ r.duplicates }} Duplikat{% endif %}{% if r.review %} · {{ r.review }} Prüfung{% endif %}</td>
+          <td><span class="status-pill {{ 'status-pill-active' if r.result == 'ok' else 'status-pill-inactive' }}">{{ r.message }}</span>
+            {% if r.detail %}<div style="font-family:monospace;font-size:.75rem;white-space:normal;word-break:break-word">{{ r.detail }}</div>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Noch keine Einträge.</p>
+  {% endif %}
+
+  {% if sx.files or sx.skipped %}
+  <h3 style="margin-top:18px">Empfangene Dateien</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Datei</th><th>Grösse (Bytes)</th><th>Empfangen</th><th>Status</th><th>Import</th><th>Prüfsumme</th></tr></thead>
+      <tbody>
+        {% for f in sx.skipped %}
+        <tr><td>{{ f.name }}</td><td>{{ f.size if f.size is not none else '–' }}</td><td>{{ sx_time(f.noticed_at) }}</td>
+          <td><span class="status-pill status-pill-inactive">nicht heruntergeladen: {{ f.reason }}</span></td><td>–</td><td>–</td></tr>
+        {% endfor %}
+        {% for f in sx.files %}
+        <tr><td>{{ f.name }}{% if f.aliases %} <span class="ts">(auch als {{ f.aliases | join(', ') }})</span>{% endif %}</td>
+          <td>{{ f.size }}</td><td>{{ sx_time(f.received_at) }}</td>
+          <td><span class="status-pill {{ 'status-pill-active' if f.status == 'received' else 'status-pill-inactive' }}">{{ 'empfangen' if f.status == 'received' else 'benötigt Prüfung' }}</span>
+            {% if f.note %}<span class="ts">{{ f.note }}</span>{% endif %}</td>
+          <td>{% if f.import_outcome == 'imported' %}<span class="status-pill status-pill-active">importiert ({{ f.import_type }})</span>
+            {% elif f.import_outcome == 'rejected' %}<span class="status-pill status-pill-inactive">nicht importiert</span>
+            {% else %}–{% endif %}
+            {% if f.import_message %}<div class="ts">{{ f.import_message }}</div>{% endif %}</td>
+          <td style="font-family:monospace;font-size:.75rem">{{ f.sha256[:16] }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
 <div class="card">
   <h2>Letzte Abrufe</h2>
   <p class="ts">Verlauf/Audit-Trail — die aktuellen Werte selbst stehen in den Tabellen oben.</p>

@@ -112,9 +112,11 @@ def parse_file(
 
     meter_data_source (OperationSettings.meter_data_source) only affects
     file_type == "sdat": METER_DATA_SOURCE_SDAT_LEG routes to the real
-    VSE SDAT-CH-2025 parser (raw/sdat_ch.py, currently a stub that raises
-    SdatChNotImplementedError — see docs/sdat_leg_import.md); the default
-    keeps using the legacy experimental parser in leg_parser.py.
+    VSE SDAT-CH-2025 parser (raw/sdat_ch.py), which yields the measured E66
+    totals only; the default keeps using the legacy experimental parser in
+    leg_parser.py. Billing with the SDAT source does not use inbox files at
+    all: it takes the official split from shareomat.database.sdat_store
+    (ADR-0008).
     """
     if imp.file_type == "csv":
         return parse_csv(imp.path, slot_minutes=slot_minutes, known_meter_ids=known_meter_ids, errors=errors)

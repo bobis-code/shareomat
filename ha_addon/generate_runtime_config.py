@@ -51,7 +51,10 @@ _SPARKPLUG_ID = re.compile(r"^[^/+#\s\x00-\x1f\x7f]{1,64}$")
 # Runtime (technical) keys this script owns; every other top-level key in an
 # existing CONFIG_OUTPUT file (legacy "leg"/"participants"/"meters"/"tariffs")
 # is preserved as-is until Shareomat's one-time database import consumes it.
-_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web"}
+_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex"}
+
+_SWISSELDEX_HOST = "datahub.swisseldex.ch"
+_SWISSELDEX_INTERVALS = (1, 3, 6, 12, 24)
 
 
 def _sparkplug_section(opts: dict, existing: dict) -> dict | None:
@@ -94,6 +97,36 @@ def _sparkplug_section(opts: dict, existing: dict) -> dict | None:
         "emsomat_edge_node_id": node_id,
         "participant_edge_node_id": "shareomat-relay",
         "managed_by_addon": True,
+    }
+
+
+def _swisseldex_section(opts: dict) -> dict:
+    """The Swisseldex mailbox, from the add-on option section `swisseldex`.
+
+    Off unless switched on. A malformed section or interval does not stop the
+    start: Swisseldex stays off or falls back to 6 hours.
+    """
+    section = opts.get("swisseldex")
+    if not isinstance(section, dict):
+        section = {}
+    try:
+        interval = int(str(section.get("sync_interval_hours", 6)))
+    except ValueError:
+        interval = 6
+    if interval not in _SWISSELDEX_INTERVALS:
+        interval = 6
+    try:
+        port = int(section.get("port", 21))
+    except (TypeError, ValueError):
+        port = 21
+    return {
+        "enabled":             bool(section.get("enabled", False)),
+        "host":                str(section.get("host") or _SWISSELDEX_HOST).strip(),
+        "port":                port,
+        "username":            str(section.get("username") or "").strip(),
+        "password":            str(section.get("password") or ""),
+        "auto_sync":           bool(section.get("auto_sync", False)),
+        "sync_interval_hours": interval,
     }
 
 
@@ -162,7 +195,7 @@ def main() -> None:
         },
     }
 
-    config = {**legacy_sections, **runtime_config}
+    config = {**legacy_sections, **runtime_config, "swisseldex": _swisseldex_section(opts)}
     sparkplug = _sparkplug_section(opts, existing)
     if sparkplug is not None:
         config["sparkplug"] = sparkplug

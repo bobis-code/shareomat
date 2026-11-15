@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Tests for the SDAT-CH-2025 parser scaffold and its meter_data_source routing.
+"""SDAT-CH routing in the automatic engine (meter_data_source) and the confirmed code values.
 
-Mirrors tests/test_external_data_placeholders.py: confirms the not-yet-
-implemented parser fails clearly instead of guessing XML structure, and
-that shareomat.core.leg_runner.parse_file only reaches it when a
-community has explicitly switched meter_data_source to "sdat_leg".
+The parser itself is tested in tests/test_sdat_ch_parser.py.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from datetime import datetime, timezone
 
 import pytest
 
@@ -17,11 +14,7 @@ from shareomat.core.leg_runner import parse_file
 from shareomat.core.pipeline.raw import sdat_ch
 from shareomat.leg_const import METER_DATA_SOURCE_EMAIL_CSV, METER_DATA_SOURCE_SDAT_LEG
 from shareomat.models.meter_data import ImportFile
-
-
-def test_parse_sdat_ch_raises_pending_verification():
-    with pytest.raises(sdat_ch.SdatChNotImplementedError, match="SDAT-CH-2025"):
-        sdat_ch.parse_sdat_ch(Path("does-not-need-to-exist.xml"))
+from tests.sdat_fixtures import CONSUMER, PRODUCER, Document, build, leg_day
 
 
 def test_product_id_to_energy_type_matches_spec():
@@ -33,9 +26,23 @@ def test_product_id_to_energy_type_matches_spec():
 
 
 def test_parse_file_routes_sdat_to_new_parser_only_when_selected(tmp_path):
-    imp = ImportFile(path=tmp_path / "not-yet-fetched.xml", file_type="sdat", sha256="x")
+    path = tmp_path / "e66.xml"
+    path.write_bytes(build(Document(series=leg_day(["2.000", "1.500"], ["1.000", "1.500"], ["3.000", "1.000"], ["1.000", "1.000"]))))
+    imp = ImportFile(path=path, file_type="sdat", sha256="x")
 
-    with pytest.raises(sdat_ch.SdatChNotImplementedError):
+    readings = parse_file(imp, 15, None, meter_data_source=METER_DATA_SOURCE_SDAT_LEG)
+    # Only the measured total becomes a reading: consumption as import, production as export.
+    assert sorted((r.meter_id, r.direction, r.value_kwh) for r in readings) == [
+        (CONSUMER, "import", 1.5), (CONSUMER, "import", 2.0), (PRODUCER, "export", 1.0), (PRODUCER, "export", 3.0),
+    ]
+    assert readings[0].slot_start == datetime(2026, 11, 30, 23, 0, tzinfo=timezone.utc)
+
+
+def test_parse_file_refuses_a_broken_sdat_document_instead_of_guessing(tmp_path):
+    path = tmp_path / "broken.xml"
+    path.write_text('<?xml version="1.0"?><root></root>', encoding="utf-8")
+    imp = ImportFile(path=path, file_type="sdat", sha256="x")
+    with pytest.raises(sdat_ch.SdatChValidationError):
         parse_file(imp, 15, None, meter_data_source=METER_DATA_SOURCE_SDAT_LEG)
 
 

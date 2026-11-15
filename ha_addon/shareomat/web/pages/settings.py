@@ -33,7 +33,7 @@ UNKNOWN_METER_POLICIES = [
 
 METER_DATA_SOURCES = [
     (METER_DATA_SOURCE_EMAIL_CSV, "E-Mail / CSV (aktuell)"),
-    (METER_DATA_SOURCE_SDAT_LEG, "SDAT (EBL/Swisseldex) — in Vorbereitung"),
+    (METER_DATA_SOURCE_SDAT_LEG, "SDAT (EBL/Swisseldex) — offizielle Zuteilung des Netzbetreibers"),
 ]
 
 

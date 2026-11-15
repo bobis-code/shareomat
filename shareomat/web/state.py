@@ -48,6 +48,7 @@ class WebState:
         self._runtime: RuntimeConfig | None = None
         self._emsomat_online_getter: Callable[[], bool] | None = None
         self._live_service = None
+        self._swisseldex = None
 
         self._flash_msg: str = ""
         self._flash_ok: bool = True
@@ -96,6 +97,11 @@ class WebState:
                 warnings.append(message)
             self._data["warnings"] = warnings
 
+    def discard_warning(self, message: str) -> None:
+        """Remove one warning that no longer applies (e.g. Swisseldex synced again)."""
+        with self._lock:
+            self._data["warnings"] = [w for w in self._data.get("warnings", []) if w != message]
+
     def clear_warnings(self) -> None:
         """Clear persistent dashboard warnings."""
         with self._lock:
@@ -120,6 +126,17 @@ class WebState:
         """Register the live layer (None while it is not running)."""
         with self._lock:
             self._live_service = service
+
+    def register_swisseldex(self, receiver) -> None:
+        """Register the Swisseldex mailbox receiver (None while Swisseldex is off)."""
+        with self._lock:
+            self._swisseldex = receiver
+
+    @property
+    def swisseldex(self):
+        """The SwisseldexReceiver, or None if Swisseldex is not enabled."""
+        with self._lock:
+            return self._swisseldex
 
     @property
     def live_service(self):

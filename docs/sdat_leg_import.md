@@ -1,5 +1,20 @@
 # Shareomat — SDAT-CH-Import für Schweizer LEG
 
+> **Stand 12.11.2026 (Swisseldex-Auftrag SX-1 bis SX-3):**
+>
+> * Empfang, Parser, Import und offizieller Abrechnungsweg sind umgesetzt und
+>   mit den offiziellen VSE-Unterlagen (SDAT-CH 2025, Stand 04.12.2025) sowie
+>   synthetischen Testdokumenten geprüft. Mit echten EBL-Dateien ist das noch
+>   **nicht verifiziert**.
+> * Empfang: §16 «Umsetzung des Empfangs».
+> * Parser: `shareomat/core/pipeline/raw/sdat_ch.py`.
+> * Import und Versionen: `shareomat/core/collector/sdat_import.py`,
+>   `shareomat/database/sdat_store.py`.
+> * Abrechnung mit der offiziellen Zuteilung: ADR-0008.
+> * Was jetzt verifiziert ist und was offen bleibt: §32.
+> * Der folgende Text ist das ursprüngliche Planungsdokument und bleibt als
+>   Begründung erhalten.
+>
 > **Status (2026-08-13):** Planungsdokument. Beschreibt den Zielzustand für
 > einen echten VSE-SDAT-CH-2025-Import (E31/E66). Abgleich mit dem
 > bestehenden Code:
@@ -474,6 +489,63 @@ Das Raw-Archiv dient:
 - Audits
 
 Eine empfangene Originaldatei sollte niemals überschrieben werden.
+
+### Umsetzung des Empfangs (SX-1, Stand 12.11.2026)
+
+Umgesetzt sind der Empfang und das Raw-Archiv, die Verarbeitung noch nicht.
+Module: `shareomat/core/collector/swisseldex_ftpes.py` (FTPES-Client) und
+`shareomat/core/collector/swisseldex_receiver.py` (Empfang, Archiv, Protokoll).
+
+* **Konfiguration:** Add-on-Optionen, Abschnitt `swisseldex` (im
+  Standalone-Betrieb der Abschnitt `swisseldex` in `config.yaml`). Das Passwort
+  steht nie in `shareomat.db`. Alles ist standardmässig aus, auch die
+  automatische Synchronisation (Intervall 1/3/6/12/24 h, Standard 6 h).
+* **Bedienung:** Seite «Externe Daten», Karte «Swisseldex Datahub» mit Status,
+  «Verbindung testen», «Jetzt synchronisieren», Protokoll und empfangenen
+  Dateien.
+* **Archiv:** `<state>/swisseldex/received/<SHA-256-Präfix>_<Dateiname>`.
+  * Die Datei wird byte-genau so gespeichert, wie sie von Swisseldex kam.
+  * Ablauf: Download in eine `.part`-Datei, Prüfung der Grösse, `fsync`, dann
+    Umbenennen.
+  * Das Archiv liegt bewusst **nicht** in Inbox oder Archiv der
+    Abrechnungsdateien. Die Freigabe eines Abrechnungslaufs prüft diese beiden
+    Ordner auf Veränderungen, und der Datei-Watcher würde dort Dateien sofort
+    verarbeiten.
+* **Zustand und Protokoll:** `<state>/swisseldex/state.json`.
+  * Der Zustand liegt in einer JSON-Datei wie beim E-Mail-Importer, nicht in
+    `shareomat.db`. Eine Synchronisation schreibt deshalb nie in die
+    Geschäftsdatenbank.
+  * Die Datei wird atomar geschrieben. Ist sie beschädigt, wird sie nicht
+    zurückgesetzt, und der Empfang hält an.
+* **Duplikate:**
+  * Eine Datei mit gleichem Namen, gleicher Grösse und gleichem Zeitstempel
+    gilt als bekannt und wird nicht erneut geladen.
+  * Gleicher Inhalt unter neuem Namen wird erkannt (SHA-256) und nicht doppelt
+    abgelegt.
+  * Gleicher Name mit neuem Inhalt wird als zweite Datei behalten und
+    gekennzeichnet.
+* **Prüfbedürftig, nicht still ignoriert:**
+  * Nicht zulässige Dateinamen und andere Endungen als `.xml`, `.txt` und
+    `.csv` (jeweils auch `.gz`) werden nicht heruntergeladen.
+  * Ebenso Dateien über 50 MB.
+  * Beschädigte `.gz`-Dateien und solche, die entpackt über 512 MB gross sind,
+    werden archiviert, aber gekennzeichnet.
+* **Swisseldex-Regeln:**
+  * Zwischen zwei Anmeldungen liegen mindestens 61 s, gespeichert über einen
+    Neustart hinweg. Eine zweite Anfrage wird eingeplant statt abgewiesen.
+  * Nach einem Abbruch beginnt der Download neu, weil der Server kein `REST`
+    kennt.
+  * Ein TLS-Schliessfehler nach vollständigem Download (Grösse belegt) ist nur
+    ein Hinweis.
+  * Der Datenkanal verwendet die TLS-Sitzung des Steuerkanals wieder.
+* **Nie:**
+  * kein Löschen, Umbenennen oder Hochladen auf Swisseldex,
+  * keine Quittungen,
+  * kein Import in die Messdaten,
+  * keine Abrechnung.
+* **Warnung:** Nach 7 Tagen ohne erfolgreiche Synchronisation erscheint ein
+  Hinweis auf jeder Seite. Swisseldex löscht nicht abgeholte Dateien nach
+  30 Tagen.
 
 ---
 
@@ -1071,6 +1143,57 @@ Folgende Punkte dürfen **nicht geraten** werden:
 
 Diese Punkte werden aus den offiziellen XSDs und Beispielnachrichten
 abgeleitet.
+
+### Stand der Verifikation (12.11.2026)
+
+Quelle: VSE-ZIP «Beispieldaten (SDAT-CH 2025)»
+`https://www.strom.ch/system/files/media/documents/20251204-be-standardisierter-datenaustausch-ch-beispieldateien.zip`
+mit XSDs und Beispielen, dazu «Messdatenaustauschprozesse» Kapitel 1.12/1.13 und
+Anhang 1. Die PDF-Links `media/13631` und `media/13636` sind Beschreibungen,
+keine XSD-Dateien.
+
+| Nr. | Punkt | Ergebnis |
+|---|---|---|
+| 1 | Namespaces | `http://www.strom.ch`, Wurzel `ValidatedMeteredData_16` (E66) bzw. `AggregatedMeteredData_13` (E31). Erkannt über Namespace, nicht über das Präfix |
+| 2 | Elementpfade E66/E31 | aus XSD und Beispielen 1_12_3/1_13_3 übernommen |
+| 3 | Dokument-ID | `InstanceDocument/DocumentID`, je Zeitreihe zusätzlich `MeteringData/DocumentID` |
+| 4 | Statuscodes | 9 Original, 5 Replace, 1 Cancellation |
+| 5 | Qualitätscodes | nur 21 (vorläufig) und 56 (Ersatzwert) zulässig (XSD-Pattern), fehlend = normaler Wert |
+| 6 | Zeitstempel | `Interval` in UTC, Position n = Beginn + (n−1) × 15 min, alle Positionen 1..N genau einmal |
+| 7 | Sommer-/Winterzeit | ergibt sich aus der UTC-Intervalllänge (92/96/100 Viertelstunden), getestet |
+| 8 | CommunityID | je Zeitreihe `Community/CommunityID` (Muster `[0-9]{6}-[0-9A-Z]{6}`). Ein Dokument kann mehrere Gemeinschaften enthalten |
+| 9 | CT01/CT02 | `Community/CommunityType/VSENationalCode` |
+| 10 | E31-Struktur | je Netzgebiet (`MeteringGridArea/EICID`) und Fluss (`FlowCharacteristic` E17 Verbrauch / E18 Einspeisung) |
+| 11 | Ersatz/Storno | umgesetzt nach ADR-0008. Needs verification: wie EBL storniert |
+| 12 | Einheiten | nur `KWH`, höchstens 3 Nachkommastellen |
+| 13 | Vollständigkeit pro Monat | Gesamtenergie = LEG-Energie + Restenergie (in den Beispielen erfüllt). Fehlende Teile sperren die Abrechnung |
+| 14 | Empfang | FTPES-Postfach beim Datahub (SX-1) |
+| 15 | Dateinamen | nicht verwendet, die Erkennung erfolgt über den Inhalt |
+
+Bekannte Abweichung im VSE-Beispiel 1_12_3: Die Produktionsblöcke f/g tragen die
+Produkt-ID «Total» statt LEG- bzw. Restenergie. Ihre Werte sind aber LEG- und
+Restenergie (900 = 700 + 200). Shareomat weist so ein Dokument als mehrdeutig ab
+(`DUPLICATE_SERIES`) und rät nicht.
+
+### Offen bis zur ersten echten Lieferung (Version 0.6.11)
+
+Version 0.6.11 ist **nicht mit echten Monatsdaten verifiziert**. Die erste
+EBL-Lieferung (November 2026) wird um den 5. Arbeitstag im Dezember 2026 erwartet.
+Bis dahin bleiben offen:
+
+| Nr. | Prüfung | Wie |
+|---|---|---|
+| O1 | Echte Anmeldung am Datahub mit den Zugangsdaten aus den Add-on-Optionen, TLS-Sitzung im Datenkanal | Button «Verbindung testen» auf «Externe Daten» |
+| O2 | Echte E66/E31-Dateien von EBL werden empfangen, archiviert und ohne Fehler importiert | Protokoll und Dateiliste auf «Externe Daten» |
+| O3 | Gesamtenergie = LEG-Energie + Restenergie auch in den echten Daten | Abrechnungsvorschau mit Datenquelle SDAT |
+| O4 | Wie EBL Korrekturen und Stornierungen schickt (Status 5/1) | erste Korrekturlieferung abwarten |
+| O5 | Ob EBL eine Empfangsbestätigung verlangt (`isIntelligibleCheckRequired`) | Hinweis im Import, Frage an EBL/Swisseldex |
+| O6 | Ob fehlende E31-Summen und Ersatzwerte (56) im SDAT-Modus die Rechnungen sperren sollen | Entscheid des Betreibers |
+| O7 | Build des Add-on-Images | erster Update-Lauf in Home Assistant (lokal kein Docker) |
+
+Keine vollständige XSD-Validierung: Dafür bräuchte es den kompletten VSE-, UNECE-
+und eCH-Schemasatz und eine zusätzliche Bibliothek. Der Parser prüft jedes
+verwendete Element gegen Typ und Codeliste der XSDs und weist alles andere ab.
 
 ---
 

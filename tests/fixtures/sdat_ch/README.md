@@ -1,4 +1,13 @@
-# SDAT-CH-2025 test fixtures — pending
+# SDAT-CH-2025 test fixtures
+
+Since 12.11.2026 the tests build synthetic E66/E31 documents in the official
+structure with `tests/sdat_fixtures.py` (element names, namespace and codes
+from the VSE SDAT-CH 2025 XSDs and examples, all IDs and values synthetic).
+The official VSE example files are not committed (licence not clarified);
+`tests/test_sdat_ch_parser.py::test_official_vse_examples` runs against them
+when the VSE ZIP is unpacked locally and `SHAREOMAT_VSE_EXAMPLES` points to it.
+
+Original note (before the official material was available):
 
 This directory is a placeholder (docs/sdat_leg_import.md, Phase 2).
 

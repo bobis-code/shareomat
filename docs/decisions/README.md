@@ -78,6 +78,8 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
   Cross-House-Kommunikation über zentralen Sparkplug-B-Relay
 * [ADR-0006](ADR-0006-mqtt-3-1-1-fuer-sparkplug.md) — MQTT 3.1.1 statt 5.0
   für die Sparkplug-B-Kommunikation
+* [ADR-0008](ADR-0008-offizielle-sdat-zuteilung-als-zweiter-abrechnungsweg.md) —
+  Offizielle SDAT-Zuteilung als zweiter Abrechnungsweg (vorgeschlagen)
 
 ## Verbindlichkeit
 

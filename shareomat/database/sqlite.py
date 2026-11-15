@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 16
+_SCHEMA_VERSION = 17
 
 _SCHEMA_STATEMENTS = [
     """
@@ -552,6 +552,60 @@ _SCHEMA_STATEMENTS = [
         applied_at TEXT NOT NULL
     )
     """,
+    # ── Official SDAT-CH data from the grid operator (schema 17, ADR-0008) ──
+    # One row per received SDAT file (imported or not, with the reason). Only
+    # the series of this Shareomat's own LEG are kept; the raw file stays in
+    # the receive archive. Nothing here is ever updated by billing.
+    """
+    CREATE TABLE IF NOT EXISTS sdat_documents (
+        id INTEGER PRIMARY KEY,
+        sha256 TEXT NOT NULL UNIQUE,
+        file_name TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT '',
+        document_type TEXT NOT NULL DEFAULT '',
+        document_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '',
+        source_created_at TEXT,
+        sender_eic TEXT NOT NULL DEFAULT '',
+        sender_role TEXT NOT NULL DEFAULT '',
+        report_start TEXT,
+        report_end TEXT,
+        acknowledgement_requested INTEGER NOT NULL DEFAULT 0,
+        community_id TEXT NOT NULL DEFAULT '',
+        outcome TEXT NOT NULL,
+        reason_code TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        series_count INTEGER NOT NULL DEFAULT 0,
+        foreign_series_count INTEGER NOT NULL DEFAULT 0,
+        first_checked_at TEXT NOT NULL,
+        checked_at TEXT NOT NULL
+    )
+    """,
+    # One flow of one metering point (E66) or of the LEG per grid area (E31).
+    # observations: "value;condition" per quarter hour from interval_start,
+    # joined by "|" - values as decimal strings exactly as delivered.
+    """
+    CREATE TABLE IF NOT EXISTS sdat_series (
+        id INTEGER PRIMARY KEY,
+        document_ref INTEGER NOT NULL REFERENCES sdat_documents(id),
+        block_id TEXT NOT NULL DEFAULT '',
+        metering_point_id TEXT NOT NULL DEFAULT '',
+        grid_area_eic TEXT NOT NULL DEFAULT '',
+        direction TEXT NOT NULL,
+        energy_type TEXT NOT NULL,
+        product_id TEXT NOT NULL,
+        community_id TEXT NOT NULL,
+        interval_start TEXT NOT NULL,
+        interval_end TEXT NOT NULL,
+        observations TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_sdat_series_period ON sdat_series(interval_start, interval_end)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_sdat_series_document ON sdat_series(document_ref)
+    """,
 ]
 
 # Additive column migrations: table -> {column_name: DDL fragment}.
@@ -772,8 +826,67 @@ def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _stored_schema_version(db_path: Path) -> int | None:
+    """Highest recorded schema version; 0 for tables without a recorded version; None for a new database."""
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        return None
+    conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True, timeout=5)
+    try:
+        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if not tables - {"schema_migrations"}:
+            return None
+        if "schema_migrations" not in tables:
+            return 0
+        row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    finally:
+        conn.close()
+
+
+def backup_before_migration(db_path: Path, from_version: int) -> Path:
+    """Consistent copy of an existing database before its schema is changed.
+
+    Uses SQLite's online backup API (includes what is still in the WAL, safe
+    while other connections read), then proves the copy is usable:
+    integrity_check must say "ok" and it must show the same schema version.
+    Raises RuntimeError instead of migrating when that cannot be proven.
+    The copy lives next to the database (same volume, same add-on backup).
+    """
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = db_path.with_name(f"{db_path.stem}.before-schema-{_SCHEMA_VERSION}-from-{from_version}-{stamp}.db")
+    source = sqlite3.connect(db_path, timeout=30)
+    copy = sqlite3.connect(target)
+    try:
+        source.backup(copy)
+    finally:
+        copy.close()
+        source.close()
+    check = sqlite3.connect(f"file:{target.as_posix()}?mode=ro", uri=True)
+    try:
+        integrity = check.execute("PRAGMA integrity_check").fetchone()[0]
+        has_versions = check.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+        ).fetchone()
+        version = check.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] if has_versions else None
+    finally:
+        check.close()
+    if integrity != "ok" or (version or 0) != from_version:
+        raise RuntimeError(f"Backup {target} could not be verified ({integrity}, version {version}); not migrating")
+    logger.info("Database backed up before schema %d migration: %s", _SCHEMA_VERSION, target)
+    return target
+
+
 def init_db(db_path: Path) -> None:
-    """Create tables if missing and record the current schema version. Idempotent."""
+    """Create tables if missing and record the current schema version. Idempotent.
+
+    An existing database with an older schema is first copied with
+    backup_before_migration(). Every step is additive and idempotent
+    (CREATE ... IF NOT EXISTS, ADD COLUMN only when missing): a start that
+    breaks off midway is completed by the next start, nothing is dropped.
+    """
+    stored = _stored_schema_version(db_path)
+    if stored is not None and stored < _SCHEMA_VERSION:
+        backup_before_migration(db_path, stored)
     with connect(db_path) as conn:
         with conn:
             for statement in _SCHEMA_STATEMENTS:

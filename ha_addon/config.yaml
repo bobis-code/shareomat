@@ -56,6 +56,16 @@ options:
   # Passwort vergessen: einschalten, Add-on neu starten, Einmal-Code im Protokoll,
   # neues Passwort in Shareomat festlegen, danach wieder ausschalten.
   reset_login: false
+  # SDAT-Empfang vom Swisseldex Datahub (FTPES-Postfach «Server beim Datahub»).
+  # Nur Empfang und Archivierung, kein Löschen auf Swisseldex, keine Abrechnung.
+  swisseldex:
+    enabled: false
+    host: "datahub.swisseldex.ch"
+    port: 21
+    username: ""
+    password: ""
+    auto_sync: false
+    sync_interval_hours: "6"
 
 schema:
   mqtt_host: str
@@ -85,3 +95,11 @@ schema:
     - str
   email_poll_interval_seconds: int
   reset_login: bool
+  swisseldex:
+    enabled: bool
+    host: str
+    port: port
+    username: str
+    password: password?
+    auto_sync: bool
+    sync_interval_hours: list(1|3|6|12|24)

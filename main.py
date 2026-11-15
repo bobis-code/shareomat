@@ -458,6 +458,71 @@ def _log_automatic_functions(runtime: RuntimeConfig, db_path: Path, sparkplug_ho
     )
 
 
+def _notice_released_corrections(db_path: Path, runtime: RuntimeConfig, outcomes: list) -> None:
+    """New official data for an already released period: a notice, never a change (ADR-0001/0008)."""
+    from shareomat.database.billing import released_runs_needing_review
+    from shareomat.database.sdat_store import imported_period
+
+    periods = [imported_period(db_path, o.sha256) for o in outcomes if o.imported and not o.skipped]
+    periods = [p for p in periods if p is not None]
+    if not periods:
+        return
+    start, end = min(p[0] for p in periods), max(p[1] for p in periods)
+    for run in released_runs_needing_review(db_path, runtime, start, end):
+        label = run.period_label or f"{run.period_start} – {run.period_end}"
+        get_web_state().add_warning(
+            f"Freigegebene Abrechnung {label} weicht von neu importierten offiziellen SDAT-Daten ab. "
+            "Sie bleibt unverändert – bitte prüfen, ob eine Korrekturabrechnung nötig ist."
+        )
+        logger.warning("Released billing run %s differs from newly imported SDAT data", run.id)
+
+
+def _swisseldex_importer(db_path: Path, runtime: RuntimeConfig) -> Callable[[list, bool], list | None]:
+    """SX-2 import of received files, then the correction notice for released periods.
+
+    Automatic (after a sync) only with the data source SDAT. With the default
+    source the official data is not used for billing, and an import - a write
+    to shareomat.db - must not be able to interrupt a running release (it
+    checks PRAGMA data_version). There the operator imports with the button.
+    """
+    def run_import(files: list, automatic: bool) -> list | None:
+        from shareomat.core.collector.sdat_import import import_pending
+        from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
+        if automatic and get_operation_settings(db_path).meter_data_source != METER_DATA_SOURCE_SDAT_LEG:
+            return None
+        outcomes = import_pending(db_path, files, origin="swisseldex")
+        try:
+            _notice_released_corrections(db_path, runtime, outcomes)
+        except Exception:
+            logger.exception("Check of released billing runs against new SDAT data failed")
+        return outcomes
+    return run_import
+
+
+def _setup_swisseldex(runtime: RuntimeConfig, db_path: Path) -> object | None:
+    """Start the Swisseldex mailbox receiver if it is enabled in the add-on options.
+
+    Receives into the archive (SX-1) and imports the official series (SX-2).
+    Billing stays a separate, manual step. A failure here is logged and never
+    stops the rest.
+    """
+    if not runtime.swisseldex.enabled:
+        return None
+    try:
+        from shareomat.core.collector.swisseldex_receiver import SwisseldexReceiver
+        web_state = get_web_state()
+        receiver = SwisseldexReceiver(
+            runtime.swisseldex, runtime.paths.state / "swisseldex",
+            warn=web_state.add_warning, unwarn=web_state.discard_warning,
+            importer=_swisseldex_importer(db_path, runtime),
+        )
+        receiver.start()
+    except Exception:
+        logger.exception("Swisseldex receiver could not be started; everything else keeps running")
+        return None
+    return receiver
+
+
 def _setup_sparkplug(
     runtime: RuntimeConfig, live_service: object | None = None,
 ) -> tuple[object | None, object | None, object | None, object | None]:
@@ -801,6 +866,13 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
     if _SHUTDOWN.is_set():
         return
 
+    swisseldex = _setup_swisseldex(runtime, db_path)
+    if swisseldex is not None:
+        get_web_state().register_swisseldex(swisseldex)
+        shutdown.add("Swisseldex receiver", lambda: swisseldex.stop(timeout=min(5.0, _drain_seconds_left())))
+    if _SHUTDOWN.is_set():
+        return
+
     # A signal during this cycle only sets the flag: the cycle ends normally, then the shutdown runs.
     _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host)
     if _SHUTDOWN.is_set():
@@ -816,8 +888,8 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
             on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host),
             shutdown=shutdown,
         )
-    elif web_server is not None:
-        # No daemon services, but the admin web UI must keep running.
+    elif web_server is not None or swisseldex is not None:
+        # No daemon services, but the admin web UI (or the Swisseldex receiver) must keep running.
         logger.info("No daemon services configured — web UI stays up")
         _wait_for_shutdown()
 

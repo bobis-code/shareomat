@@ -194,6 +194,37 @@ class WanConfig:
 
 
 @dataclass
+class SwisseldexConfig:
+    """Swisseldex Datahub mailbox ("Server beim Datahub"), fetched over FTPES.
+
+    Credentials live here, in the technical runtime configuration (add-on
+    options / config.yaml), never in SQLite - the same place as the MQTT and
+    e-mail passwords. Off by default; automatic sync is a second, separate
+    switch. See docs/development/Swisseldex-SDAT-Auftrag_2026-11-12.md.
+    """
+
+    enabled: bool = False
+    host: str = "datahub.swisseldex.ch"
+    port: int = 21
+    username: str = ""
+    password: str = ""
+    auto_sync: bool = False
+    sync_interval_hours: int = 6
+    timeout_seconds: int = 30
+
+    def __repr__(self) -> str:
+        # The password must never reach a log line through an accidental repr().
+        return (
+            f"SwisseldexConfig(enabled={self.enabled}, host={self.host!r}, port={self.port}, "
+            f"username={'set' if self.username else 'empty'}, password={'set' if self.password else 'empty'}, "
+            f"auto_sync={self.auto_sync}, sync_interval_hours={self.sync_interval_hours})"
+        )
+
+
+SWISSELDEX_SYNC_INTERVALS_HOURS: tuple[int, ...] = (1, 3, 6, 12, 24)
+
+
+@dataclass
 class RuntimeConfig:
     """The technical configuration that comes from Docker/Home-Assistant options, not SQLite."""
 
@@ -203,6 +234,7 @@ class RuntimeConfig:
     web: WebConfig = field(default_factory=WebConfig)
     sparkplug: SparkplugConfig = field(default_factory=SparkplugConfig)
     wan: WanConfig = field(default_factory=WanConfig)
+    swisseldex: SwisseldexConfig = field(default_factory=SwisseldexConfig)
 
 
 @dataclass
@@ -329,6 +361,30 @@ def _parse_wan(raw: dict[str, Any]) -> WanConfig:
     )
 
 
+def _parse_swisseldex(raw: dict[str, Any]) -> SwisseldexConfig:
+    """Parse the optional Swisseldex mailbox section. Missing section = off."""
+    s = raw.get("swisseldex", {})
+    if not s:
+        return SwisseldexConfig()
+    interval = int(s.get("sync_interval_hours", 6))
+    if interval not in SWISSELDEX_SYNC_INTERVALS_HOURS:
+        logger.warning(
+            "swisseldex.sync_interval_hours=%s is not one of %s, using 6",
+            interval, SWISSELDEX_SYNC_INTERVALS_HOURS,
+        )
+        interval = 6
+    return SwisseldexConfig(
+        enabled=bool(s.get("enabled", False)),
+        host=str(s.get("host", "datahub.swisseldex.ch")).strip(),
+        port=int(s.get("port", 21)),
+        username=str(s.get("username", "")).strip(),
+        password=str(s.get("password", "")),
+        auto_sync=bool(s.get("auto_sync", False)),
+        sync_interval_hours=interval,
+        timeout_seconds=max(5, min(120, int(s.get("timeout_seconds", 30)))),
+    )
+
+
 def load_runtime_config(config_path: Path) -> RuntimeConfig:
     """Read the technical runtime configuration YAML (paths, MQTT, e-mail, web port)."""
     logger.info("Loading runtime config from %s", config_path)
@@ -343,6 +399,7 @@ def load_runtime_config(config_path: Path) -> RuntimeConfig:
         web=_parse_web(raw),
         sparkplug=_parse_sparkplug(raw),
         wan=_parse_wan(raw),
+        swisseldex=_parse_swisseldex(raw),
     )
 
 

@@ -28,13 +28,12 @@ Notes:
     meter_data_source: which channel the community currently receives meter
     data through — METER_DATA_SOURCE_* from shareomat.leg_const. "email_csv"
     (default) is today's flow: CSV/xlsx attachments via the email/share
-    importers. "sdat_leg" switches "sdat"-typed inbox files to the real
-    VSE SDAT-CH-2025 E31/E66 parser (shareomat.core.pipeline.raw.sdat_ch)
-    instead of the legacy experimental one in leg_parser.py — see
-    docs/sdat_leg_import.md. sdat_ch.py currently raises
-    SdatChNotImplementedError until its XML structure is verified against
-    official XSDs, so switching this on ahead of that is a deliberate,
-    visible no-op rather than a silent misparse.
+    importers. "sdat_leg" makes billing use the grid operator's official
+    E66 split (LEG / residual energy) imported from the Swisseldex Datahub
+    (shareomat.database.sdat_store, ADR-0008) instead of distributing raw
+    meter data itself, and switches "sdat"-typed inbox files to the real
+    SDAT-CH 2025 parser (shareomat.core.pipeline.raw.sdat_ch) instead of the
+    legacy experimental one in leg_parser.py — see docs/sdat_leg_import.md.
 """
 
 from __future__ import annotations
