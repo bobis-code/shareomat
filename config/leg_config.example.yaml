@@ -11,6 +11,7 @@ paths:
   reports: "data/reports"
   state: "data/state"
   share_inbox: ""
+  backups: "data/backups"   # "Sicherung erstellen" on the settings page
 
 mqtt:
   enabled: false

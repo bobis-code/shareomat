@@ -73,6 +73,7 @@ class PathConfig:
     reports: Path
     state: Path
     share_inbox: str = ""  # External share folder to watch; empty = disabled
+    backups: Path | None = None  # "Sicherung erstellen" target; None = <state>/backups
 
 
 @dataclass
@@ -271,6 +272,7 @@ def _parse_paths(raw: dict[str, Any]) -> PathConfig:
         reports=Path(p["reports"]),
         state=Path(p["state"]),
         share_inbox=str(p.get("share_inbox", "")),
+        backups=Path(p["backups"]) if p.get("backups") else None,
     )
 
 

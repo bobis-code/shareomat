@@ -118,8 +118,33 @@ add-on's own persistent `/data` (both survive add-on updates):
 └── state/            ← processed_files.json (SHA-256 deduplication)
 
 /data/
-└── shareomat.db       ← Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife/Automatik
+├── shareomat.db       ← Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife/Automatik
+└── documents/beitritte/ ← uploaded signed join declarations
+
+/share/shareomat/backups/  ← backups from Einstellungen → Sicherung (visible over Samba)
 ```
+
+### Backups (Einstellungen → Sicherung)
+
+`/data` is private to the add-on and not reachable over Samba. The button
+**Sicherung erstellen** writes one ZIP to `/share/shareomat/backups/`:
+
+* `shareomat.db`: a consistent copy made with SQLite's online backup API,
+  checked with `PRAGMA integrity_check` before it is kept,
+* `documents/beitritte/`: the uploaded signed declarations,
+* `manifest.json`: schema version and SHA-256 of every file (re-checked
+  after writing).
+
+Add-on options (MQTT, IMAP, Swisseldex credentials) are **not** included.
+The file contains all personal data of the community, so store it safely.
+Downloading needs the password again if it was last entered more than
+10 minutes ago, and every creation and download is in the audit log.
+Shareomat never deletes old backups.
+
+Restoring a Shareomat backup into `/data` is not a function yet. To restore
+the whole add-on, use a Home Assistant backup (it contains `/data`). The
+Shareomat backup is the copy to file away, inspect and keep outside Home
+Assistant.
 
 Drop meter data files into `/config/shareomat/inbox/` via SSH or the
 HA File Editor add-on. Shareomat scans inbox on each startup and on

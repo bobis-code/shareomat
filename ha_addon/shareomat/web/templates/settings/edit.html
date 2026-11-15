@@ -39,6 +39,66 @@
 </div>
 
 <div class="card">
+  <h2>Sicherung</h2>
+  <p class="field-hint" style="margin-bottom:10px">
+    Erstellt eine geprüfte Kopie der Datenbank (Teilnehmer, Messpunkte, Verträge, Abrechnungen,
+    Belege, Audit-Log) und der hochgeladenen Beitrittserklärungen als eine ZIP-Datei.
+    Zugangsdaten und Add-on-Optionen sind nicht enthalten. Die Datei enthält alle Personendaten
+    der Gemeinschaft: sicher aufbewahren.
+  </p>
+  {% if backup_folder %}
+  <p class="ts">Ablage: <span style="font-family:monospace">{{ backup_folder }}</span>
+    {% if backup_folder|string == '/share/shareomat/backups' %}(in Home Assistant über Samba im Ordner
+    <span style="font-family:monospace">share/shareomat/backups</span>){% endif %}</p>
+  <form class="form-card" method="post" action="{{ url_for('settings', suffix='/backup') }}" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {% if backup_password_needed %}
+    <div class="field">
+      <label for="backup_confirm_password">Ihr Shareomat-Passwort (zur Bestätigung)</label>
+      <input type="password" id="backup_confirm_password" name="confirm_password" autocomplete="current-password" required>
+    </div>
+    {% endif %}
+    <div class="actions-row">
+      <button type="submit">Sicherung erstellen</button>
+    </div>
+  </form>
+
+  {% if backups %}
+  <div class="table-wrap">
+    <table style="margin-top:12px">
+      <thead><tr><th>Sicherung</th><th>Erstellt</th><th>Grösse</th><th></th></tr></thead>
+      <tbody>
+        {% for b in backups %}
+        <tr>
+          <td style="font-family:monospace">{{ b.name }}</td>
+          <td class="ts">{{ b.created_at.astimezone().strftime('%d.%m.%Y %H:%M') }}</td>
+          <td class="ts">{{ '%.1f'|format(b.size / 1048576) }} MB</td>
+          <td>{% if not backup_password_needed %}<a class="btn-small btn-secondary"
+                 href="{{ url_for('settings', suffix='/backup/' + b.name) }}">Herunterladen</a>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if backup_password_needed %}
+  <form class="form-card" method="post" action="{{ url_for('settings', suffix='/backup/confirm') }}" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="backup_download_password">Zum Herunterladen: Ihr Shareomat-Passwort</label>
+      <input type="password" id="backup_download_password" name="confirm_password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="btn-secondary">Passwort bestätigen</button>
+  </form>
+  {% endif %}
+  <p class="field-hint" style="margin-top:8px">Alte Sicherungen löscht Shareomat nie selbst. Nicht mehr
+    benötigte Dateien bitte im Ordner von Hand entfernen.</p>
+  {% else %}
+  <p class="ts" style="margin-top:10px">Noch keine Sicherung vorhanden.</p>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Technische Konfiguration</h2>
   <p class="ts">Diese Werte werden über die Docker- bzw. Home-Assistant-Add-on-Optionen verwaltet, nicht hier.</p>
   {% if runtime %}

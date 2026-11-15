@@ -310,6 +310,9 @@ class _Handler(BaseHTTPRequestHandler):
         if len(segments) == 4 and segments[0] == "contract" and segments[1] == "participants" and segments[3] == "document":
             self._serve_signed_document(segments[2])
             return
+        if len(segments) == 3 and segments[0] == "settings" and segments[1] == "backup":
+            self._serve_backup(segments[2], ingress_path)
+            return
         # URLs use hyphens ("meter-data"), but route names (_PAGE_MODULES keys,
         # ROUTE_PATHS keys, url_for() arguments) use underscores throughout —
         # normalize once here so route always means the same thing everywhere.
@@ -462,15 +465,49 @@ class _Handler(BaseHTTPRequestHandler):
             redirect_to = url_for(ingress_path, route)
         self._redirect(redirect_to)
 
+    _RECENT_AUTH_MESSAGES = {
+        "payment_profile.change": "Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben, um das Bankkonto zu ändern.",
+        "backup.manage": "Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben (Sicherungen enthalten alle Daten).",
+    }
+
     def _check_recent_auth(self, route: str, segments: list[str], form: dict) -> None:
-        """Changing the bank account needs the password again if the last entry is over 10 minutes old."""
+        """Bank account and backups need the password again if the last entry is over 10 minutes old."""
         principal = current_principal()
-        if principal is None or required_permission("POST", route, segments) != "payment_profile.change":
+        message = self._RECENT_AUTH_MESSAGES.get(required_permission("POST", route, segments))
+        if principal is None or message is None:
             return
         if not login.recent_auth_required(principal):
             return
         if not login.confirm_recent_auth(principal, form.get("confirm_password", "")):
-            raise FormError("Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben, um das Bankkonto zu ändern.")
+            raise FormError(message)
+
+    # ── Backups ("Sicherung erstellen" on the settings page) ───────────
+
+    def _serve_backup(self, name: str, ingress_path: str) -> None:
+        """Download one backup ZIP: only generated names, only from the backup folder, only after a recent password entry."""
+        from shareomat.database.audit import log_event
+        from shareomat.database.backup import backup_dir, find_backup
+
+        state = get_state()
+        principal = current_principal()
+        if principal is None or login.recent_auth_required(principal):
+            state.set_flash("Zum Herunterladen einer Sicherung bitte zuerst Ihr Passwort bestätigen.", ok=False)
+            self._redirect(url_for(ingress_path, "settings"))
+            return
+        info = find_backup(backup_dir(state.runtime), name) if state.runtime and state.db_path else None
+        if info is None:
+            self.send_response(404)
+            self.end_headers()
+            return
+        log_event(state.db_path, "backup", info.name, "downloaded", f"{info.size} Bytes")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{info.name}"')
+        self.send_header("Content-Length", str(info.size))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        with info.path.open("rb") as handle:
+            shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
 
     # ── Signed join declarations (stored next to the database) ─────────
 

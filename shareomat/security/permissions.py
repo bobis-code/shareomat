@@ -32,6 +32,7 @@ PERMISSIONS = {
     "masterdata.edit": "Gemeinschaft, Teilnehmer, Messpunkte, Tarife bearbeiten",
     "contract.manage": "Vertrag bearbeiten und veröffentlichen",
     "system.configure": "System und Automatisierung einstellen",
+    "backup.manage": "Sicherungen erstellen und herunterladen",
     "account.self": "Eigenes Konto (Passwort, Geräte)",
 }
 
@@ -59,6 +60,8 @@ _POST_PERMISSIONS = {
 
 def required_permission(method: str, route: str, segments: list[str]) -> str:
     """The permission an action needs. Unknown POST routes need the strongest one."""
+    if route == "settings" and segments[:1] == ["backup"]:
+        return "backup.manage"   # a backup holds all business data: never just "view"
     if method != "POST":
         return "account.self" if route == "account" else "view"
     if route == "invoices":

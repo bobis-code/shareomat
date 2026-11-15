@@ -160,6 +160,8 @@ def main() -> None:
             "reports":      "/config/shareomat/reports",
             "state":        "/config/shareomat/state",
             "share_inbox":  str(opts.get("share_inbox", "")),
+            # Visible over Samba (share), so the operator can file backups away.
+            "backups":      "/share/shareomat/backups",
         },
         "mqtt": {
             "enabled":                True,
