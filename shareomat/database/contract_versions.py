@@ -417,7 +417,17 @@ def _validate_publishable(draft: ContractVersion, prior: ContractVersion | None)
         raise ContractWorkflowError("Zahlungsfrist und Kündigungsfrist müssen grösser als 0 sein.")
 
 
-def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = False) -> ContractVersion:
+def contract_gap(prior: ContractVersion | None, valid_from: date | None) -> tuple[date, date] | None:
+    """(first, last) day without any contract between a fixed-term prior version and a new start, or None."""
+    if prior is None or prior.valid_until is None or valid_from is None:
+        return None
+    first = prior.valid_until + timedelta(days=1)
+    return (first, valid_from - timedelta(days=1)) if first < valid_from else None
+
+
+def publish_version(
+    db_path: Path, version_id: int, *, consent_of_all: bool = False, accept_gap: bool = False,
+) -> ContractVersion:
     """Publish a draft: enforce the contractually required notice period, create its tariff.
 
     Raises ContractWorkflowError if: the version is not a draft, valid_from
@@ -430,6 +440,10 @@ def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = Fa
     version's valid_from, its tariff likewise; a new tariff is created from
     this version's prices; this version becomes published, recording
     tariff_id/supersedes_version_id so withdraw_version() can undo it.
+
+    A prior version with its own end date (fixed term) is never extended:
+    if it ends before the new version starts, publishing is refused unless
+    accept_gap=True confirms the period without contract (no billing then).
 
     consent_of_all=True publishes an amendment that every member agreed to:
     no notice period applies (the periods protect members against changes
@@ -483,17 +497,29 @@ def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = Fa
             now = now_iso()
             community_row_id = ensure_community_row_id(conn)
 
-            if prior is not None:
-                closeout_until = draft.valid_from - timedelta(days=1)
-                conn.execute(
-                    "UPDATE contract_versions SET valid_until = ?, updated_at = ? WHERE id = ?",
-                    (date_to_str(closeout_until), now, prior.id),
+            gap = contract_gap(prior, draft.valid_from)
+            if gap is not None and not accept_gap:
+                raise ContractWorkflowError(
+                    f"Vom {gap[0].strftime('%d.%m.%Y')} bis {gap[1].strftime('%d.%m.%Y')} gilt kein Vertrag — "
+                    f"v{prior.version} endet am {prior.valid_until.strftime('%d.%m.%Y')}. In dieser Zeit wird nicht "
+                    "abgerechnet. Lücke bestätigen oder einen früheren Beginn wählen."
                 )
-                if prior.tariff_id is not None:
+            prior_until_before = None
+            if prior is not None:
+                prior_until_before = date_to_str(prior.valid_until) if prior.valid_until else "open"
+                closeout_until = draft.valid_from - timedelta(days=1)
+                # Shorten only, never extend a fixed-term version (P5 of the 16.11.2026 concept).
+                if prior.valid_until is None or prior.valid_until > closeout_until:
                     conn.execute(
-                        "UPDATE tariffs SET valid_until = ?, updated_at = ? WHERE id = ?",
-                        (date_to_str(closeout_until), now, prior.tariff_id),
+                        "UPDATE contract_versions SET valid_until = ?, updated_at = ? WHERE id = ?",
+                        (date_to_str(closeout_until), now, prior.id),
                     )
+                    if prior.tariff_id is not None:
+                        conn.execute(
+                            "UPDATE tariffs SET valid_until = ?, updated_at = ? WHERE id = ? "
+                            "AND (valid_until IS NULL OR valid_until > ?)",
+                            (date_to_str(closeout_until), now, prior.tariff_id, date_to_str(closeout_until)),
+                        )
 
             cursor = conn.execute(
                 """
@@ -537,9 +563,10 @@ def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = Fa
             text_sha256 = hashlib.sha256(draft.contract_text_snapshot.encode("utf-8")).hexdigest()
             conn.execute(
                 "UPDATE contract_versions SET status = ?, tariff_id = ?, supersedes_version_id = ?, "
-                "text_sha256 = ?, published_at = ?, consent_based = ?, updated_at = ? WHERE id = ?",
+                "text_sha256 = ?, published_at = ?, consent_based = ?, prior_valid_until_before = ?, "
+                "updated_at = ? WHERE id = ?",
                 (CONTRACT_STATUS_PUBLISHED, new_tariff_id, prior.id if prior else None,
-                 text_sha256, now, int(consent_of_all and prior is not None), now, version_id),
+                 text_sha256, now, int(consent_of_all and prior is not None), prior_until_before, now, version_id),
             )
             record_event(
                 conn, "contract_version", version_id, "published",
@@ -551,14 +578,22 @@ def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = Fa
     return result
 
 
-def _restore_superseded(conn: sqlite3.Connection, supersedes_id: int | None, now: str) -> None:
-    """Re-open the version (and its tariff) a withdrawn version had capped at publish time."""
+def _restore_superseded(conn: sqlite3.Connection, supersedes_id: int | None, now: str,
+                        before: str | None = None) -> None:
+    """Give the version (and its tariff) a withdrawn version had capped back the end it had before.
+
+    `before` is what publishing recorded: an ISO date (fixed term), "open",
+    or None for versions published before schema 18 (then open, as before).
+    """
     if supersedes_id is None:
         return
-    conn.execute("UPDATE contract_versions SET valid_until = NULL, updated_at = ? WHERE id = ?", (now, supersedes_id))
+    restored = before if before and before != "open" else None
+    conn.execute("UPDATE contract_versions SET valid_until = ?, updated_at = ? WHERE id = ?",
+                 (restored, now, supersedes_id))
     prior_tariff_row = conn.execute("SELECT tariff_id FROM contract_versions WHERE id = ?", (supersedes_id,)).fetchone()
     if prior_tariff_row and prior_tariff_row["tariff_id"] is not None:
-        conn.execute("UPDATE tariffs SET valid_until = NULL, updated_at = ? WHERE id = ?", (now, prior_tariff_row["tariff_id"]))
+        conn.execute("UPDATE tariffs SET valid_until = ?, updated_at = ? WHERE id = ?",
+                     (restored, now, prior_tariff_row["tariff_id"]))
 
 
 def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
@@ -624,7 +659,7 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
                 )
                 if tariff_id_to_delete is not None:
                     conn.execute("UPDATE tariffs SET active = 0, updated_at = ? WHERE id = ?", (now, tariff_id_to_delete))
-                _restore_superseded(conn, supersedes_id, now)
+                _restore_superseded(conn, supersedes_id, now, row["prior_valid_until_before"])
                 record_event(
                     conn, "contract_version", version_id, "withdrawn_archived",
                     f"v{version.version}: {evidence} Teilnehmer mit Nachweisen — archiviert, nichts gelöscht",
@@ -652,7 +687,7 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
                     )
                 if tariff_id_to_delete is not None:
                     conn.execute("DELETE FROM tariffs WHERE id = ?", (tariff_id_to_delete,))
-                _restore_superseded(conn, supersedes_id, now)
+                _restore_superseded(conn, supersedes_id, now, row["prior_valid_until_before"])
     result = get_contract_version(db_path, version_id)
     assert result is not None
     return result

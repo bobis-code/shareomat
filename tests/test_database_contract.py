@@ -521,14 +521,18 @@ def test_join_status_chain_and_audit_trail(db_path):
     assert a.status_label == "angelegt"
     assert mark_declaration_issued(db_path, a.id, date(2026, 10, 26)).status_label == "Erklärung ausgestellt"
     mark_accepted(db_path, a.id, date(2026, 10, 26), method="scan", signed_by="Haus 1")
-    with pytest.raises(ParticipantContractError, match="Meldung"):
-        mark_vnb_confirmed(db_path, a.id, date(2026, 10, 30), date(2026, 11, 1))
-    assert mark_vnb_notified(db_path, a.id, date(2026, 10, 27)).status_label == "beim Netzbetreiber gemeldet"
+    # No fixed order (0.6.13): the confirmation may come in before the report was recorded,
+    # but the start must be a first of month, not before the join, the date not in the future.
+    with pytest.raises(ParticipantContractError, match="vor dem Beitritt"):
+        mark_vnb_confirmed(db_path, a.id, date(2026, 10, 30), date(2026, 10, 1))
+    with pytest.raises(ParticipantContractError, match="Zukunft"):
+        mark_vnb_confirmed(db_path, a.id, date.today() + timedelta(days=1), date(2026, 11, 1))
     confirmed = mark_vnb_confirmed(db_path, a.id, date(2026, 10, 30), date(2026, 11, 1))
     assert confirmed.status_label == "vom Netzbetreiber bestätigt"
     assert confirmed.effective_start_at == date(2026, 11, 1)
+    assert mark_vnb_notified(db_path, a.id, date(2026, 10, 27)).vnb_notified_at == date(2026, 10, 27)
     actions = [e.action for e in list_events(db_path, entity="participant", entity_id="p1")]
-    assert actions == ["vnb_confirmed", "vnb_notified", "accepted", "declaration_issued", "assigned"]
+    assert actions == ["vnb_notified", "vnb_confirmed", "accepted", "declaration_issued", "assigned"]
 
 
 def test_record_departure_is_write_once_and_not_before_join(db_path):
@@ -648,14 +652,23 @@ def test_mark_accepted_unknown_assignment_raises(db_path):
         mark_accepted(db_path, 99999, date(2027, 1, 1))
 
 
-def test_mark_notified_leaves_accepted_at_untouched(db_path):
+def test_mark_notified_leaves_accepted_at_untouched(db_path, monkeypatch):
     create_participant(db_path, Participant("p1", "Haus 1"))
-    v = save_draft_version(db_path, _draft())
-    # A carried-forward row: original acceptance present, this version not yet notified.
-    assignment = assign_contract(db_path, "p1", v.id, accepted_at=date(2026, 1, 1))
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2025, 1, 1)))
+    v1 = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2026, 1, 1))).id)
+    signed = assign_contract(db_path, "p1", v1.id, v1.tariff_id, joined_at=date(2026, 1, 1))
+    mark_accepted(db_path, signed.id, date(2025, 12, 1))
+    monkeypatch.setattr(contract_versions_module, "date", _fixed_today(date(2026, 9, 1)))
+    v2 = publish_version(db_path, save_draft_version(db_path, _draft(valid_from=date(2027, 6, 1),
+                                                                     representative_city="Neudorf")).id)
+    # The carried row: the original acceptance counts, this version not yet notified.
+    [assignment] = list_assignments_for_version(db_path, v2.id)
+    assert assignment.accepted_at == date(2025, 12, 1) and not assignment.own_signature
+    with pytest.raises(ParticipantContractError, match="bereits erfasst|selbst unterschrieben"):
+        mark_notified(db_path, signed.id, date(2027, 6, 1))     # v1 was signed: no notice needed there
 
     updated = mark_notified(db_path, assignment.id, date(2027, 6, 1), evidence="E-Mail vom 01.06.2027")
-    assert updated.accepted_at == date(2026, 1, 1)  # original join confirmation, never re-set
+    assert updated.accepted_at == date(2025, 12, 1)  # original join confirmation, never re-set
     assert updated.notified_at == date(2027, 6, 1)
     assert updated.notice_evidence == "E-Mail vom 01.06.2027"
     with pytest.raises(ParticipantContractError, match="bereits"):

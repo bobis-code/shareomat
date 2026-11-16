@@ -650,6 +650,28 @@ def released_runs_needing_review(db_path: Path, runtime: RuntimeConfig, start: d
     return affected
 
 
+def released_runs_differing(db_path: Path, runtime: RuntimeConfig, run_ids: list[int]) -> list[BillingRun]:
+    """Of the given released runs, those whose recomputation no longer gives the released result.
+
+    Used after a correction of participant data. A released run is never
+    changed (ADR-0001); the caller shows the notice to check for a
+    correction billing. Any data source.
+    """
+    wanted = set(run_ids)
+    differing = []
+    for run in list_billing_runs(db_path):
+        if run.id not in wanted or run.status != BILLING_STATUS_RELEASED or not run.result_fingerprint:
+            continue
+        try:
+            current = compute_billing_preview(db_path, runtime, run.period_start, run.period_end, persist_readings=False)
+        except IncompleteConfigError:
+            differing.append(run)
+            continue
+        if _result_fingerprint(current) != run.result_fingerprint:
+            differing.append(run)
+    return differing
+
+
 def _load_issues(raw: str) -> tuple[list[str], list[str]]:
     """(hard, soft) from the stored JSON; runs saved before the split stored a plain list (all soft)."""
     if not raw:
