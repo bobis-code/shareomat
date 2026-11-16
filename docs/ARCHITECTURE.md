@@ -228,7 +228,12 @@ database/                   SQLite, Quelle der Wahrheit für Stammdaten
   community.py / participants.py / meters.py / tariffs.py / settings.py
   contract_versions.py         Versionierte Vertragskonditionen (draft/publish/withdraw/end)
   contract_settings.py         Vorbelegung für einen neuen Vertragsentwurf
-  participant_contract.py      Welche Vertragsversion ein Teilnehmer akzeptiert hat
+  memberships.py               Mitgliedschaften: Beitritt, Austritt, EBL-Meldung/-Bestätigung (ADR-0009)
+  membership_migration.py      Einmalige Umstellung auf Schema 18 (geprüft, mit Prüfhinweisen)
+  participant_contract.py      Pro Vertragsversion: Erklärung, Unterschrift, Mitteilung, Zustimmung;
+                               Korrekturen und Sammelaktionen mit denselben Regeln
+  participant_checklist.py     Checkliste pro Teilnehmer, nur lesend (Abrechnung über billing_eligibility)
+  backup.py                    «Sicherung erstellen» (Einstellungen): geprüfte ZIP-Kopie
   config_builder.py            RuntimeConfig + SQLite → LegConfig
   billing.py                   Interaktiver Abrechnungs-Workflow (Ausnahme: enthält Kernlogik, siehe Docstring dort)
   yaml_import.py               Einmaliger Import aus einer vorbestehenden leg_config.yaml
@@ -236,6 +241,7 @@ database/                   SQLite, Quelle der Wahrheit für Stammdaten
 models/                     Domänen-Dataclasses
   community.py / participant.py / meter.py / tariff.py / settings.py
   contract.py                  ContractVersion / ContractSettings
+  membership.py                Membership (ADR-0009)
   meter_data.py                IntervalReading / EnergySlot / ImportFile
   billing.py                    MatchResult / BillingRecord
   billing_workflow.py           BillingRun / BillingPreview / BillingSourceFile
@@ -256,7 +262,7 @@ layout".
 
 ```text
 Übersicht     — Dashboard
-VERWALTUNG    — Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag
+VERWALTUNG    — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag
 BETRIEB       — Messdaten, Analyse, Abrechnungen, Rechnungen, Automatisierung, Berichte
 INTEGRATIONEN — Apps & Integrationen
 SYSTEM        — Einstellungen, Externe Daten
@@ -436,6 +442,8 @@ Konsequenzen. Aktuell:
 * ADR-0005 — Cross-House-Kommunikation über zentralen Sparkplug-B-Relay.
 * ADR-0006 — MQTT 3.1.1 statt 5.0 für die Sparkplug-B-Kommunikation.
 * ADR-0007 — Live-Energie-Ebene und Teilnehmerportal.
+* ADR-0008 — Offizielle SDAT-Zuteilung als zweiter Abrechnungsweg (vorgeschlagen).
+* ADR-0009 — Mitgliedschaft getrennt von der Vertragsversion (Schema 18).
 
 Angenommene ADRs sind dauerhafte Leitplanken für künftige Änderungen, nicht
 nur historische Notizen — siehe `docs/decisions/README.md`, "Verbindlichkeit".
@@ -516,4 +524,7 @@ architektur-relevanten Punkte, Stand 2026-08-13:
 | **BillingRun** | Ein Abrechnungslauf für eine Periode — draft/released/cancelled, released ist unveränderlich |
 | **SDAT** | Standardisierter Schweizer Messdatenaustausch (VSE) — siehe `docs/sdat_leg_import.md` |
 | **E31 / E66** | SDAT-Nachrichtentypen: E31 = aggregierte LEG-Daten, E66 = Messdaten je Teilnehmer |
+| **Mitgliedschaft** | Zeitraum eines Teilnehmers in der LEG (Beitritt bis Austritt) mit EBL-Meldung und -Bestätigung; ein Wiedereintritt ist eine neue Mitgliedschaft (ADR-0009) |
+| **Mitteilung / Zustimmung** | Mitteilung = Teilnehmer wurde über eine Vertragsversion informiert; Zustimmung = ausdrückliches Einverständnis, nur nötig bei Versionen «mit Zustimmung aller». Eine Mitteilung ist nie eine Zustimmung |
+| **Checkliste** | VERWALTUNG → Checkliste: zeigt pro Teilnehmer, was erledigt ist, was fehlt und worauf gewartet wird; speichert selbst nichts |
 | **Vertrag** | Der öffentliche LEG-Mustervertrag inkl. Preisen — Quelle der Wahrheit für Tarife, nicht die Tarife-Seite (die ist nur Fallback) |
