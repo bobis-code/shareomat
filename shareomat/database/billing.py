@@ -58,6 +58,7 @@ from shareomat.core.pipeline.leg_matcher import match_all
 from shareomat.core.pipeline.leg_parser import readings_to_slots
 from shareomat.database.audit import record_event
 from shareomat.database.billing_eligibility import EligibilityResolver
+from shareomat.database.memberships import memberships_needing_review
 from shareomat.database.config_builder import IncompleteConfigError, build_leg_config
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.meter_readings import save_meter_readings
@@ -410,6 +411,13 @@ def compute_billing_preview(
         )
         soft: list[str] = []
     resolver = EligibilityResolver(db_path)
+    if resolver.contract_mode:
+        # Conflicting data from before schema 18 (ADR-0009): never billed on a guess.
+        for membership in memberships_needing_review(db_path):
+            hard.append(
+                f"Mitgliedschaft von {membership.participant_id} ist zu prüfen ({membership.review_note}). "
+                "Unter „Checkliste“ kontrollieren, bei Bedarf korrigieren und bestätigen."
+            )
 
     configured_meter_ids = {m.meter_id for m in list_meters(db_path)}
     meter_ids_with_data = sorted({r.meter_id for r in readings})

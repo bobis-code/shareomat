@@ -515,33 +515,21 @@ def publish_version(db_path: Path, version_id: int, *, consent_of_all: bool = Fa
             new_tariff_id = cursor.lastrowid
 
             if prior is not None:
-                # Existing, not-yet-departed participants carry over to the new version
-                # automatically — LEG-Mustervertrag §8 only requires notifying them of an
-                # amendment, not a fresh Beitrittserklärung. accepted_at (their original
-                # join confirmation) is preserved as-is; notified_at always starts NULL
-                # for the new version and must be recorded separately (see mark_notified()).
-                # Carried over: the ORIGINAL join evidence (accepted_at,
-                # accepted_version, signature fields) travels along unchanged and
-                # keeps pointing at the version actually signed — it is never
-                # presented as consent to this new version; that is notified_at
-                # (+ notice_evidence), which always starts empty here. Members
-                # who leave before the new version starts are not carried; those
-                # leaving later keep their left_at.
+                # Running memberships carry over to the new version automatically —
+                # LEG-Mustervertrag §8 only requires notifying them of an amendment, not a
+                # fresh Beitrittserklärung. Only the link is created: join, departure and
+                # grid-operator data stay on the membership, the original signature stays
+                # on the row of the version actually signed and keeps counting (ADR-0009).
+                # The notice (and, "with consent of all", the consent) for this version
+                # starts empty. Memberships ending before the new version starts are not
+                # carried; those ending later keep their left_at.
                 conn.execute(
                     """
                     INSERT INTO participant_contract
-                        (participant_id, contract_version_id, tariff_id, joined_at, left_at,
-                         accepted_at, notified_at, accepted_version, declaration_issued_at,
-                         acceptance_method, signed_at, signed_by, signed_document_location,
-                         signed_document_sha256, recorded_by, recorded_at, vnb_notified_at,
-                         vnb_confirmed_at, effective_start_at, effective_end_at, exit_reason, created_at)
-                    SELECT participant_id, ?, ?, joined_at, left_at,
-                           accepted_at, NULL, accepted_version, declaration_issued_at,
-                           acceptance_method, signed_at, signed_by, signed_document_location,
-                           signed_document_sha256, recorded_by, recorded_at, vnb_notified_at,
-                           vnb_confirmed_at, effective_start_at, effective_end_at, exit_reason, ?
-                    FROM participant_contract
-                    WHERE contract_version_id = ? AND (left_at IS NULL OR left_at >= ?)
+                        (participant_id, membership_id, contract_version_id, tariff_id, created_at)
+                    SELECT pc.participant_id, pc.membership_id, ?, ?, ?
+                    FROM participant_contract pc JOIN memberships m ON m.id = pc.membership_id
+                    WHERE pc.contract_version_id = ? AND (m.left_at IS NULL OR m.left_at >= ?)
                     """,
                     (version_id, new_tariff_id, now, prior.id, date_to_str(draft.valid_from)),
                 )
@@ -604,12 +592,20 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
                     'dafür „Vertrag beenden" verwenden.'
                 )
 
+            # Evidence for THIS version: its own signatures, notices, consents and
+            # declarations — and grid-operator reports of memberships that exist only
+            # through this version (a founding version), which deleting would lose.
             evidence = conn.execute(
                 """
-                SELECT COUNT(*) AS n FROM participant_contract
-                WHERE contract_version_id = ?
-                  AND ((accepted_version = ? AND accepted_at IS NOT NULL) OR notified_at IS NOT NULL
-                       OR declaration_issued_at IS NOT NULL OR vnb_notified_at IS NOT NULL)
+                SELECT COUNT(*) AS n FROM participant_contract pc
+                JOIN memberships m ON m.id = pc.membership_id
+                WHERE pc.contract_version_id = ?
+                  AND ((pc.accepted_version = ? AND pc.accepted_at IS NOT NULL) OR pc.notified_at IS NOT NULL
+                       OR pc.consent_at IS NOT NULL OR pc.declaration_issued_at IS NOT NULL
+                       OR ((m.vnb_notified_at IS NOT NULL OR m.vnb_confirmed_at IS NOT NULL)
+                           AND NOT EXISTS (SELECT 1 FROM participant_contract other
+                                           WHERE other.membership_id = pc.membership_id
+                                             AND other.contract_version_id != pc.contract_version_id)))
                 """,
                 (version_id, version.version),
             ).fetchone()["n"]
@@ -644,7 +640,16 @@ def withdraw_version(db_path: Path, version_id: int) -> ContractVersion:
                     (CONTRACT_STATUS_DRAFT, now, version_id),
                 )
                 record_event(conn, "contract_version", version_id, "withdrawn", f"v{version.version}")
+                membership_ids = [r["membership_id"] for r in conn.execute(
+                    "SELECT membership_id FROM participant_contract WHERE contract_version_id = ?", (version_id,))]
                 conn.execute("DELETE FROM participant_contract WHERE contract_version_id = ?", (version_id,))
+                # Memberships that existed only through this version (no evidence, see above).
+                for membership_id in membership_ids:
+                    conn.execute(
+                        "DELETE FROM memberships WHERE id = ? AND NOT EXISTS "
+                        "(SELECT 1 FROM participant_contract WHERE membership_id = ?)",
+                        (membership_id, membership_id),
+                    )
                 if tariff_id_to_delete is not None:
                     conn.execute("DELETE FROM tariffs WHERE id = ?", (tariff_id_to_delete,))
                 _restore_superseded(conn, supersedes_id, now)

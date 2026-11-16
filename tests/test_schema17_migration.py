@@ -16,7 +16,7 @@ def _as_schema_16(db) -> None:
     with sqlite3.connect(db) as conn:
         conn.execute("DROP TABLE sdat_series")
         conn.execute("DROP TABLE sdat_documents")
-        conn.execute("DELETE FROM schema_migrations WHERE version = 17")
+        conn.execute("DELETE FROM schema_migrations WHERE version >= 17")
         conn.execute("INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (16, '2026-11-08T00:00:00+00:00')")
 
 
@@ -37,7 +37,7 @@ def test_upgrade_backs_up_first_and_changes_no_business_data(case):  # noqa: F81
 
     init_db(db)
 
-    backups = sorted(db.parent.glob(f"{db.stem}.before-schema-17-from-16-*.db"))
+    backups = sorted(db.parent.glob(f"{db.stem}.before-schema-{db_module._SCHEMA_VERSION}-from-16-*.db"))
     assert len(backups) == 1
     with sqlite3.connect(backups[0]) as conn:
         assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -46,10 +46,10 @@ def test_upgrade_backs_up_first_and_changes_no_business_data(case):  # noqa: F81
     with sqlite3.connect(db) as conn:
         assert {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE name LIKE 'sdat_%'")} >= {
             "sdat_documents", "sdat_series"}
-        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 17
+        assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == db_module._SCHEMA_VERSION
 
     init_db(db)   # a normal restart: nothing to migrate, no further copy
-    assert len(list(db.parent.glob(f"{db.stem}.before-schema-17-*.db"))) == 1
+    assert len(list(db.parent.glob(f"{db.stem}.before-schema-*.db"))) == 1
 
 
 def test_new_installation_needs_no_backup(tmp_path):

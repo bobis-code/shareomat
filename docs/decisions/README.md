@@ -80,6 +80,8 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
   für die Sparkplug-B-Kommunikation
 * [ADR-0008](ADR-0008-offizielle-sdat-zuteilung-als-zweiter-abrechnungsweg.md) —
   Offizielle SDAT-Zuteilung als zweiter Abrechnungsweg (vorgeschlagen)
+* [ADR-0009](ADR-0009-mitgliedschaft-getrennt-von-der-vertragsversion.md) —
+  Mitgliedschaft getrennt von der Vertragsversion (Schema 18)
 
 ## Verbindlichkeit
 

@@ -3,40 +3,32 @@
 File: shareomat/database/participant_contract.py
 
 Purpose:
-    Assigns a participant to a specific contract version (and, at that
-    point in time, a specific tariff) — so it stays reconstructable later
-    which conditions applied to a participant during a given period, even
-    after the community activates a newer contract version or tariff.
-    Reuses the existing tariffs table by id rather than duplicating rate
-    data here.
+    A participant's relation to one contract version (and the tariff that
+    applied): the declaration handed out, the signature, the notice of an
+    amendment and — for versions published "with consent of all" — the
+    consent. Every row belongs to exactly one membership
+    (shareomat.database.memberships), which holds join, departure and the
+    grid operator's report/confirmation (ADR-0009).
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
-    accepted_at and notified_at answer two different legal questions and
-    must never be conflated: accepted_at is the participant's original,
-    immutable join confirmation (LEG-Mustervertrag's Beitrittserklärung) —
-    it is never touched again once set. notified_at tracks whether the
-    participant has been informed of the *currently* assigned contract
-    version — per LEG-Mustervertrag §8, an existing participant only needs
-    to be notified of a contract amendment, not to sign a new declaration.
-    shareomat.database.contract_versions.publish_version() carries
-    accepted_at forward unchanged when an assignment moves to a new
-    version, but always resets notified_at to NULL there.
-
-    Evidence is write-once: a recorded acceptance, notification, grid-
-    operator report or departure is never overwritten — a second attempt
-    raises ParticipantContractError. Corrections need a new, logged event,
-    not a silent update. accepted_version names the contract version that
-    was actually signed (it stays the same when the row is carried to a
-    later version). Every change is appended to audit_events.
-
-    Status chain of a join: angelegt -> Erklärung ausgestellt
-    (declaration_issued_at) -> Unterschrift eingegangen (accepted_at +
-    signature evidence) -> beim Netzbetreiber gemeldet (vnb_notified_at)
-    -> vom Netzbetreiber bestätigt (vnb_confirmed_at, effective_start_at)
-    -> aktiv ab effective_start_at.
+    * A signature is stored once, on the row of the version that was
+      signed (accepted_version). It also counts for every later version of
+      the same membership, never for an earlier one and never across a
+      re-entry. Rows from before schema 18 may still carry copies of the
+      original signature; resolution prefers the original row, so the paper
+      location / stored document of the original is always the one shown.
+    * Reading an assignment returns the membership fields (joined_at,
+      left_at, vnb_*, effective_start_at, exit_reason) and the effective
+      signature, so callers see one complete picture per version.
+    * notified_at is the notice of the version; consent_at is the consent
+      needed for versions published "with consent of all". A notice is
+      never a consent. A member who signs a version directly gets
+      notified_at = accepted_at and needs no consent for that version.
+    * Evidence is write-once here: a second record raises
+      ParticipantContractError. Every change is appended to audit_events.
 """
 
 from __future__ import annotations
@@ -57,15 +49,15 @@ class ParticipantContractError(Exception):
 
 @dataclass
 class ParticipantContractAssignment:
-    """One participant's acceptance of one contract version, with the tariff that applied."""
+    """One participant's relation to one contract version, with membership data and the effective signature."""
 
     participant_id: str        # business key (Participant.participant_id), not the row id
     contract_version_id: int
     tariff_id: int | None
-    joined_at: date | None
+    joined_at: date | None     # ── from the membership ──
     left_at: date | None
-    accepted_at: date | None
-    notified_at: date | None
+    accepted_at: date | None   # ── effective signature (this row or an earlier version of the membership) ──
+    notified_at: date | None   # ── this version ──
     created_at: datetime
     id: int | None = None
     accepted_version: int | None = None
@@ -86,19 +78,50 @@ class ParticipantContractAssignment:
     declaration_snapshot: str = ""
     declaration_sha256: str = ""
     paper_original_location: str = ""
+    membership_id: int | None = None
+    version_number: int | None = None
+    review_note: str = ""
+    signature_assignment_id: int | None = None   # row that holds the effective signature
+    signature_version: int | None = None         # contract version that was actually signed
+    signed_paperless_id: int | None = None
+    signed_paperless_asn: int | None = None
+    notice_method: str = ""
+    notice_paperless_id: int | None = None
+    notice_paperless_asn: int | None = None
+    notice_batch_id: str = ""
+    notice_recorded_by: str = ""
+    notice_recorded_at: datetime | None = None
+    consent_at: date | None = None
+    consent_evidence: str = ""
+    consent_paperless_id: int | None = None
+    consent_paperless_asn: int | None = None
+    consent_batch_id: str = ""
+    consent_recorded_by: str = ""
+    consent_recorded_at: datetime | None = None
+    vnb_notified_paperless_id: int | None = None
+    vnb_notified_paperless_asn: int | None = None
+    vnb_confirmed_paperless_id: int | None = None
+    vnb_confirmed_paperless_asn: int | None = None
+
+    @property
+    def own_signature(self) -> bool:
+        """True if the effective signature was given on this very version."""
+        return self.accepted_at is not None and self.signature_assignment_id == self.id
 
     @property
     def signature_evidence(self) -> str:
-        """How the signature is evidenced: stored document, paper original location, or nothing."""
+        """How the signature is evidenced: stored document, Paperless, paper original location, or nothing."""
         if self.signed_document_sha256:
             return "document"
+        if self.signed_paperless_id:
+            return "paperless"
         if self.paper_original_location:
             return "paper"
         return ""
 
     @property
     def status_label(self) -> str:
-        """Furthest step reached in the join status chain (see module docstring)."""
+        """Short summary for lists (the checklist shows every point on its own)."""
         if self.left_at is not None:
             return "ausgetreten per " + self.left_at.strftime("%d.%m.%Y")
         if self.vnb_confirmed_at is not None:
@@ -112,135 +135,143 @@ class ParticipantContractAssignment:
         return "angelegt"
 
 
-def _row_to_assignment(row: sqlite3.Row, participant_id: str) -> ParticipantContractAssignment:
+ACCEPTANCE_METHODS = {
+    "paper": "Unterschrift auf Papier",
+    "scan": "unterschriebenes Dokument (Scan/PDF)",
+    "qes": "qualifizierte elektronische Signatur",
+}
+
+# ── Private helpers ─────────────────────────────────────────────────────────
+
+_SELECT = """
+    SELECT pc.*, p.participant_id AS participant_business_id, cv.version AS version_number,
+           cv.consent_based AS version_consent_based,
+           m.joined_at AS m_joined_at, m.left_at AS m_left_at, m.exit_reason AS m_exit_reason,
+           m.vnb_notified_at AS m_vnb_notified_at, m.vnb_confirmed_at AS m_vnb_confirmed_at,
+           m.effective_start_at AS m_effective_start_at, m.review_note AS m_review_note,
+           m.vnb_notified_paperless_id AS m_vnb_notified_paperless_id,
+           m.vnb_notified_paperless_asn AS m_vnb_notified_paperless_asn,
+           m.vnb_confirmed_paperless_id AS m_vnb_confirmed_paperless_id,
+           m.vnb_confirmed_paperless_asn AS m_vnb_confirmed_paperless_asn
+    FROM participant_contract pc
+    JOIN participants p ON p.id = pc.participant_id
+    JOIN contract_versions cv ON cv.id = pc.contract_version_id
+    JOIN memberships m ON m.id = pc.membership_id
+"""
+
+
+def _datetime(value) -> datetime | None:
+    return datetime.fromisoformat(value) if value else None
+
+
+def _signature_version(row) -> int:
+    return row["accepted_version"] if row["accepted_version"] is not None else row["version_number"]
+
+
+def _signature_rows(conn, membership_ids) -> dict[int, list]:
+    """Signed rows per membership (incl. withdrawn versions; _effective_signature decides)."""
+    ids = sorted({m for m in membership_ids if m is not None})
+    if not ids:
+        return {}
+    rows = conn.execute(
+        f"""
+        SELECT pc.*, cv.version AS version_number, cv.status AS version_status FROM participant_contract pc
+        JOIN contract_versions cv ON cv.id = pc.contract_version_id
+        WHERE pc.accepted_at IS NOT NULL
+          AND pc.membership_id IN ({', '.join('?' * len(ids))})
+        """,
+        ids,
+    ).fetchall()
+    result: dict[int, list] = {}
+    for row in rows:
+        result.setdefault(row["membership_id"], []).append(row)
+    return result
+
+
+def _effective_signature(signed_rows: list, version_number: int, row_id: int):
+    """The signature that counts for the row `row_id` of `version_number`.
+
+    The newest one given on that version or an earlier one of the same
+    membership; a signature on a withdrawn version only stays visible on
+    its own row (participants sign the corrected version again). On a tie
+    (old copies of one signature) the row of the signed version wins.
+    """
+    eligible = [r for r in signed_rows if _signature_version(r) <= version_number
+                and (r["version_status"] != "withdrawn" or r["id"] == row_id)]
+    if not eligible:
+        return None
+    return max(eligible, key=lambda r: (_signature_version(r), r["version_number"] == _signature_version(r), -r["id"]))
+
+
+def _row_to_assignment(row: sqlite3.Row, signature) -> ParticipantContractAssignment:
+    sig = signature
     return ParticipantContractAssignment(
-        participant_id=participant_id,
+        participant_id=row["participant_business_id"],
         contract_version_id=row["contract_version_id"],
         tariff_id=row["tariff_id"],
-        joined_at=str_to_date(row["joined_at"]),
-        left_at=str_to_date(row["left_at"]),
-        accepted_at=str_to_date(row["accepted_at"]),
+        joined_at=str_to_date(row["m_joined_at"]),
+        left_at=str_to_date(row["m_left_at"]),
+        accepted_at=str_to_date(sig["accepted_at"]) if sig else None,
         notified_at=str_to_date(row["notified_at"]),
         created_at=datetime.fromisoformat(row["created_at"]),
         id=row["id"],
-        accepted_version=row["accepted_version"],
+        accepted_version=sig["accepted_version"] if sig else None,
         declaration_issued_at=str_to_date(row["declaration_issued_at"]),
-        acceptance_method=row["acceptance_method"],
-        signed_at=str_to_date(row["signed_at"]),
-        signed_by=row["signed_by"],
-        signed_document_location=row["signed_document_location"],
-        signed_document_sha256=row["signed_document_sha256"],
-        recorded_by=row["recorded_by"],
-        recorded_at=datetime.fromisoformat(row["recorded_at"]) if row["recorded_at"] else None,
+        acceptance_method=sig["acceptance_method"] if sig else "",
+        signed_at=str_to_date(sig["signed_at"]) if sig else None,
+        signed_by=sig["signed_by"] if sig else "",
+        signed_document_location=sig["signed_document_location"] if sig else "",
+        signed_document_sha256=sig["signed_document_sha256"] if sig else "",
+        recorded_by=sig["recorded_by"] if sig else "",
+        recorded_at=_datetime(sig["recorded_at"]) if sig else None,
         notice_evidence=row["notice_evidence"],
-        vnb_notified_at=str_to_date(row["vnb_notified_at"]),
-        vnb_confirmed_at=str_to_date(row["vnb_confirmed_at"]),
-        effective_start_at=str_to_date(row["effective_start_at"]),
-        effective_end_at=str_to_date(row["effective_end_at"]),
-        exit_reason=row["exit_reason"],
+        vnb_notified_at=str_to_date(row["m_vnb_notified_at"]),
+        vnb_confirmed_at=str_to_date(row["m_vnb_confirmed_at"]),
+        effective_start_at=str_to_date(row["m_effective_start_at"]),
+        effective_end_at=str_to_date(row["m_left_at"]),
+        exit_reason=row["m_exit_reason"],
         declaration_snapshot=row["declaration_snapshot"],
         declaration_sha256=row["declaration_sha256"],
-        paper_original_location=row["paper_original_location"],
+        paper_original_location=sig["paper_original_location"] if sig else "",
+        membership_id=row["membership_id"],
+        version_number=row["version_number"],
+        review_note=row["m_review_note"],
+        signature_assignment_id=sig["id"] if sig else None,
+        signature_version=_signature_version(sig) if sig else None,
+        signed_paperless_id=sig["signed_paperless_id"] if sig else None,
+        signed_paperless_asn=sig["signed_paperless_asn"] if sig else None,
+        notice_method=row["notice_method"],
+        notice_paperless_id=row["notice_paperless_id"],
+        notice_paperless_asn=row["notice_paperless_asn"],
+        notice_batch_id=row["notice_batch_id"],
+        notice_recorded_by=row["notice_recorded_by"],
+        notice_recorded_at=_datetime(row["notice_recorded_at"]),
+        consent_at=str_to_date(row["consent_at"]),
+        consent_evidence=row["consent_evidence"],
+        consent_paperless_id=row["consent_paperless_id"],
+        consent_paperless_asn=row["consent_paperless_asn"],
+        consent_batch_id=row["consent_batch_id"],
+        consent_recorded_by=row["consent_recorded_by"],
+        consent_recorded_at=_datetime(row["consent_recorded_at"]),
+        vnb_notified_paperless_id=row["m_vnb_notified_paperless_id"],
+        vnb_notified_paperless_asn=row["m_vnb_notified_paperless_asn"],
+        vnb_confirmed_paperless_id=row["m_vnb_confirmed_paperless_id"],
+        vnb_confirmed_paperless_asn=row["m_vnb_confirmed_paperless_asn"],
     )
 
 
-def assign_contract(
-    db_path: Path, participant_id: str, contract_version_id: int, tariff_id: int | None = None, *,
-    joined_at: date | None = None, accepted_at: date | None = None,
-) -> ParticipantContractAssignment:
-    """Assign `participant_id` to `contract_version_id`. Refuses a second assignment of the same pair.
-
-    No upsert: an existing row may already carry signature/notification
-    evidence, which must never be overwritten by re-adding the participant.
-    """
-    now = now_iso()
-    with connect(db_path) as conn:
-        with conn:
-            participant_row = conn.execute(
-                "SELECT id FROM participants WHERE participant_id = ?", (participant_id,),
-            ).fetchone()
-            if participant_row is None:
-                raise ParticipantContractError(f"Teilnehmer '{participant_id}' wurde nicht gefunden.")
-
-            existing = conn.execute(
-                "SELECT 1 FROM participant_contract WHERE participant_id = ? AND contract_version_id = ?",
-                (participant_row["id"], contract_version_id),
-            ).fetchone()
-            if existing:
-                raise ParticipantContractError(
-                    f"Teilnehmer '{participant_id}' ist dieser Vertragsversion bereits zugeordnet."
-                )
-            version_row = conn.execute(
-                "SELECT version FROM contract_versions WHERE id = ?", (contract_version_id,),
-            ).fetchone()
-            if version_row is None:
-                raise ParticipantContractError(f"Vertragsversion {contract_version_id} wurde nicht gefunden.")
-            conn.execute(
-                """
-                INSERT INTO participant_contract
-                    (participant_id, contract_version_id, tariff_id, joined_at, left_at, accepted_at,
-                     accepted_version, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    participant_row["id"], contract_version_id, tariff_id,
-                    date_to_str(joined_at), None, date_to_str(accepted_at),
-                    version_row["version"] if accepted_at else None, now,
-                ),
-            )
-            record_event(
-                conn, "participant", participant_id, "assigned",
-                f"Vertragsversion v{version_row['version']}, Beitritt per {date_to_str(joined_at)}",
-            )
-            row = conn.execute(
-                "SELECT * FROM participant_contract WHERE participant_id = ? AND contract_version_id = ?",
-                (participant_row["id"], contract_version_id),
-            ).fetchone()
-    return _row_to_assignment(row, participant_id)
-
-
-def list_assignments_for_version(db_path: Path, contract_version_id: int) -> list[ParticipantContractAssignment]:
-    """Return every participant assignment for one contract version."""
-    with connect(db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT pc.*, p.participant_id AS participant_business_id
-            FROM participant_contract pc
-            JOIN participants p ON p.id = pc.participant_id
-            WHERE pc.contract_version_id = ?
-            ORDER BY p.participant_id
-            """,
-            (contract_version_id,),
-        ).fetchall()
-        return [_row_to_assignment(r, r["participant_business_id"]) for r in rows]
-
-
-def get_assignment(db_path: Path, assignment_id: int) -> ParticipantContractAssignment | None:
-    """Return one assignment by its internal database id, or None if it does not exist."""
-    with connect(db_path) as conn:
-        row = conn.execute(
-            """
-            SELECT pc.*, p.participant_id AS participant_business_id
-            FROM participant_contract pc
-            JOIN participants p ON p.id = pc.participant_id
-            WHERE pc.id = ?
-            """,
-            (assignment_id,),
-        ).fetchone()
-        return _row_to_assignment(row, row["participant_business_id"]) if row else None
+def load_assignments(conn, where: str, params: tuple) -> list[ParticipantContractAssignment]:
+    """Assignments matching `where` (SQL on pc/p/cv/m), with effective signatures. For this package only."""
+    rows = conn.execute(f"{_SELECT} WHERE {where} ORDER BY p.participant_id, m.joined_at, pc.id", params).fetchall()
+    signatures = _signature_rows(conn, [r["membership_id"] for r in rows])
+    return [
+        _row_to_assignment(r, _effective_signature(signatures.get(r["membership_id"], []), r["version_number"], r["id"]))
+        for r in rows
+    ]
 
 
 def _load_for_update(conn, assignment_id: int):
-    row = conn.execute(
-        """
-        SELECT pc.*, p.participant_id AS participant_business_id, cv.version AS version_number
-        FROM participant_contract pc
-        JOIN participants p ON p.id = pc.participant_id
-        JOIN contract_versions cv ON cv.id = pc.contract_version_id
-        WHERE pc.id = ?
-        """,
-        (assignment_id,),
-    ).fetchone()
+    row = conn.execute(f"{_SELECT} WHERE pc.id = ?", (assignment_id,)).fetchone()
     if row is None:
         raise ParticipantContractError(f"Zuordnung {assignment_id} wurde nicht gefunden.")
     return row
@@ -252,11 +283,9 @@ def _reload(db_path: Path, assignment_id: int) -> ParticipantContractAssignment:
     return result
 
 
-ACCEPTANCE_METHODS = {
-    "paper": "Unterschrift auf Papier",
-    "scan": "unterschriebenes Dokument (Scan/PDF)",
-    "qes": "qualifizierte elektronische Signatur",
-}
+def _effective_signature_for(conn, row):
+    signatures = _signature_rows(conn, [row["membership_id"]])
+    return _effective_signature(signatures.get(row["membership_id"], []), row["version_number"], row["id"])
 
 
 def _freeze_declaration(conn, row, snapshot: str) -> str:
@@ -269,6 +298,104 @@ def _freeze_declaration(conn, row, snapshot: str) -> str:
         (snapshot, digest, row["id"]),
     )
     return digest
+
+
+def _update_membership(conn, membership_id: int, **values) -> None:
+    columns = ", ".join(f"{name} = ?" for name in values)
+    conn.execute(f"UPDATE memberships SET {columns}, updated_at = ? WHERE id = ?",
+                 (*values.values(), now_iso(), membership_id))
+
+
+# ── Public functions ────────────────────────────────────────────────────────
+
+
+def assign_contract(
+    db_path: Path, participant_id: str, contract_version_id: int, tariff_id: int | None = None, *,
+    joined_at: date | None = None, accepted_at: date | None = None,
+) -> ParticipantContractAssignment:
+    """Assign `participant_id` to `contract_version_id`, within their current membership or a new one.
+
+    A participant without a running membership starts a new one (also a
+    re-entry after a departure). One who is a member already gets the
+    version added to that membership; a different join date is refused —
+    it would silently change an existing membership. No upsert: an
+    existing row may carry evidence that must never be overwritten.
+    """
+    now = now_iso()
+    with connect(db_path) as conn:
+        with conn:
+            participant_row = conn.execute(
+                "SELECT id FROM participants WHERE participant_id = ?", (participant_id,),
+            ).fetchone()
+            if participant_row is None:
+                raise ParticipantContractError(f"Teilnehmer '{participant_id}' wurde nicht gefunden.")
+            version_row = conn.execute(
+                "SELECT version, valid_from FROM contract_versions WHERE id = ?", (contract_version_id,),
+            ).fetchone()
+            if version_row is None:
+                raise ParticipantContractError(f"Vertragsversion {contract_version_id} wurde nicht gefunden.")
+            starts = joined_at or str_to_date(version_row["valid_from"])
+            running = conn.execute(
+                "SELECT * FROM memberships WHERE participant_id = ? AND (left_at IS NULL OR left_at >= ?) "
+                "ORDER BY joined_at DESC, id DESC LIMIT 1",
+                (participant_row["id"], date_to_str(starts)),
+            ).fetchone()
+            if running is not None:
+                on_version = conn.execute(
+                    "SELECT 1 FROM participant_contract WHERE membership_id = ? AND contract_version_id = ?",
+                    (running["id"], contract_version_id),
+                ).fetchone()
+                if on_version:
+                    raise ParticipantContractError(
+                        f"Teilnehmer '{participant_id}' ist dieser Vertragsversion bereits zugeordnet."
+                    )
+                if joined_at is not None and running["joined_at"] and date_to_str(joined_at) != running["joined_at"]:
+                    raise ParticipantContractError(
+                        f"Teilnehmer '{participant_id}' ist bereits Mitglied seit "
+                        f"{str_to_date(running['joined_at']).strftime('%d.%m.%Y')} — das Beitrittsdatum dort korrigieren."
+                    )
+                membership_id = running["id"]
+            else:
+                membership_id = conn.execute(
+                    "INSERT INTO memberships (participant_id, joined_at, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                    (participant_row["id"], date_to_str(joined_at), now, now),
+                ).lastrowid
+            assignment_id = conn.execute(
+                """
+                INSERT INTO participant_contract
+                    (participant_id, membership_id, contract_version_id, tariff_id, accepted_at,
+                     accepted_version, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    participant_row["id"], membership_id, contract_version_id, tariff_id,
+                    date_to_str(accepted_at), version_row["version"] if accepted_at else None, now,
+                ),
+            ).lastrowid
+            record_event(
+                conn, "participant", participant_id, "assigned",
+                f"Vertragsversion v{version_row['version']}, Beitritt per {date_to_str(joined_at)}",
+            )
+    return _reload(db_path, assignment_id)
+
+
+def list_assignments_for_version(db_path: Path, contract_version_id: int) -> list[ParticipantContractAssignment]:
+    """Return every participant assignment for one contract version (a re-entry can add a second row)."""
+    with connect(db_path) as conn:
+        return load_assignments(conn, "pc.contract_version_id = ?", (contract_version_id,))
+
+
+def list_assignments_for_participant(db_path: Path, participant_id: str) -> list[ParticipantContractAssignment]:
+    """Every assignment of one participant over all versions and memberships."""
+    with connect(db_path) as conn:
+        return load_assignments(conn, "p.participant_id = ?", (participant_id,))
+
+
+def get_assignment(db_path: Path, assignment_id: int) -> ParticipantContractAssignment | None:
+    """Return one assignment by its internal database id, or None if it does not exist."""
+    with connect(db_path) as conn:
+        found = load_assignments(conn, "pc.id = ?", (assignment_id,))
+    return found[0] if found else None
 
 
 def mark_declaration_issued(
@@ -300,9 +427,8 @@ def mark_accepted(
 
     The date is the signature date, which cannot lie in the future. The
     signature evidence (method, signer, optional stored document + hash,
-    who recorded it and when) is stored with it. A second call raises —
-    an existing acceptance is never overwritten. For an existing
-    participant carried forward to a newer version, use mark_notified().
+    who recorded it and when) is stored with it. Refused when the
+    membership already has a signature that counts for this version.
     """
     if accepted_at > date.today():
         raise ParticipantContractError("Das Unterschriftsdatum darf nicht in der Zukunft liegen.")
@@ -315,9 +441,10 @@ def mark_accepted(
     with connect(db_path) as conn:
         with conn:
             row = _load_for_update(conn, assignment_id)
-            if row["accepted_at"]:
+            existing = _effective_signature_for(conn, row)
+            if existing is not None:
                 raise ParticipantContractError(
-                    f"Der Beitritt wurde bereits am {row['accepted_at']} bestätigt und wird nicht überschrieben."
+                    f"Der Beitritt wurde bereits am {existing['accepted_at']} bestätigt und wird nicht überschrieben."
                 )
             conn.execute(
                 """
@@ -354,10 +481,9 @@ def mark_notified(
 ) -> ParticipantContractAssignment:
     """Record that a participant has been informed of the currently assigned contract version (write-once).
 
-    Only sets notified_at (+ how it was notified) — accepted_at, the
-    original join confirmation, is left untouched, matching
-    LEG-Mustervertrag §8: an existing participant only needs notice of a
-    contract amendment, not a new signature.
+    For a version published "with consent of all" this form records the
+    consent (the operator answers "Zustimmung erfassen"): it then also sets
+    consent_at, which billing checks.
     """
     with connect(db_path) as conn:
         with conn:
@@ -368,22 +494,24 @@ def mark_notified(
                 "UPDATE participant_contract SET notified_at = ?, notice_evidence = ? WHERE id = ?",
                 (date_to_str(notified_at), evidence, assignment_id),
             )
+            if row["version_consent_based"]:
+                conn.execute(
+                    "UPDATE participant_contract SET consent_at = ?, consent_evidence = ? WHERE id = ?",
+                    (date_to_str(notified_at), evidence, assignment_id),
+                )
             record_event(conn, "participant", row["participant_business_id"], "notified",
                          f"v{row['version_number']} am {date_to_str(notified_at)}" + (f" ({evidence})" if evidence else ""))
     return _reload(db_path, assignment_id)
 
 
 def mark_vnb_notified(db_path: Path, assignment_id: int, notified_at: date) -> ParticipantContractAssignment:
-    """Record that the join was reported to the grid operator (write-once)."""
+    """Record that the join was reported to the grid operator (write-once, on the membership)."""
     with connect(db_path) as conn:
         with conn:
             row = _load_for_update(conn, assignment_id)
-            if row["vnb_notified_at"]:
+            if row["m_vnb_notified_at"]:
                 raise ParticipantContractError("Die Meldung an den Netzbetreiber wurde bereits erfasst.")
-            conn.execute(
-                "UPDATE participant_contract SET vnb_notified_at = ? WHERE id = ?",
-                (date_to_str(notified_at), assignment_id),
-            )
+            _update_membership(conn, row["membership_id"], vnb_notified_at=date_to_str(notified_at))
             record_event(conn, "participant", row["participant_business_id"], "vnb_notified",
                          f"am {date_to_str(notified_at)}")
     return _reload(db_path, assignment_id)
@@ -396,16 +524,14 @@ def mark_vnb_confirmed(
     with connect(db_path) as conn:
         with conn:
             row = _load_for_update(conn, assignment_id)
-            if row["vnb_confirmed_at"]:
+            if row["m_vnb_confirmed_at"]:
                 raise ParticipantContractError("Die Bestätigung des Netzbetreibers wurde bereits erfasst.")
-            if not row["vnb_notified_at"]:
+            if not row["m_vnb_notified_at"]:
                 raise ParticipantContractError("Zuerst die Meldung an den Netzbetreiber erfassen.")
             if effective_start.day != 1:
                 raise ParticipantContractError("Der wirksame Beginn muss ein Monatserster sein.")
-            conn.execute(
-                "UPDATE participant_contract SET vnb_confirmed_at = ?, effective_start_at = ? WHERE id = ?",
-                (date_to_str(confirmed_at), date_to_str(effective_start), assignment_id),
-            )
+            _update_membership(conn, row["membership_id"], vnb_confirmed_at=date_to_str(confirmed_at),
+                               effective_start_at=date_to_str(effective_start))
             record_event(conn, "participant", row["participant_business_id"], "vnb_confirmed",
                          f"am {date_to_str(confirmed_at)}, wirksam ab {date_to_str(effective_start)}")
     return _reload(db_path, assignment_id)
@@ -414,23 +540,20 @@ def mark_vnb_confirmed(
 def record_departure(
     db_path: Path, assignment_id: int, left_at: date, *, reason: str = "",
 ) -> ParticipantContractAssignment:
-    """Record a participant's departure on their contract assignment (write-once). Deletes nothing.
+    """Record a participant's departure on their membership (write-once). Deletes nothing.
 
-    The departure date can't lie before the join, and an already recorded
-    departure is never moved — a correction must be logged as such.
+    Applies to every contract version of the membership. The departure
+    date can't lie before the join.
     """
     with connect(db_path) as conn:
         with conn:
             row = _load_for_update(conn, assignment_id)
-            if row["left_at"]:
-                raise ParticipantContractError(f"Der Austritt wurde bereits per {row['left_at']} erfasst.")
-            joined = str_to_date(row["joined_at"])
+            if row["m_left_at"]:
+                raise ParticipantContractError(f"Der Austritt wurde bereits per {row['m_left_at']} erfasst.")
+            joined = str_to_date(row["m_joined_at"])
             if joined is not None and left_at < joined:
                 raise ParticipantContractError("Der Austritt darf nicht vor dem Beitritt liegen.")
-            conn.execute(
-                "UPDATE participant_contract SET left_at = ?, effective_end_at = ?, exit_reason = ? WHERE id = ?",
-                (date_to_str(left_at), date_to_str(left_at), reason, assignment_id),
-            )
+            _update_membership(conn, row["membership_id"], left_at=date_to_str(left_at), exit_reason=reason)
             record_event(conn, "participant", row["participant_business_id"], "departed",
                          f"per {date_to_str(left_at)}" + (f" ({reason})" if reason else ""))
     return _reload(db_path, assignment_id)

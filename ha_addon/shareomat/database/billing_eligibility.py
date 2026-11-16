@@ -14,10 +14,14 @@ Part of:
 
 Notes:
     Effective member on day d (contract mode): an assignment of the
-    version in force on d with joined_at <= d, no left_at before d, a
-    recorded signature (accepted_at), d >= effective_start_at when the grid
-    operator confirmed one, and — for a carried member of a version
-    published "with consent of all" — recorded consent (notified_at).
+    version in force on d whose membership covers d (joined_at <= d, no
+    left_at before d), a signature that counts for that version (given on
+    it or an earlier version of the same membership, see
+    shareomat.database.participant_contract), d >= effective_start_at when
+    the grid operator confirmed one, and — for a carried member of a
+    version published "with consent of all" — recorded consent (consent_at).
+    With a re-entry a version can have two rows of one participant; the
+    membership covering d (else the nearest one) decides (ADR-0009).
     The community-level start confirmed by the grid operator
     (vnb_confirmed_start) is a hard lower bound: before it the grid
     operator allocates no LEG energy at all.
@@ -63,6 +67,24 @@ def _meter_valid(meter: Meter, day: date) -> bool:
     return True
 
 
+def _assignment_for_day(rows: list, day: date):
+    """The row whose membership covers `day`; otherwise the latest one begun before it, else the first.
+
+    One row per participant and version except after a re-entry; then the
+    reasons stay the same as with a single membership ("nach dem Austritt",
+    "vor dem Beitritt").
+    """
+    if not rows:
+        return None
+    ordered = sorted(rows, key=lambda a: (a.joined_at or date.min, a.id or 0))
+    covering = [a for a in ordered
+                if (a.joined_at is None or a.joined_at <= day) and (a.left_at is None or a.left_at >= day)]
+    if covering:
+        return covering[-1]
+    begun = [a for a in ordered if a.joined_at is None or a.joined_at <= day]
+    return begun[-1] if begun else ordered[0]
+
+
 class EligibilityResolver:
     """Caches master data once per billing preview and answers eligibility per day."""
 
@@ -86,7 +108,7 @@ class EligibilityResolver:
         if cached is not None:
             return cached
         result = DayEligibility()
-        members: dict[str, object] | None = None
+        members: dict[str, list] | None = None
         version = None
         if self.contract_mode:
             version = get_contract_version_for_date(self._db_path, day)
@@ -96,7 +118,8 @@ class EligibilityResolver:
                 if rows is None:
                     rows = list_assignments_for_version(self._db_path, version.id)
                     self._assignments_by_version[version.id] = rows
-                members = {a.participant_id: a for a in rows}
+                for assignment in rows:
+                    members.setdefault(assignment.participant_id, []).append(assignment)
 
         for meter in self._meters:
             if not meter.participant_id or meter.role == "grid":
@@ -108,11 +131,12 @@ class EligibilityResolver:
                 result.excluded[meter.meter_id] = "Teilnehmer inaktiv"
                 continue
             if self.contract_mode:
-                reason = self._membership_problem(day, version, members.get(pid))
+                assignment = _assignment_for_day(members.get(pid, []), day)
+                reason = self._membership_problem(day, version, assignment)
                 if reason:
                     result.excluded[meter.meter_id] = reason
                     continue
-                if members[pid].vnb_confirmed_at is None:
+                if assignment.vnb_confirmed_at is None:
                     result.unconfirmed_participants.add(pid)
             result.meters[meter.meter_id] = pid
         self._cache[day] = result
@@ -134,6 +158,6 @@ class EligibilityResolver:
         if assignment.effective_start_at is not None and day < assignment.effective_start_at:
             return "vor dem vom Netzbetreiber bestätigten Beginn"
         if version.consent_based and assignment.accepted_version not in (None, version.version) \
-                and assignment.notified_at is None:
+                and assignment.consent_at is None:
             return f"Zustimmung zu v{version.version} fehlt"
         return ""

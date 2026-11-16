@@ -34,7 +34,73 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/shareomat.db")
 
-_SCHEMA_VERSION = 17
+_SCHEMA_VERSION = 18
+
+# Schema 18 (ADR-0009): a membership is its own row; participant_contract only
+# holds what belongs to one contract version, linked to exactly one membership.
+MEMBERSHIPS_DDL = """
+    CREATE TABLE IF NOT EXISTS memberships (
+        id INTEGER PRIMARY KEY,
+        participant_id INTEGER NOT NULL REFERENCES participants(id),
+        joined_at TEXT,
+        left_at TEXT,
+        exit_reason TEXT NOT NULL DEFAULT '',
+        vnb_notified_at TEXT,
+        vnb_confirmed_at TEXT,
+        effective_start_at TEXT,
+        vnb_notified_paperless_id INTEGER,
+        vnb_notified_paperless_asn INTEGER,
+        vnb_confirmed_paperless_id INTEGER,
+        vnb_confirmed_paperless_asn INTEGER,
+        review_note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+"""
+
+# {table} is participant_contract, or participant_contract_v18 while the
+# schema-18 migration rebuilds the table (shareomat.database.membership_migration).
+PARTICIPANT_CONTRACT_DDL = """
+    CREATE TABLE IF NOT EXISTS {table} (
+        id INTEGER PRIMARY KEY,
+        participant_id INTEGER NOT NULL REFERENCES participants(id),
+        membership_id INTEGER NOT NULL REFERENCES memberships(id),
+        contract_version_id INTEGER NOT NULL REFERENCES contract_versions(id),
+        tariff_id INTEGER REFERENCES tariffs(id),
+        declaration_issued_at TEXT,
+        declaration_snapshot TEXT NOT NULL DEFAULT '',
+        declaration_sha256 TEXT NOT NULL DEFAULT '',
+        accepted_at TEXT,
+        accepted_version INTEGER,
+        acceptance_method TEXT NOT NULL DEFAULT '',
+        signed_at TEXT,
+        signed_by TEXT NOT NULL DEFAULT '',
+        signed_document_location TEXT NOT NULL DEFAULT '',
+        signed_document_sha256 TEXT NOT NULL DEFAULT '',
+        paper_original_location TEXT NOT NULL DEFAULT '',
+        signed_paperless_id INTEGER,
+        signed_paperless_asn INTEGER,
+        recorded_by TEXT NOT NULL DEFAULT '',
+        recorded_at TEXT,
+        notified_at TEXT,
+        notice_evidence TEXT NOT NULL DEFAULT '',
+        notice_method TEXT NOT NULL DEFAULT '',
+        notice_paperless_id INTEGER,
+        notice_paperless_asn INTEGER,
+        notice_batch_id TEXT NOT NULL DEFAULT '',
+        notice_recorded_by TEXT NOT NULL DEFAULT '',
+        notice_recorded_at TEXT,
+        consent_at TEXT,
+        consent_evidence TEXT NOT NULL DEFAULT '',
+        consent_paperless_id INTEGER,
+        consent_paperless_asn INTEGER,
+        consent_batch_id TEXT NOT NULL DEFAULT '',
+        consent_recorded_by TEXT NOT NULL DEFAULT '',
+        consent_recorded_at TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(membership_id, contract_version_id)
+    )
+"""
 
 _SCHEMA_STATEMENTS = [
     """
@@ -347,19 +413,8 @@ _SCHEMA_STATEMENTS = [
         UNIQUE(community_id, version)
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS participant_contract (
-        id INTEGER PRIMARY KEY,
-        participant_id INTEGER NOT NULL REFERENCES participants(id),
-        contract_version_id INTEGER NOT NULL REFERENCES contract_versions(id),
-        tariff_id INTEGER REFERENCES tariffs(id),
-        joined_at TEXT,
-        left_at TEXT,
-        accepted_at TEXT,
-        created_at TEXT NOT NULL,
-        UNIQUE(participant_id, contract_version_id)
-    )
-    """,
+    MEMBERSHIPS_DDL,
+    PARTICIPANT_CONTRACT_DDL.format(table="participant_contract"),
     """
     CREATE TABLE IF NOT EXISTS audit_events (
         id INTEGER PRIMARY KEY,
@@ -678,6 +733,10 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         # Published as an amendment all members agreed to (no notice period);
         # carried members then need recorded consent, not a mere notification.
         "consent_based": "INTEGER NOT NULL DEFAULT 0",
+        # valid_until the superseded version had before this one capped it, so
+        # withdraw_version() can restore exactly that (a fixed-term version must
+        # not become open-ended). NULL for versions published before schema 18.
+        "prior_valid_until_before": "TEXT",
     },
     "billing_runs": {
         # Producer credits (Gutschriften) and the quality gate: issues found while
@@ -737,44 +796,16 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "qr_reference": "TEXT NOT NULL DEFAULT ''",
         "record_sha256": "TEXT NOT NULL DEFAULT ''",
     },
-    "participant_contract": {
-        # Separate from accepted_at: accepted_at is the participant's original,
-        # immutable join confirmation (never touched again); notified_at tracks
-        # whether they've been told about the CURRENT contract version — reset
-        # to NULL whenever an assignment is carried forward to a new version at
-        # publish time (see contract_versions.publish_version()).
-        "notified_at": "TEXT",
-        # Evidence chain of the join (see participant_contract module docstring):
-        # which version was originally signed, by whom, how, and the stored
-        # signed document; then grid-operator notification/confirmation and the
-        # effective membership window actually confirmed by the grid operator.
-        "accepted_version": "INTEGER",
-        "declaration_issued_at": "TEXT",
-        "acceptance_method": "TEXT NOT NULL DEFAULT ''",
-        "signed_at": "TEXT",
-        "signed_by": "TEXT NOT NULL DEFAULT ''",
-        "signed_document_location": "TEXT NOT NULL DEFAULT ''",
-        "signed_document_sha256": "TEXT NOT NULL DEFAULT ''",
-        "recorded_by": "TEXT NOT NULL DEFAULT ''",
-        "recorded_at": "TEXT",
-        "notice_evidence": "TEXT NOT NULL DEFAULT ''",
-        "vnb_notified_at": "TEXT",
-        "vnb_confirmed_at": "TEXT",
-        "effective_start_at": "TEXT",
-        "effective_end_at": "TEXT",
-        "exit_reason": "TEXT NOT NULL DEFAULT ''",
-        # The personal Beitrittserklärung as handed out/signed (participant data,
-        # roles, meters at that moment) — frozen so a later reprint can't differ.
-        "declaration_snapshot": "TEXT NOT NULL DEFAULT ''",
-        "declaration_sha256": "TEXT NOT NULL DEFAULT ''",
-        # Where the paper original is kept when no scan was uploaded.
-        "paper_original_location": "TEXT NOT NULL DEFAULT ''",
-    },
+    # participant_contract: since schema 18 the table is created complete by
+    # PARTICIPANT_CONTRACT_DDL; older layouts are rebuilt by
+    # shareomat.database.membership_migration, not extended column by column.
 }
 
 
 # Run after _ensure_columns: they use columns that older databases only get by migration.
 _POST_MIGRATION_STATEMENTS = [
+    "CREATE INDEX IF NOT EXISTS idx_memberships_participant ON memberships(participant_id)",
+    "CREATE INDEX IF NOT EXISTS idx_participant_contract_version ON participant_contract(contract_version_id)",
     """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_document_reminders_active
         ON document_reminders(document_id, level) WHERE discarded_at IS NULL
@@ -887,6 +918,11 @@ def init_db(db_path: Path) -> None:
     stored = _stored_schema_version(db_path)
     if stored is not None and stored < _SCHEMA_VERSION:
         backup_before_migration(db_path, stored)
+    if stored is not None:
+        # Before the main block: the rebuild needs foreign_keys OFF and its own
+        # transaction. Idempotent: does nothing once the table has the new layout.
+        from shareomat.database.membership_migration import migrate_to_memberships
+        migrate_to_memberships(db_path)
     with connect(db_path) as conn:
         with conn:
             for statement in _SCHEMA_STATEMENTS:
