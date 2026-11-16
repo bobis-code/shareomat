@@ -47,16 +47,14 @@ from shareomat.database.participant_contract import (
     apply_batch,
     preview_batch,
 )
-from shareomat.leg_const import METER_ROLE_CONSUMER, METER_ROLE_PRODUCER, METER_ROLE_PRODUCER_CONSUMER, METER_ROLE_STORAGE
 from shareomat.security.context import current_principal
 from shareomat.web.navigation import url_for
+from shareomat.web.pages.meters import METER_ROLES
 from shareomat.web.rendering import FormError, RequestContext, form_date, render_page
 from shareomat.web.state import get_state
 
 FILTERS = {"all": "Alle", "open": "Offen", "waiting": "Wartet auf EBL", "check": "Prüfen",
            "complete": "Vollständig", "departed": "Ausgetreten"}
-METER_ROLES = [(METER_ROLE_CONSUMER, "Bezüger"), (METER_ROLE_PRODUCER, "Produzent"),
-               (METER_ROLE_PRODUCER_CONSUMER, "Produzent und Bezüger"), (METER_ROLE_STORAGE, "Speicher")]
 _TOKEN_TTL_SECONDS = 15 * 60
 _MAX_PENDING = 100
 _pending: dict[str, dict] = {}
@@ -247,7 +245,7 @@ def handle_get(ctx: RequestContext) -> str:
         month_choices=_month_choices(month), month_value=month.strftime("%Y-%m"),
         selected=selected, selected_id=selected_id,
         events=list_events(ctx.db_path, entity="participant", entity_id=selected_id, limit=40) if selected else [],
-        joinable_versions=_joinable_versions(ctx.db_path), meter_roles=METER_ROLES,
+        joinable_versions=_joinable_versions(ctx.db_path), meter_roles=METER_ROLES, meter_role_labels=dict(METER_ROLES),
         acceptance_methods=ACCEPTANCE_METHODS, notice_methods=NOTICE_METHODS,
         batch_kind=batch_kind, batch_kinds=BATCH_KINDS, batch_version=batch_version, candidates=candidates,
         preview=preview, token=token, state_labels=STATE_LABELS, state_symbols=STATE_SYMBOLS,

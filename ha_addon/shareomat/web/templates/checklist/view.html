@@ -5,6 +5,9 @@
 <span class="ck ck-{{ point.state }}" title="{{ point.label }}"><b aria-hidden="true">{{ point.symbol }}</b> {{ point.label }}</span>
 {%- if point.text %}<div class="ts">{{ point.text }}</div>{% endif %}
 {%- endmacro %}
+{% macro badge(point) -%}
+<span class="ck ck-{{ point.state }}"><b aria-hidden="true">{{ point.symbol }}</b> {{ point.label }}</span>
+{%- endmacro %}
 {% block content %}
 {% from "contract/_macros.html" import back, paperless_fields, paperless_ref with context %}
 
@@ -141,158 +144,238 @@
 {% set p = selected.participant %}
 {% set m = selected.membership %}
 {% set current = (selected.assignments|sort(attribute='version_number')|list)[-1] if selected.assignments else None %}
-<div class="card" id="detail">
-  <h2>{{ p.label }}</h2>
+{% macro section_head(title, point, anchor) -%}
+<div class="ck-section-head">
+  <h3 id="{{ anchor }}">{{ title }}</h3>
+  {{ badge(point) }}
+</div>
+{%- if point and point.text and point.state != 'done' %}<div class="ck-note">{{ point.text }}</div>{% endif %}
+{%- endmacro %}
+<div class="card ck-detail" id="detail">
+  <div class="ck-detail-head">
+    <div>
+      <h2 class="ck-name">{{ p.label }}</h2>
+      <div class="ck-meta">
+        {% if m and m.joined_at %}Mitglied seit {{ m.joined_at.strftime('%d.%m.%Y') }}{% if m.left_at %} · ausgetreten per {{ m.left_at.strftime('%d.%m.%Y') }}{% endif %}{% else %}noch keinem Vertrag zugeordnet{% endif %}
+      </div>
+    </div>
+    {% if selected.departed %}<span class="ck ck-na">– ausgetreten</span>
+    {% elif selected.open_items %}<span class="ck ck-open"><b aria-hidden="true">✗</b> {{ selected.open_items|length }} offen</span>
+    {% else %}<span class="ck ck-done"><b aria-hidden="true">✓</b> vollständig</span>{% endif %}
+  </div>
+
   {% if selected.open_items %}
-  <div class="notice-warn"><strong>Fehlt noch:</strong>
-    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for item in selected.open_items %}<li>{{ item }}</li>{% endfor %}</ul></div>
-  {% elif not selected.departed %}<div class="info-box">Administrativ vollständig.</div>{% endif %}
+  <div class="notice-warn ck-todo"><strong>Fehlt noch</strong>
+    <ul class="ck-items">{% for item in selected.open_items %}<li>{{ item }}</li>{% endfor %}</ul></div>
+  {% endif %}
 
   {% if m and m.review_note %}
   <div class="error-box" id="pruefen"><strong>Prüfen:</strong> {{ m.review_note }}
-    <p class="ts">Die Abrechnung ist gesperrt, bis die Werte geprüft sind. Falsche Werte zuerst unten korrigieren, dann bestätigen.</p>
-    <form method="post" action="{{ url_for('checklist', suffix='/review/' ~ m.id) }}">
+    <p class="ck-note">Die Abrechnung ist gesperrt, bis die Werte geprüft sind. Falsche Werte zuerst unten korrigieren, dann bestätigen.</p>
+    <form method="post" action="{{ url_for('checklist', suffix='/review/' ~ m.id) }}" class="ck-actions">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <button type="submit">Geprüft — Werte stimmen</button>
     </form></div>
   {% endif %}
 
-  <h3 id="stammdaten">Stammdaten {{ pill(selected.points['master']) }}</h3>
-  <form method="post" action="{{ url_for('participants', suffix='/' ~ p.participant_id|path_segment ~ '/edit') }}" class="form-card">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <input type="hidden" name="participant_id" value="{{ p.participant_id }}">
-    {% if p.active %}<input type="hidden" name="active" value="on">{% endif %}
-    <div class="field"><label>Name</label><input type="text" name="label" value="{{ p.label }}" required></div>
-    <div class="field"><label>Strasse und Nr.</label><input type="text" name="address_line" value="{{ p.address_line }}"></div>
-    <div class="field"><label>PLZ</label><input type="text" name="postal_code" value="{{ p.postal_code }}"></div>
-    <div class="field"><label>Ort</label><input type="text" name="city" value="{{ p.city }}"></div>
-    <div class="field"><label>E-Mail</label><input type="email" name="email" value="{{ p.email }}"></div>
-    <button type="submit" class="btn-secondary">Stammdaten speichern</button>
-  </form>
+  <div class="ck-sections">
 
-  <h3 id="messpunkte">Messpunkte {{ pill(selected.points['meters']) }}</h3>
-  {% if selected.meters %}
-  <ul>{% for mt in selected.meters %}<li><span style="font-family:monospace">{{ mt.meter_id }}</span> · {{ mt.role }} ·
-    {{ 'aktiv' if mt.active else 'inaktiv' }}{% if mt.valid_until %} · gilt bis {{ mt.valid_until.strftime('%d.%m.%Y') }}{% endif %}</li>{% endfor %}</ul>
-  {% endif %}
-  <details class="doc-details"><summary>Messpunkt hinzufügen</summary>
-    <form method="post" action="{{ url_for('meters', suffix='/new') }}" class="form-card" style="padding:10px">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-      <input type="hidden" name="participant_id" value="{{ p.participant_id }}"><input type="hidden" name="active" value="on">
-      <div class="field"><label>Messpunkt-ID (33 Zeichen, «CH…»)</label><input type="text" name="meter_id" required maxlength="64"></div>
-      <div class="field"><label>Bezeichnung</label><input type="text" name="label" required></div>
-      <div class="field"><label>Rolle</label><select name="role">{% for value, label in meter_roles %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
-      <div class="field"><label>Gültig ab</label><input type="date" name="valid_from"></div>
-      <div class="field"><label>Gültig bis (leer = unbefristet)</label><input type="date" name="valid_until"></div>
-      <button type="submit" class="btn-secondary">Messpunkt speichern</button>
-    </form></details>
+    <section class="ck-section">
+      {{ section_head('Stammdaten', selected.points['master'], 'stammdaten') }}
+      <form method="post" action="{{ url_for('participants', suffix='/' ~ p.participant_id|path_segment ~ '/edit') }}" class="form-card ck-form ck-body">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+        <input type="hidden" name="participant_id" value="{{ p.participant_id }}">
+        {% if p.active %}<input type="hidden" name="active" value="on">{% endif %}
+        <div class="field ck-wide"><label for="ck_label">Name</label><input type="text" id="ck_label" name="label" value="{{ p.label }}" required></div>
+        <div class="field ck-wide"><label for="ck_address">Strasse und Nr.</label><input type="text" id="ck_address" name="address_line" value="{{ p.address_line }}"></div>
+        <div class="field"><label for="ck_postal">PLZ</label><input type="text" id="ck_postal" name="postal_code" value="{{ p.postal_code }}"></div>
+        <div class="field"><label for="ck_city">Ort</label><input type="text" id="ck_city" name="city" value="{{ p.city }}"></div>
+        <div class="field ck-wide"><label for="ck_email">E-Mail</label><input type="email" id="ck_email" name="email" value="{{ p.email }}"></div>
+        <div class="ck-actions ck-wide"><button type="submit">Stammdaten speichern</button></div>
+      </form>
+    </section>
 
-  <h3 id="vertrag">Vertrag {{ pill(selected.points['contract']) }}</h3>
-  {% if selected.assignments %}
-  <ul>{% for a in selected.assignments|sort(attribute='version_number') %}
-    <li>Version {{ a.version_number }} · Beitritt per {{ a.joined_at.strftime('%d.%m.%Y') if a.joined_at else '—' }}
-      · <a href="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/declaration') }}">Erklärung und Details</a>
-      {% if a.declaration_issued_at %}· ausgestellt {{ a.declaration_issued_at.strftime('%d.%m.%Y') }}{% endif %}</li>
-  {% endfor %}</ul>
-  {% endif %}
-  {% if not m or selected.departed %}
-  {% if joinable_versions and selected.points['meters'].state != 'open' %}
-  <form method="post" action="{{ url_for('contract', suffix='/participants/add') }}" class="form-card">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <input type="hidden" name="participant_id" value="{{ p.participant_id }}">
-    <div class="field"><label>Vertragsversion</label><select name="contract_version_id">
-      {% for v in joinable_versions %}<option value="{{ v.id }}" {{ 'selected' if loop.last }}>v{{ v.version }} (ab {{ v.valid_from.strftime('%d.%m.%Y') }})</option>{% endfor %}</select></div>
-    <div class="field"><label>Beitritt per (Monatserster)</label><input type="date" name="valid_from" required></div>
-    <button type="submit">{{ 'Wiedereintritt erfassen' if selected.departed else 'Dem Vertrag zuordnen' }}</button>
-  </form>
-  {% elif selected.points['meters'].state == 'open' %}<p class="ts">Zuerst oben einen Messpunkt hinzufügen.</p>
-  {% else %}<p class="ts">Kein veröffentlichter Vertrag — zuerst unter «Vertrag» veröffentlichen.</p>{% endif %}
-  {% endif %}
-  {% if current and not current.declaration_issued_at and not current.accepted_at %}
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/issue') }}" class="actions-row">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <a class="btn btn-secondary" href="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/declaration/print') }}" target="_blank" rel="noopener">Erklärung drucken</a>
-    <label>ausgestellt am <input type="date" name="issued_at" value="{{ today.isoformat() }}"></label>
-    <button type="submit" class="btn-secondary">Als ausgestellt erfassen</button>
-  </form>
-  {% endif %}
+    <section class="ck-section">
+      {{ section_head('Messpunkte', selected.points['meters'], 'messpunkte') }}
+      <div class="ck-body">
+        {% if selected.meters %}
+        <div class="ck-rows">
+          {% for mt in selected.meters %}
+          <div class="ck-row">
+            <div class="ck-id">{{ mt.meter_id }}</div>
+            <div class="ck-meta">{{ meter_role_labels.get(mt.role, mt.role) }} · {{ 'aktiv' if mt.active else 'inaktiv' }}
+              {%- if mt.valid_from %} · ab {{ mt.valid_from.strftime('%d.%m.%Y') }}{% endif %}
+              {%- if mt.valid_until %} · gilt bis {{ mt.valid_until.strftime('%d.%m.%Y') }}{% endif %}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <details class="ck-more" {{ 'open' if not selected.meters }}><summary>Messpunkt hinzufügen</summary>
+          <form method="post" action="{{ url_for('meters', suffix='/new') }}" class="form-card ck-form ck-more-body">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+            <input type="hidden" name="participant_id" value="{{ p.participant_id }}"><input type="hidden" name="active" value="on">
+            <div class="field ck-wide"><label>Messpunkt-ID (33 Zeichen, «CH…»)</label><input type="text" name="meter_id" required maxlength="64"></div>
+            <div class="field"><label>Bezeichnung</label><input type="text" name="label" required></div>
+            <div class="field"><label>Rolle</label><select name="role">{% for value, label in meter_roles %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="field"><label>Gültig ab</label><input type="date" name="valid_from"></div>
+            <div class="field"><label>Gültig bis (leer = unbefristet)</label><input type="date" name="valid_until"></div>
+            <div class="ck-actions ck-wide"><button type="submit">Messpunkt speichern</button></div>
+          </form></details>
+      </div>
+    </section>
 
-  {% if current %}
-  <h3 id="unterschrift">Unterschrift</h3>
-  {% if current.accepted_at %}
-  <p>v{{ current.signature_version }}, unterschrieben am {{ current.accepted_at.strftime('%d.%m.%Y') }}
-    {% if current.signed_by %}durch {{ current.signed_by }}{% endif %}
-    {% if current.signed_document_sha256 %}· Dokument ✓{% endif %}
-    {% if current.paper_original_location %}· Papier: {{ current.paper_original_location }}{% endif %}
-    {{ paperless_ref(current.signed_paperless_id, current.signed_paperless_asn) }}</p>
-  {% include "contract/correct_signature.html" %}
-  {% else %}
-  <form method="post" enctype="multipart/form-data" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/confirm') }}" class="form-card">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required max="{{ today.isoformat() }}"></div>
-    <div class="field"><label>Art der Zustimmung</label><select name="acceptance_method">{% for key, label in acceptance_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
-    <div class="field"><label>Unterzeichnet von</label><input type="text" name="signed_by" required value="{{ p.label }}"></div>
-    <p class="field-hint">Nachweis: mindestens eines davon.</p>
-    <div class="field"><label>Ablageort des Papieroriginals</label><input type="text" name="paper_original_location" maxlength="200"></div>
-    {{ paperless_fields('signed_') }}
-    <div class="field"><label>Unterschriebenes Dokument hochladen (PDF/JPG/PNG)</label><input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png">
-      <div class="field-hint">Bitte als letztes Feld ausfüllen.</div></div>
-    <button type="submit">Unterschrift erfassen</button>
-  </form>
-  {% endif %}
+    <section class="ck-section">
+      {{ section_head('Vertrag & Unterschrift', selected.points['contract'], 'vertrag') }}
+      <div class="ck-body">
+        {% if selected.assignments %}
+        <dl class="ck-kv">
+          <dt>Vertragsversion</dt>
+          <dd>{% for a in selected.assignments|sort(attribute='version_number') %}v{{ a.version_number }}
+            (<a href="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/declaration') }}">Details</a>){{ ', ' if not loop.last }}{% endfor %}</dd>
+          <dt>Beitritt per</dt><dd>{{ m.joined_at.strftime('%d.%m.%Y') if m and m.joined_at else '—' }}</dd>
+          <dt>Erklärung ausgestellt</dt>
+          <dd>{% set issued = selected.assignments|selectattr('declaration_issued_at')|list %}{{ issued[-1].declaration_issued_at.strftime('%d.%m.%Y') if issued else '—' }}</dd>
+          {% if current and current.accepted_at %}
+          <dt>Unterschrift</dt>
+          <dd>{{ current.accepted_at.strftime('%d.%m.%Y') }}, Version {{ current.signature_version }}{% if current.signed_by %} · {{ current.signed_by }}{% endif %}</dd>
+          <dt>Nachweis</dt>
+          <dd>{% if current.signed_document_sha256 %}Dokument hochgeladen{% endif %}
+            {%- if current.paper_original_location %}{{ ' · ' if current.signed_document_sha256 }}Papier: {{ current.paper_original_location }}{% endif %}
+            {{ paperless_ref(current.signed_paperless_id, current.signed_paperless_asn) }}
+            {%- if not current.signature_evidence %}<span class="ck-warn-text">kein Nachweis</span>{% endif %}</dd>
+          {% else %}
+          <dt>Unterschrift</dt><dd><span class="ck-warn-text">noch nicht erfasst</span></dd>
+          {% endif %}
+        </dl>
+        {% endif %}
 
-  <h3 id="ebl">EBL (Netzbetreiber) {{ pill(selected.points['vnb']) }}</h3>
-  <p>Gemeldet: {{ m.vnb_notified_at.strftime('%d.%m.%Y') if m.vnb_notified_at else '—' }}
-    {{ paperless_ref(m.vnb_notified_paperless_id, m.vnb_notified_paperless_asn) }} ·
-    Bestätigt: {{ m.vnb_confirmed_at.strftime('%d.%m.%Y') if m.vnb_confirmed_at else '—' }}
-    {% if m.effective_start_at %}(wirksam ab {{ m.effective_start_at.strftime('%d.%m.%Y') }}){% endif %}
-    {{ paperless_ref(m.vnb_confirmed_paperless_id, m.vnb_confirmed_paperless_asn) }}</p>
-  {% if not m.vnb_notified_at %}
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/vnb-notified') }}" class="form-card">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <div class="field"><label>Bei EBL gemeldet am</label><input type="date" name="vnb_notified_at" required></div>
-    {{ paperless_fields('') }}
-    <button type="submit" class="btn-secondary">Meldung erfassen</button>
-  </form>
-  {% endif %}
-  {% if not m.vnb_confirmed_at %}
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/vnb-confirmed') }}" class="form-card">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <div class="field"><label>Von EBL bestätigt am</label><input type="date" name="vnb_confirmed_at" required max="{{ today.isoformat() }}"></div>
-    <div class="field"><label>Bestätigter Beginn (Monatserster)</label><input type="date" name="effective_start_at" required value="{{ m.joined_at.isoformat() if m.joined_at else '' }}"></div>
-    {{ paperless_fields('') }}
-    <button type="submit" class="btn-secondary">Bestätigung erfassen</button>
-  </form>
-  {% endif %}
-  {% include "contract/correct_membership.html" %}
+        {% if not m or selected.departed %}
+          {% if joinable_versions and selected.points['meters'].state != 'open' %}
+          <form method="post" action="{{ url_for('contract', suffix='/participants/add') }}" class="form-card ck-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+            <input type="hidden" name="participant_id" value="{{ p.participant_id }}">
+            <div class="field"><label>Vertragsversion</label><select name="contract_version_id">
+              {% for v in joinable_versions %}<option value="{{ v.id }}" {{ 'selected' if loop.last }}>v{{ v.version }} (ab {{ v.valid_from.strftime('%d.%m.%Y') }})</option>{% endfor %}</select></div>
+            <div class="field"><label>Beitritt per (Monatserster)</label><input type="date" name="valid_from" required></div>
+            <div class="ck-actions ck-wide"><button type="submit">{{ 'Wiedereintritt erfassen' if selected.departed else 'Dem Vertrag zuordnen' }}</button></div>
+          </form>
+          {% elif selected.points['meters'].state == 'open' %}<p class="ck-note">Zuerst oben einen Messpunkt hinzufügen.</p>
+          {% else %}<p class="ck-note">Kein veröffentlichter Vertrag — zuerst unter «Vertrag» veröffentlichen.</p>{% endif %}
+        {% endif %}
 
-  <h3 id="mitteilung">Mitteilung / Zustimmung {{ pill(selected.points['notice']) }}</h3>
-  {% for a in selected.assignments|sort(attribute='version_number') if a.accepted_at is none or a.signature_version != a.version_number %}
-  {% include "contract/notice_forms.html" %}
-  {% else %}<p class="ts">Nicht nötig: Der Teilnehmer hat jede seiner Versionen selbst unterschrieben.</p>
-  {% endfor %}
+        {% if current and not current.declaration_issued_at and not current.accepted_at %}
+        <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/issue') }}" class="ck-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+          <a class="btn btn-small btn-muted" href="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/declaration/print') }}" target="_blank" rel="noopener">Erklärung drucken</a>
+          <label class="ck-inline-field">ausgestellt am <input type="date" name="issued_at" value="{{ today.isoformat() }}"></label>
+          <button type="submit" class="btn-small">Als ausgestellt erfassen</button>
+        </form>
+        {% endif %}
 
-  <h3 id="austritt">Austritt</h3>
-  {% if m.left_at %}<p>Ausgetreten per {{ m.left_at.strftime('%d.%m.%Y') }}{% if m.exit_reason %} ({{ m.exit_reason }}){% endif %}.</p>
-  {% else %}
-  <details class="doc-details"><summary>Austritt erfassen</summary>
-    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/depart') }}" class="form-card" style="padding:10px">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-      <div class="field"><label>Austritt per (Monatsletzter)</label><input type="date" name="end_date" required></div>
-      <div class="field"><label>Grund</label><input type="text" name="exit_reason" required maxlength="200"></div>
-      <button type="submit" class="btn-small btn-danger">Austritt bestätigen</button>
-    </form></details>
-  {% endif %}
-  {% endif %}
+        {% if current and not current.accepted_at %}
+        <details class="ck-more" open><summary>Unterschrift erfassen</summary>
+          <form method="post" enctype="multipart/form-data" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/confirm') }}" class="form-card ck-form ck-more-body">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+            <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required max="{{ today.isoformat() }}"></div>
+            <div class="field"><label>Art der Zustimmung</label><select name="acceptance_method">{% for key, label in acceptance_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+            <div class="field ck-wide"><label>Unterzeichnet von</label><input type="text" name="signed_by" required value="{{ p.label }}"></div>
+            <p class="field-hint ck-wide">Nachweis: mindestens eines der folgenden Felder.</p>
+            <div class="field ck-wide"><label>Ablageort des Papieroriginals</label><input type="text" name="paper_original_location" maxlength="200"></div>
+            {{ paperless_fields('signed_') }}
+            <div class="field ck-wide"><label>Unterschriebenes Dokument hochladen (PDF/JPG/PNG)</label><input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png">
+              <div class="field-hint">Bitte als letztes Feld ausfüllen.</div></div>
+            <div class="ck-actions ck-wide"><button type="submit">Unterschrift erfassen</button></div>
+          </form></details>
+        {% elif current %}
+        {% include "contract/correct_signature.html" %}
+        {% endif %}
+      </div>
+    </section>
 
-  <h3 id="abrechnung">Abrechnung {{ checklist.month_start.strftime('%m.%Y') }} {{ pill(selected.points['billing']) }}</h3>
-  <p class="ts">Aus derselben Regel wie die Abrechnung selbst (Vertrag, Beitritt/Austritt, Unterschrift, bestätigter Beginn, Zustimmung).</p>
+    {% if current %}
+    <section class="ck-section">
+      {{ section_head('EBL (Netzbetreiber)', selected.points['vnb'], 'ebl') }}
+      <div class="ck-body">
+        <dl class="ck-kv">
+          <dt>Gemeldet</dt><dd>{{ m.vnb_notified_at.strftime('%d.%m.%Y') if m.vnb_notified_at else '—' }} {{ paperless_ref(m.vnb_notified_paperless_id, m.vnb_notified_paperless_asn) }}</dd>
+          <dt>Bestätigt</dt><dd>{{ m.vnb_confirmed_at.strftime('%d.%m.%Y') if m.vnb_confirmed_at else '—' }} {{ paperless_ref(m.vnb_confirmed_paperless_id, m.vnb_confirmed_paperless_asn) }}</dd>
+          <dt>Wirksam ab</dt><dd>{{ m.effective_start_at.strftime('%d.%m.%Y') if m.effective_start_at else '—' }}</dd>
+        </dl>
+        {% if not m.vnb_notified_at or not m.vnb_confirmed_at %}
+        <div class="ck-forms">
+          {% if not m.vnb_notified_at %}
+          <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/vnb-notified') }}" class="ck-mini">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+            <h4>Meldung erfassen</h4>
+            <div class="field"><label>Bei EBL gemeldet am</label><input type="date" name="vnb_notified_at" required></div>
+            {{ paperless_fields('') }}
+            <button type="submit">Meldung speichern</button>
+          </form>
+          {% endif %}
+          {% if not m.vnb_confirmed_at %}
+          <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/vnb-confirmed') }}" class="ck-mini">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+            <h4>Bestätigung erfassen</h4>
+            <div class="field"><label>Von EBL bestätigt am</label><input type="date" name="vnb_confirmed_at" required max="{{ today.isoformat() }}"></div>
+            <div class="field"><label>Bestätigter Beginn (Monatserster)</label><input type="date" name="effective_start_at" required value="{{ m.joined_at.isoformat() if m.joined_at else '' }}"></div>
+            {{ paperless_fields('') }}
+            <button type="submit">Bestätigung speichern</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% include "contract/correct_membership.html" %}
+      </div>
+    </section>
 
-  {% if events %}
-  <details class="doc-details"><summary>Verlauf ({{ events|length }})</summary>
-    <ul style="padding:10px 10px 10px 28px;margin:0">{% for e in events %}<li class="ts">{{ e.occurred_at.astimezone().strftime('%d.%m.%Y %H:%M') }} · {{ e.action }} · {{ e.detail }}{% if e.actor %} · {{ e.actor }}{% endif %}</li>{% endfor %}</ul>
-  </details>
-  {% endif %}
+    <section class="ck-section">
+      {{ section_head('Mitteilung / Zustimmung', selected.points['notice'], 'mitteilung') }}
+      <div class="ck-body">
+        {% for a in selected.assignments|sort(attribute='version_number') if a.accepted_at is none or a.signature_version != a.version_number %}
+        {% include "contract/notice_forms.html" %}
+        {% else %}<p class="ck-note">Nicht nötig: Der Teilnehmer hat jede seiner Vertragsversionen selbst unterschrieben.</p>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="ck-section">
+      {{ section_head('Abrechnung ' ~ checklist.month_start.strftime('%m.%Y'), selected.points['billing'], 'abrechnung') }}
+      <div class="ck-body">
+        <p class="ck-note">{% if selected.points['billing'].state == 'done' %}Wird für diesen Monat abgerechnet. {% endif %}Ermittelt mit derselben
+          Regel wie die Abrechnung selbst: Vertrag, Beitritt/Austritt, Unterschrift, bestätigter Beginn, Zustimmung.
+          Anderer Monat: oben bei «Abrechnungsbereit für» wählen.</p>
+      </div>
+    </section>
+
+    <section class="ck-section ck-section-muted">
+      <div class="ck-section-head"><h3 id="austritt">Austritt und Verlauf</h3></div>
+      <div class="ck-body">
+        {% if current %}
+          {% if m.left_at %}<p>Ausgetreten per {{ m.left_at.strftime('%d.%m.%Y') }}{% if m.exit_reason %} ({{ m.exit_reason }}){% endif %}.</p>
+          {% else %}
+          <details class="ck-more"><summary>Austritt erfassen</summary>
+            <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/depart') }}" class="form-card ck-form ck-more-body">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+              <div class="field"><label>Austritt per (Monatsletzter)</label><input type="date" name="end_date" required></div>
+              <div class="field"><label>Grund</label><input type="text" name="exit_reason" required maxlength="200"></div>
+              <p class="field-hint ck-wide">Gilt für alle Vertragsversionen dieser Mitgliedschaft. EBL mindestens 1 Monat im Voraus melden.</p>
+              <div class="ck-actions ck-wide"><button type="submit" class="btn-danger">Austritt bestätigen</button></div>
+            </form></details>
+          {% endif %}
+        {% endif %}
+        {% if events %}
+        <details class="ck-more"><summary>Verlauf ({{ events|length }})</summary>
+          <ol class="ck-history ck-more-body">{% for e in events %}
+            <li><span class="ck-meta">{{ e.occurred_at.astimezone().strftime('%d.%m.%Y %H:%M') }}{% if e.actor %} · {{ e.actor }}{% endif %}</span>
+              <div>{{ e.action }}{% if e.detail %} — {{ e.detail }}{% endif %}</div></li>
+          {% endfor %}</ol>
+        </details>
+        {% endif %}
+      </div>
+    </section>
+
+  </div>
 </div>
 {% endif %}
 {% endblock %}

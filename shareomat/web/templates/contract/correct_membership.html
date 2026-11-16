@@ -1,14 +1,14 @@
 {#- Correct membership data (join, departure, grid operator). Needs `current` (assignment) and `m` (membership values). -#}
-{% from "contract/_macros.html" import back, paperless_fields, reason_field with context %}
-<details class="doc-details"><summary>Mitgliedschaft und EBL korrigieren</summary>
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/correct') }}" class="form-card" style="padding:10px">
+{% from "contract/_macros.html" import back, reason_field with context %}
+<details class="ck-more"><summary>Mitgliedschaft und EBL korrigieren</summary>
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/correct') }}" class="form-card ck-form ck-more-body">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
     <input type="hidden" name="section" value="membership">
-    <p class="field-hint">Gilt für alle Vertragsversionen dieser Mitgliedschaft. Ein leeres Feld entfernt den Wert.
+    <p class="field-hint ck-wide">Gilt für alle Vertragsversionen dieser Mitgliedschaft. Ein leeres Feld entfernt den Wert.
       Alter und neuer Wert werden im Verlauf festgehalten.</p>
     <div class="field"><label>Beitritt per (Monatserster)</label><input type="date" name="joined_at" required value="{{ m.joined_at.isoformat() if m.joined_at else '' }}"></div>
     <div class="field"><label>Austritt per (Monatsletzter, leer = Mitglied)</label><input type="date" name="left_at" value="{{ m.left_at.isoformat() if m.left_at else '' }}"></div>
-    <div class="field"><label>Austrittsgrund</label><input type="text" name="exit_reason" maxlength="200" value="{{ m.exit_reason or '' }}"></div>
+    <div class="field ck-wide"><label>Austrittsgrund</label><input type="text" name="exit_reason" maxlength="200" value="{{ m.exit_reason or '' }}"></div>
     <div class="field"><label>Bei EBL gemeldet am</label><input type="date" name="vnb_notified_at" value="{{ m.vnb_notified_at.isoformat() if m.vnb_notified_at else '' }}"></div>
     <div class="field"><label>Von EBL bestätigt am</label><input type="date" name="vnb_confirmed_at" value="{{ m.vnb_confirmed_at.isoformat() if m.vnb_confirmed_at else '' }}"></div>
     <div class="field"><label>Wirksamer Beginn (Monatserster)</label><input type="date" name="effective_start_at" value="{{ m.effective_start_at.isoformat() if m.effective_start_at else '' }}"></div>
@@ -17,6 +17,6 @@
     <div class="field"><label>Paperless-Nr. Bestätigung</label><input type="text" inputmode="numeric" name="vnb_confirmed_paperless_id" maxlength="10" value="{{ m.vnb_confirmed_paperless_id or '' }}"></div>
     {% endif %}
     {{ reason_field() }}
-    <button type="submit" class="btn-secondary">Korrektur speichern</button>
+    <div class="ck-actions ck-wide"><button type="submit">Korrektur speichern</button></div>
   </form>
 </details>

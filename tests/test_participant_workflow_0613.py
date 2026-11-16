@@ -547,3 +547,30 @@ def test_collective_consent_needs_a_common_document(server, monkeypatch):  # noq
                                 f"sel_{rows['p2'].id}": "on"})
     _, _, html = a.get("/checklist")
     assert "gemeinsamer Nachweis nötig" in html
+
+
+def test_detail_view_has_one_card_per_area_and_saving_comes_back(server, monkeypatch):  # noqa: F811
+    _prepare_server_data(server, monkeypatch)
+    a = _setup_admin(server)
+    status, _, html = a.get("/checklist?p=p2")
+    assert status == 200
+    assert html.count('<section class="ck-section') == 7                           # one card per area
+    for title in ("Stammdaten", "Messpunkte", "Vertrag &amp; Unterschrift", "EBL (Netzbetreiber)",
+                  "Mitteilung / Zustimmung", "Abrechnung", "Austritt und Verlauf"):
+        assert f">{title}" in html, title
+    assert "consumer ·" not in html and "Verbraucher" in html                      # roles in plain German
+    csrf = a.page_csrf("/checklist?p=p2")
+    status, headers, _ = a.post("/participants/p2/edit", {
+        "csrf_token": csrf, "participant_id": "p2", "label": "Haus 2", "address_line": "Neuer Weg 5",
+        "postal_code": "9999", "city": "Testdorf", "email": "p2@example.ch", "active": "on",
+        "return_to": "checklist", "return_participant": "p2"})
+    assert status == 303 and headers["Location"] == "/checklist?p=p2#detail"
+    _, _, html = a.get("/checklist?p=p2")
+    assert 'value="Neuer Weg 5"' in html
+    status, headers, _ = a.post("/meters/new", {
+        "csrf_token": a.page_csrf("/checklist?p=p2"), "participant_id": "p2", "active": "on",
+        "meter_id": METER.format(9), "label": "Zähler 2b", "role": "consumer", "valid_from": "", "valid_until": "",
+        "return_to": "checklist", "return_participant": "p2"})
+    assert headers["Location"] == "/checklist?p=p2#detail"
+    _, _, html = a.get("/checklist?p=p2")
+    assert METER.format(9) in html

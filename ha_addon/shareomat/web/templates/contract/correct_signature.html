@@ -1,36 +1,41 @@
 {#- Correct or remove a recorded signature and the declaration date. Needs `current` (assignment). -#}
 {% from "contract/_macros.html" import back, reason_field with context %}
-<details class="doc-details"><summary>Unterschrift oder Erklärung korrigieren</summary>
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/correct') }}" class="form-card" style="padding:10px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <input type="hidden" name="section" value="signature">
-    {% if current.signature_version and current.signature_version != current.version_number %}
-    <p class="field-hint">Unterschrieben wurde Version {{ current.signature_version }}; die Korrektur betrifft diese Unterschrift.</p>
-    {% endif %}
-    <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required max="{{ today.isoformat() }}" value="{{ current.signed_at.isoformat() if current.signed_at else (current.accepted_at.isoformat() if current.accepted_at else '') }}"></div>
-    <div class="field"><label>Art der Zustimmung</label><select name="acceptance_method">
-      {% for key, label in acceptance_methods.items() %}<option value="{{ key }}" {{ 'selected' if key == current.acceptance_method }}>{{ label }}</option>{% endfor %}</select></div>
-    <div class="field"><label>Unterzeichnet von</label><input type="text" name="signed_by" maxlength="200" value="{{ current.signed_by }}"></div>
-    <div class="field"><label>Ablageort des Papieroriginals</label><input type="text" name="paper_original_location" maxlength="200" value="{{ current.paper_original_location }}"></div>
-    {% if paperless_url %}
-    <div class="field"><label>Paperless-Nr.</label><input type="text" inputmode="numeric" name="signed_paperless_id" maxlength="10" value="{{ current.signed_paperless_id or '' }}"></div>
-    <div class="field"><label>ASN</label><input type="text" inputmode="numeric" name="signed_paperless_asn" maxlength="10" value="{{ current.signed_paperless_asn or '' }}"></div>
-    {% endif %}
-    {{ reason_field() }}
-    <button type="submit" class="btn-secondary">Korrektur speichern</button>
-  </form>
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/correct') }}" class="form-card" style="padding:10px">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <input type="hidden" name="section" value="declaration">
-    <div class="field"><label>Erklärung ausgestellt am (leer = nicht ausgestellt)</label><input type="date" name="declaration_issued_at" value="{{ current.declaration_issued_at.isoformat() if current.declaration_issued_at else '' }}"></div>
-    {{ reason_field() }}
-    <button type="submit" class="btn-secondary">Datum speichern</button>
-  </form>
-  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/remove-signature') }}" class="form-card" style="padding:10px"
-        onsubmit="return confirm('Unterschrift wirklich entfernen? Alle Angaben bleiben im Verlauf erhalten.')">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-    <p class="field-hint">Nur für eine irrtümlich erfasste Unterschrift. Ohne Unterschrift wird der Teilnehmer nicht abgerechnet.</p>
-    {{ reason_field() }}
-    <button type="submit" class="btn-small btn-danger">Unterschrift entfernen</button>
-  </form>
+<details class="ck-more"><summary>Unterschrift oder Erklärung korrigieren</summary>
+  <div class="ck-more-body">
+    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/correct') }}" class="form-card ck-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <input type="hidden" name="section" value="signature">
+      <h4 class="ck-wide">Unterschrift</h4>
+      {% if current.signature_version and current.signature_version != current.version_number %}
+      <p class="field-hint ck-wide">Unterschrieben wurde Version {{ current.signature_version }}; die Korrektur betrifft diese Unterschrift.</p>
+      {% endif %}
+      <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required max="{{ today.isoformat() }}" value="{{ current.signed_at.isoformat() if current.signed_at else (current.accepted_at.isoformat() if current.accepted_at else '') }}"></div>
+      <div class="field"><label>Art der Zustimmung</label><select name="acceptance_method">
+        {% for key, label in acceptance_methods.items() %}<option value="{{ key }}" {{ 'selected' if key == current.acceptance_method }}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Unterzeichnet von</label><input type="text" name="signed_by" maxlength="200" value="{{ current.signed_by }}"></div>
+      <div class="field"><label>Ablageort des Papieroriginals</label><input type="text" name="paper_original_location" maxlength="200" value="{{ current.paper_original_location }}"></div>
+      {% if paperless_url %}
+      <div class="field"><label>Paperless-Nr.</label><input type="text" inputmode="numeric" name="signed_paperless_id" maxlength="10" value="{{ current.signed_paperless_id or '' }}"></div>
+      <div class="field"><label>ASN</label><input type="text" inputmode="numeric" name="signed_paperless_asn" maxlength="10" value="{{ current.signed_paperless_asn or '' }}"></div>
+      {% endif %}
+      {{ reason_field() }}
+      <div class="ck-actions ck-wide"><button type="submit">Korrektur speichern</button></div>
+    </form>
+    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/correct') }}" class="form-card ck-form ck-separated">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <input type="hidden" name="section" value="declaration">
+      <h4 class="ck-wide">Beitrittserklärung</h4>
+      <div class="field"><label>Ausgestellt am (leer = nicht ausgestellt)</label><input type="date" name="declaration_issued_at" value="{{ current.declaration_issued_at.isoformat() if current.declaration_issued_at else '' }}"></div>
+      {{ reason_field() }}
+      <div class="ck-actions ck-wide"><button type="submit">Datum speichern</button></div>
+    </form>
+    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/remove-signature') }}" class="form-card ck-form ck-separated"
+          onsubmit="return confirm('Unterschrift wirklich entfernen? Alle Angaben bleiben im Verlauf erhalten.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <h4 class="ck-wide">Unterschrift entfernen</h4>
+      <p class="field-hint ck-wide">Nur für eine irrtümlich erfasste Unterschrift. Ohne Unterschrift wird der Teilnehmer nicht abgerechnet.</p>
+      {{ reason_field() }}
+      <div class="ck-actions ck-wide"><button type="submit" class="btn-danger btn-small">Unterschrift entfernen</button></div>
+    </form>
+  </div>
 </details>
