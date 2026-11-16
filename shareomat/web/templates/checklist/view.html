@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}Checkliste{% endblock %}
+{% block heading %}Checkliste{% endblock %}
+{% macro pill(point) -%}
+<span class="ck ck-{{ point.state }}" title="{{ point.label }}"><b aria-hidden="true">{{ point.symbol }}</b> {{ point.label }}</span>
+{%- if point.text %}<div class="ts">{{ point.text }}</div>{% endif %}
+{%- endmacro %}
+{% block content %}
+{% from "contract/_macros.html" import back, paperless_fields, paperless_ref with context %}
+
+<div class="card">
+  <h2>LEG gesamt</h2>
+  <ul class="ck-list">
+    {% for label, point in checklist.community_points %}
+    <li><span class="ck ck-{{ point.state }}"><b aria-hidden="true">{{ point.symbol }}</b> {{ point.label }}</span>
+      <strong>{{ label }}</strong>{% if point.text %}: {{ point.text }}{% endif %}</li>
+    {% endfor %}
+  </ul>
+  {% for task in checklist.version_tasks %}
+  <div class="notice-warn" style="margin:10px 0 0">
+    {% if task.kind == 'notice' %}Vertrag v{{ task.version.version }} (gültig ab {{ task.version.valid_from.strftime('%d.%m.%Y') }}):
+      {{ task.assignments|length }} Mitteilung(en) offen.
+    {% else %}Vertrag v{{ task.version.version }} gilt «mit Zustimmung aller»: {{ task.assignments|length }} Zustimmung(en) fehlen —
+      ohne Zustimmung wird der Teilnehmer ab {{ task.version.valid_from.strftime('%d.%m.%Y') }} nicht abgerechnet.{% endif %}
+    <a class="btn-small" href="{{ url_for('checklist') }}?batch={{ task.kind }}&v={{ task.version.id }}#sammel">{{ 'Mitteilungen erfassen' if task.kind == 'notice' else 'Zustimmungen erfassen' }}</a>
+  </div>
+  {% endfor %}
+</div>
+
+{% if batch_kind %}
+{% set spec = batch_kinds[batch_kind] %}
+<div class="card" id="sammel">
+  <h2>{{ spec.title }}{% if batch_version %} — Vertrag v{{ batch_version.version }}{% endif %}</h2>
+  <p class="field-hint">{{ spec.hint }}</p>
+  {% if preview %}
+  <div class="info-box">
+    <strong>Vorschau — noch nichts gespeichert.</strong>
+    {{ spec.date_label }}: {{ preview['values']['day'].strftime('%d.%m.%Y') }}
+    {% if preview['values'].get('effective_start') %}· wirksam ab {{ preview['values']['effective_start'].strftime('%d.%m.%Y') }}{% endif %}
+    {% if preview['values'].get('method') %}· {{ notice_methods[preview['values']['method']] }}{% endif %}
+    {% if preview['values']['evidence'] %}· Nachweis: {{ preview['values']['evidence'] }}{% endif %}
+    {{ paperless_ref(preview['values']['paperless_id'], preview['values']['paperless_asn']) }}
+    <ul style="margin:.4rem 0 0 1rem;padding:0">
+      {% for _id, label in preview['ok'] %}<li>✓ {{ label }}</li>{% endfor %}
+      {% for label, why in preview['skipped'] %}<li>– {{ label }}: wird nicht übernommen ({{ why }})</li>{% endfor %}
+    </ul>
+    {% for w in preview.get('warnings', []) %}<div class="error-box">{{ w }}</div>{% endfor %}
+  </div>
+  {% if preview['ok'] %}
+  <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="actions-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="{{ batch_kind }}">
+    <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
+    <input type="hidden" name="step" value="apply">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button type="submit">Übernehmen ({{ preview['ok']|length }})</button>
+    <a class="btn btn-muted" href="{{ url_for('checklist') }}?batch={{ batch_kind }}{{ '&v=' ~ batch_version.id if batch_version }}#sammel">Auswahl ändern</a>
+  </form>
+  {% endif %}
+  {% elif candidates %}
+  <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="{{ batch_kind }}">
+    <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
+    <input type="hidden" name="step" value="preview">
+    <div class="field checkbox-row"><input type="checkbox" id="sel_all"
+         onclick="for (const c of document.querySelectorAll('.sel-one')) c.checked = this.checked">
+      <label for="sel_all" style="margin:0">Alle auswählen ({{ candidates|length }})</label></div>
+    {% for a in candidates %}
+    <div class="field checkbox-row"><input type="checkbox" class="sel-one" id="sel_{{ a.id }}" name="sel_{{ a.id }}">
+      <label for="sel_{{ a.id }}" style="margin:0">{{ a.participant_id }}</label></div>
+    {% endfor %}
+    <p class="field-hint">Ein Häkchen wählt nur aus. Gespeichert wird erst nach der Vorschau mit «Übernehmen».</p>
+    {% if batch_kind == 'notice' %}
+    <div class="field"><label for="notice_method">Versandart</label>
+      <select id="notice_method" name="notice_method" required>
+        {% for key, label in notice_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select></div>
+    {% endif %}
+    <div class="field"><label for="batch_date">{{ spec.date_label }}</label><input type="date" id="batch_date" name="batch_date" required></div>
+    {% if batch_kind == 'vnb_confirmed' %}
+    <div class="field"><label for="effective_start">Bestätigter Beginn (Monatserster)</label><input type="date" id="effective_start" name="effective_start" required></div>
+    {% endif %}
+    <div class="field"><label for="evidence">{{ 'Gemeinsamer Nachweis' if batch_kind == 'consent' else 'Nachweis (optional)' }}</label>
+      <input type="text" id="evidence" name="evidence" maxlength="500" placeholder="{{ spec.evidence_placeholder }}"></div>
+    {{ paperless_fields('') }}
+    {% if batch_kind == 'consent' %}
+    <div class="field checkbox-row"><input type="checkbox" id="confirm_common_document" name="confirm_common_document" required>
+      <label for="confirm_common_document" style="margin:0">Der gemeinsame Nachweis belegt die ausdrückliche Zustimmung jedes ausgewählten Teilnehmers.</label></div>
+    {% endif %}
+    <button type="submit">Vorschau</button>
+  </form>
+  {% else %}
+  <p class="ts">Für diese Aktion ist bei keinem Teilnehmer etwas offen.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="get" action="{{ url_for('checklist') }}" class="filter-row">
+    <label>Suche<input type="search" name="q" value="{{ query }}" maxlength="100" placeholder="Name oder ID"></label>
+    <label>Abrechnungsbereit für
+      <select name="m" onchange="this.form.submit()">
+        {% for value, label, sel in month_choices %}<option value="{{ value }}" {{ 'selected' if sel }}>{{ label }}</option>{% endfor %}
+      </select></label>
+    <input type="hidden" name="f" value="{{ flt }}">
+    <button type="submit" class="btn-secondary">Anzeigen</button>
+  </form>
+  <div class="tabs">
+    {% for key, label in filters.items() %}
+    <a class="btn {{ '' if flt == key else 'btn-muted' }}" href="{{ url_for('checklist') }}?f={{ key }}&m={{ month_value }}{{ '&q=' ~ query|urlencode if query }}">{{ label }} ({{ checklist.counts[key] }})</a>
+    {% endfor %}
+    <a class="btn btn-secondary" href="{{ url_for('checklist') }}?batch=vnb_notified#sammel">Sammel: EBL gemeldet</a>
+    <a class="btn btn-secondary" href="{{ url_for('checklist') }}?batch=vnb_confirmed#sammel">Sammel: EBL bestätigt</a>
+    <a class="btn" href="{{ url_for('participants', suffix='/new') }}">+ Teilnehmer aufnehmen</a>
+  </div>
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="ck-table">
+      <thead><tr><th>Teilnehmer</th>
+        {% for key, label in columns %}<th>{{ label }}{% if key == 'billing' %}<div class="ts">{{ checklist.month_start.strftime('%m.%Y') }}</div>{% endif %}</th>{% endfor %}
+        <th></th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr{% if selected and r.participant.participant_id == selected.participant.participant_id %} class="ck-selected"{% endif %}>
+          <td data-label="Teilnehmer"><a href="{{ url_for('checklist') }}?p={{ r.participant.participant_id|path_segment }}&f={{ flt }}&m={{ month_value }}#detail"><strong>{{ r.participant.label }}</strong></a>
+            {% if r.departed %}<div class="ts">ausgetreten</div>{% endif %}</td>
+          {% for key, label in columns %}<td data-label="{{ label }}">{{ pill(r.points[key]) }}</td>{% endfor %}
+          <td><a class="btn-small btn-secondary" href="{{ url_for('checklist') }}?p={{ r.participant.participant_id|path_segment }}&f={{ flt }}&m={{ month_value }}#detail">Öffnen</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts">Keine Teilnehmer für diese Auswahl.</p>
+  {% endif %}
+</div>
+
+{% if selected %}
+{% set p = selected.participant %}
+{% set m = selected.membership %}
+{% set current = (selected.assignments|sort(attribute='version_number')|list)[-1] if selected.assignments else None %}
+<div class="card" id="detail">
+  <h2>{{ p.label }}</h2>
+  {% if selected.open_items %}
+  <div class="notice-warn"><strong>Fehlt noch:</strong>
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for item in selected.open_items %}<li>{{ item }}</li>{% endfor %}</ul></div>
+  {% elif not selected.departed %}<div class="info-box">Administrativ vollständig.</div>{% endif %}
+
+  {% if m and m.review_note %}
+  <div class="error-box" id="pruefen"><strong>Prüfen:</strong> {{ m.review_note }}
+    <p class="ts">Die Abrechnung ist gesperrt, bis die Werte geprüft sind. Falsche Werte zuerst unten korrigieren, dann bestätigen.</p>
+    <form method="post" action="{{ url_for('checklist', suffix='/review/' ~ m.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Geprüft — Werte stimmen</button>
+    </form></div>
+  {% endif %}
+
+  <h3 id="stammdaten">Stammdaten {{ pill(selected.points['master']) }}</h3>
+  <form method="post" action="{{ url_for('participants', suffix='/' ~ p.participant_id|path_segment ~ '/edit') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <input type="hidden" name="participant_id" value="{{ p.participant_id }}">
+    {% if p.active %}<input type="hidden" name="active" value="on">{% endif %}
+    <div class="field"><label>Name</label><input type="text" name="label" value="{{ p.label }}" required></div>
+    <div class="field"><label>Strasse und Nr.</label><input type="text" name="address_line" value="{{ p.address_line }}"></div>
+    <div class="field"><label>PLZ</label><input type="text" name="postal_code" value="{{ p.postal_code }}"></div>
+    <div class="field"><label>Ort</label><input type="text" name="city" value="{{ p.city }}"></div>
+    <div class="field"><label>E-Mail</label><input type="email" name="email" value="{{ p.email }}"></div>
+    <button type="submit" class="btn-secondary">Stammdaten speichern</button>
+  </form>
+
+  <h3 id="messpunkte">Messpunkte {{ pill(selected.points['meters']) }}</h3>
+  {% if selected.meters %}
+  <ul>{% for mt in selected.meters %}<li><span style="font-family:monospace">{{ mt.meter_id }}</span> · {{ mt.role }} ·
+    {{ 'aktiv' if mt.active else 'inaktiv' }}{% if mt.valid_until %} · gilt bis {{ mt.valid_until.strftime('%d.%m.%Y') }}{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+  <details class="doc-details"><summary>Messpunkt hinzufügen</summary>
+    <form method="post" action="{{ url_for('meters', suffix='/new') }}" class="form-card" style="padding:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <input type="hidden" name="participant_id" value="{{ p.participant_id }}"><input type="hidden" name="active" value="on">
+      <div class="field"><label>Messpunkt-ID (33 Zeichen, «CH…»)</label><input type="text" name="meter_id" required maxlength="64"></div>
+      <div class="field"><label>Bezeichnung</label><input type="text" name="label" required></div>
+      <div class="field"><label>Rolle</label><select name="role">{% for value, label in meter_roles %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Gültig ab</label><input type="date" name="valid_from"></div>
+      <div class="field"><label>Gültig bis (leer = unbefristet)</label><input type="date" name="valid_until"></div>
+      <button type="submit" class="btn-secondary">Messpunkt speichern</button>
+    </form></details>
+
+  <h3 id="vertrag">Vertrag {{ pill(selected.points['contract']) }}</h3>
+  {% if selected.assignments %}
+  <ul>{% for a in selected.assignments|sort(attribute='version_number') %}
+    <li>Version {{ a.version_number }} · Beitritt per {{ a.joined_at.strftime('%d.%m.%Y') if a.joined_at else '—' }}
+      · <a href="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/declaration') }}">Erklärung und Details</a>
+      {% if a.declaration_issued_at %}· ausgestellt {{ a.declaration_issued_at.strftime('%d.%m.%Y') }}{% endif %}</li>
+  {% endfor %}</ul>
+  {% endif %}
+  {% if not m or selected.departed %}
+  {% if joinable_versions and selected.points['meters'].state != 'open' %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/add') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <input type="hidden" name="participant_id" value="{{ p.participant_id }}">
+    <div class="field"><label>Vertragsversion</label><select name="contract_version_id">
+      {% for v in joinable_versions %}<option value="{{ v.id }}" {{ 'selected' if loop.last }}>v{{ v.version }} (ab {{ v.valid_from.strftime('%d.%m.%Y') }})</option>{% endfor %}</select></div>
+    <div class="field"><label>Beitritt per (Monatserster)</label><input type="date" name="valid_from" required></div>
+    <button type="submit">{{ 'Wiedereintritt erfassen' if selected.departed else 'Dem Vertrag zuordnen' }}</button>
+  </form>
+  {% elif selected.points['meters'].state == 'open' %}<p class="ts">Zuerst oben einen Messpunkt hinzufügen.</p>
+  {% else %}<p class="ts">Kein veröffentlichter Vertrag — zuerst unter «Vertrag» veröffentlichen.</p>{% endif %}
+  {% endif %}
+  {% if current and not current.declaration_issued_at and not current.accepted_at %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/issue') }}" class="actions-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <a class="btn btn-secondary" href="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/declaration/print') }}" target="_blank" rel="noopener">Erklärung drucken</a>
+    <label>ausgestellt am <input type="date" name="issued_at" value="{{ today.isoformat() }}"></label>
+    <button type="submit" class="btn-secondary">Als ausgestellt erfassen</button>
+  </form>
+  {% endif %}
+
+  {% if current %}
+  <h3 id="unterschrift">Unterschrift</h3>
+  {% if current.accepted_at %}
+  <p>v{{ current.signature_version }}, unterschrieben am {{ current.accepted_at.strftime('%d.%m.%Y') }}
+    {% if current.signed_by %}durch {{ current.signed_by }}{% endif %}
+    {% if current.signed_document_sha256 %}· Dokument ✓{% endif %}
+    {% if current.paper_original_location %}· Papier: {{ current.paper_original_location }}{% endif %}
+    {{ paperless_ref(current.signed_paperless_id, current.signed_paperless_asn) }}</p>
+  {% include "contract/correct_signature.html" %}
+  {% else %}
+  <form method="post" enctype="multipart/form-data" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/confirm') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required max="{{ today.isoformat() }}"></div>
+    <div class="field"><label>Art der Zustimmung</label><select name="acceptance_method">{% for key, label in acceptance_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label>Unterzeichnet von</label><input type="text" name="signed_by" required value="{{ p.label }}"></div>
+    <p class="field-hint">Nachweis: mindestens eines davon.</p>
+    <div class="field"><label>Ablageort des Papieroriginals</label><input type="text" name="paper_original_location" maxlength="200"></div>
+    {{ paperless_fields('signed_') }}
+    <div class="field"><label>Unterschriebenes Dokument hochladen (PDF/JPG/PNG)</label><input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png">
+      <div class="field-hint">Bitte als letztes Feld ausfüllen.</div></div>
+    <button type="submit">Unterschrift erfassen</button>
+  </form>
+  {% endif %}
+
+  <h3 id="ebl">EBL (Netzbetreiber) {{ pill(selected.points['vnb']) }}</h3>
+  <p>Gemeldet: {{ m.vnb_notified_at.strftime('%d.%m.%Y') if m.vnb_notified_at else '—' }}
+    {{ paperless_ref(m.vnb_notified_paperless_id, m.vnb_notified_paperless_asn) }} ·
+    Bestätigt: {{ m.vnb_confirmed_at.strftime('%d.%m.%Y') if m.vnb_confirmed_at else '—' }}
+    {% if m.effective_start_at %}(wirksam ab {{ m.effective_start_at.strftime('%d.%m.%Y') }}){% endif %}
+    {{ paperless_ref(m.vnb_confirmed_paperless_id, m.vnb_confirmed_paperless_asn) }}</p>
+  {% if not m.vnb_notified_at %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/vnb-notified') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <div class="field"><label>Bei EBL gemeldet am</label><input type="date" name="vnb_notified_at" required></div>
+    {{ paperless_fields('') }}
+    <button type="submit" class="btn-secondary">Meldung erfassen</button>
+  </form>
+  {% endif %}
+  {% if not m.vnb_confirmed_at %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/vnb-confirmed') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <div class="field"><label>Von EBL bestätigt am</label><input type="date" name="vnb_confirmed_at" required max="{{ today.isoformat() }}"></div>
+    <div class="field"><label>Bestätigter Beginn (Monatserster)</label><input type="date" name="effective_start_at" required value="{{ m.joined_at.isoformat() if m.joined_at else '' }}"></div>
+    {{ paperless_fields('') }}
+    <button type="submit" class="btn-secondary">Bestätigung erfassen</button>
+  </form>
+  {% endif %}
+  {% include "contract/correct_membership.html" %}
+
+  <h3 id="mitteilung">Mitteilung / Zustimmung {{ pill(selected.points['notice']) }}</h3>
+  {% for a in selected.assignments|sort(attribute='version_number') if a.accepted_at is none or a.signature_version != a.version_number %}
+  {% include "contract/notice_forms.html" %}
+  {% else %}<p class="ts">Nicht nötig: Der Teilnehmer hat jede seiner Versionen selbst unterschrieben.</p>
+  {% endfor %}
+
+  <h3 id="austritt">Austritt</h3>
+  {% if m.left_at %}<p>Ausgetreten per {{ m.left_at.strftime('%d.%m.%Y') }}{% if m.exit_reason %} ({{ m.exit_reason }}){% endif %}.</p>
+  {% else %}
+  <details class="doc-details"><summary>Austritt erfassen</summary>
+    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/depart') }}" class="form-card" style="padding:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <div class="field"><label>Austritt per (Monatsletzter)</label><input type="date" name="end_date" required></div>
+      <div class="field"><label>Grund</label><input type="text" name="exit_reason" required maxlength="200"></div>
+      <button type="submit" class="btn-small btn-danger">Austritt bestätigen</button>
+    </form></details>
+  {% endif %}
+  {% endif %}
+
+  <h3 id="abrechnung">Abrechnung {{ checklist.month_start.strftime('%m.%Y') }} {{ pill(selected.points['billing']) }}</h3>
+  <p class="ts">Aus derselben Regel wie die Abrechnung selbst (Vertrag, Beitritt/Austritt, Unterschrift, bestätigter Beginn, Zustimmung).</p>
+
+  {% if events %}
+  <details class="doc-details"><summary>Verlauf ({{ events|length }})</summary>
+    <ul style="padding:10px 10px 10px 28px;margin:0">{% for e in events %}<li class="ts">{{ e.occurred_at.astimezone().strftime('%d.%m.%Y %H:%M') }} · {{ e.action }} · {{ e.detail }}{% if e.actor %} · {{ e.actor }}{% endif %}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

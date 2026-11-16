@@ -2,6 +2,7 @@
 {% block title %}Beitritt{% endblock %}
 {% block heading %}Beitritt — {{ participant.label }}{% endblock %}
 {% block content %}
+{% from "contract/_macros.html" import paperless_fields, paperless_ref with context %}
 {% set base = '/participants/' ~ assignment.id %}
 {% if issues %}
 <div class="card">
@@ -27,12 +28,18 @@
           {% if assignment.signed_document_sha256 %}
           <div class="ts"><a href="{{ url_for('contract', suffix=base ~ '/document') }}">unterschriebenes Dokument öffnen</a>
             · SHA-256 <span style="font-family:monospace;word-break:break-all">{{ assignment.signed_document_sha256 }}</span></div>
-          {% elif assignment.paper_original_location %}<div class="ts">Papieroriginal: {{ assignment.paper_original_location }}</div>
-          {% else %}<div class="ts" style="color:#b45309">Kein Nachweis hinterlegt.</div>{% endif %}
+          {% endif %}
+          {% if assignment.paper_original_location %}<div class="ts">Papieroriginal: {{ assignment.paper_original_location }}</div>{% endif %}
+          {% if assignment.signed_paperless_id %}<div class="ts">{{ paperless_ref(assignment.signed_paperless_id, assignment.signed_paperless_asn) }}</div>{% endif %}
+          {% if not assignment.signature_evidence %}<div class="ts" style="color:#b45309">Kein Nachweis hinterlegt.</div>{% endif %}
+          {% if assignment.signature_version and assignment.signature_version != version.version %}<div class="ts">Unterschrieben wurde Version {{ assignment.signature_version }}; die Unterschrift gilt weiter.</div>{% endif %}
           {% else %}—{% endif %}
         </td></tr>
-        {% if assignment.accepted_version and assignment.accepted_version != version.version %}
-        <tr><td>{{ 'Zustimmung zu' if version.consent_based else 'Mitteilung über' }} v{{ version.version }}</td><td>{{ (assignment.notified_at.strftime('%d.%m.%Y') ~ ' · ' ~ assignment.notice_evidence) if assignment.notified_at else '⏳ ausstehend' }}</td></tr>
+        {% if assignment.accepted_at is none or assignment.signature_version != version.version %}
+        <tr><td>Mitteilung über v{{ version.version }}</td><td>{{ (assignment.notified_at.strftime('%d.%m.%Y') ~ (' · ' ~ assignment.notice_evidence if assignment.notice_evidence else '')) if assignment.notified_at else '⏳ ausstehend' }}</td></tr>
+        {% if version.consent_based %}
+        <tr><td>Zustimmung zu v{{ version.version }}</td><td>{{ (assignment.consent_at.strftime('%d.%m.%Y') ~ (' · ' ~ assignment.consent_evidence if assignment.consent_evidence else '')) if assignment.consent_at else '⏳ fehlt (nötig für die Abrechnung)' }}</td></tr>
+        {% endif %}
         {% endif %}
         <tr><td>Beim Netzbetreiber gemeldet</td><td>{{ assignment.vnb_notified_at.strftime('%d.%m.%Y') if assignment.vnb_notified_at else '—' }}</td></tr>
         <tr><td>Vom Netzbetreiber bestätigt</td><td>{{ (assignment.vnb_confirmed_at.strftime('%d.%m.%Y') ~ ', wirksam ab ' ~ assignment.effective_start_at.strftime('%d.%m.%Y')) if assignment.vnb_confirmed_at else '—' }}</td></tr>
@@ -40,12 +47,17 @@
       </tbody>
     </table>
   </div>
-  <p class="field-hint" style="margin-top:8px">Erfasste Schritte können nicht überschrieben werden. Fehler bitte als neuer,
-    begründeter Eintrag korrigieren lassen — die Historie unten bleibt vollständig.</p>
+  <p class="field-hint" style="margin-top:8px">Jeder Schritt kann in beliebiger Reihenfolge erfasst und bei Bedarf
+    korrigiert werden. Jede Korrektur steht mit altem und neuem Wert in der Historie unten.
+    Alles auf einen Blick: <a href="{{ url_for('checklist') }}?p={{ assignment.participant_id|path_segment }}#detail">Checkliste</a>.</p>
+  {% if assignment.review_note %}
+  <div class="error-box"><strong>Prüfen:</strong> {{ assignment.review_note }} — in der
+    <a href="{{ url_for('checklist') }}?p={{ assignment.participant_id|path_segment }}#pruefen">Checkliste</a> bestätigen.</div>
+  {% endif %}
 </div>
 
 <div class="card">
-  <h2>Nächster Schritt</h2>
+  <h2>Erfassen und korrigieren</h2>
   {% if not assignment.declaration_issued_at and not assignment.accepted_at %}
   <form class="form-card" method="post" action="{{ url_for('contract', suffix=base ~ '/issue') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -58,55 +70,53 @@
   <form class="form-card" method="post" enctype="multipart/form-data"
         action="{{ url_for('contract', suffix=base ~ '/confirm') }}" style="margin-top:12px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required></div>
+    <div class="field"><label>Unterschrieben am</label><input type="date" name="signed_at" required max="{{ today.isoformat() }}"></div>
     <div class="field"><label>Unterzeichnet von (Name)</label><input type="text" name="signed_by" required value="{{ participant.label }}"></div>
     <div class="field"><label>Art der Zustimmung</label>
       <select name="acceptance_method">
         {% for value, label in acceptance_methods.items() %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
       </select>
     </div>
-    <div class="field"><label>Ablageort Papieroriginal (falls kein Scan)</label>
-      <input type="text" name="paper_original_location" placeholder="z. B. Ordner LEG-TEST, Register Beitritte"></div>
+    <p class="field-hint">Nachweis: mindestens eines davon.</p>
+    <div class="field"><label>Ablageort Papieroriginal</label>
+      <input type="text" name="paper_original_location" maxlength="200" placeholder="z. B. Ordner LEG, Register Beitritte"></div>
+    {{ paperless_fields('signed_') }}
     <div class="field">
       <label>Unterschriebenes Dokument (PDF/JPG/PNG)</label>
       <input type="file" name="document" accept=".pdf,.jpg,.jpeg,.png">
-      <div class="field-hint">Wird mit Prüfsumme neben der Datenbank abgelegt (im Backup enthalten). Bitte als letztes
+      <div class="field-hint">Wird mit Prüfsumme neben der Datenbank abgelegt (in der Sicherung enthalten). Bitte als letztes
         Feld ausfüllen.</div>
     </div>
     <button type="submit">Unterschrift erfassen</button>
   </form>
-  {% elif assignment.accepted_version and assignment.accepted_version != version.version and not assignment.notified_at %}
-  <form class="form-card" method="post" action="{{ url_for('contract', suffix=base ~ '/notify') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    {% if version.consent_based %}
-    <p class="field-hint">Version {{ version.version }} wurde ohne Ankündigungsfrist veröffentlicht, weil alle Gesellschafter
-      zustimmen — hier die Zustimmung dieses Teilnehmers mit Nachweis erfassen.</p>
-    <div class="field"><label>Zustimmung zu Version {{ version.version }} am</label><input type="date" name="notified_at"></div>
-    <div class="field"><label>Nachweis der Zustimmung</label><input type="text" name="notice_evidence" required placeholder="z. B. unterschriebene Änderung vom … / E-Mail-Zustimmung vom …"></div>
-    <button type="submit">Zustimmung erfassen</button>
-    {% else %}
-    <div class="field"><label>Über Version {{ version.version }} informiert am</label><input type="date" name="notified_at"></div>
-    <div class="field"><label>Wie (Nachweis)</label><input type="text" name="notice_evidence" required placeholder="z. B. E-Mail vom … mit Vertrag als PDF"></div>
-    <button type="submit">Mitteilung erfassen</button>
-    {% endif %}
-  </form>
+  {% else %}
+  {% include "contract/correct_signature.html" %}
   {% endif %}
 
-  {% if assignment.accepted_at and not assignment.vnb_notified_at %}
+  {% if assignment.accepted_at is none or assignment.signature_version != assignment.version_number %}
+  {% set a = assignment %}
+  {% include "contract/notice_forms.html" %}
+  {% endif %}
+
+  {% if not assignment.vnb_notified_at %}
   <form class="form-card" method="post" action="{{ url_for('contract', suffix=base ~ '/vnb-notified') }}" style="margin-top:12px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field"><label>Beim Netzbetreiber gemeldet am</label><input type="date" name="vnb_notified_at"></div>
+    <div class="field"><label>Beim Netzbetreiber gemeldet am</label><input type="date" name="vnb_notified_at" required></div>
+    {{ paperless_fields('') }}
     <button type="submit" class="btn-secondary">Meldung erfassen</button>
   </form>
-  {% elif assignment.vnb_notified_at and not assignment.vnb_confirmed_at %}
+  {% endif %}
+  {% if not assignment.vnb_confirmed_at %}
   <form class="form-card" method="post" action="{{ url_for('contract', suffix=base ~ '/vnb-confirmed') }}" style="margin-top:12px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field"><label>Bestätigung des Netzbetreibers am</label><input type="date" name="vnb_confirmed_at"></div>
+    <div class="field"><label>Bestätigung des Netzbetreibers am</label><input type="date" name="vnb_confirmed_at" required max="{{ today.isoformat() }}"></div>
     <div class="field"><label>Bestätigter Beginn (Monatserster)</label><input type="date" name="effective_start_at" required
-           value="{{ assignment.joined_at if assignment.joined_at else '' }}"></div>
+           value="{{ assignment.joined_at.isoformat() if assignment.joined_at else '' }}"></div>
+    {{ paperless_fields('') }}
     <button type="submit" class="btn-secondary">Bestätigung erfassen</button>
   </form>
   {% endif %}
+  {% include "contract/correct_membership.html" %}
 
   {% if not assignment.left_at %}
   <details style="margin-top:12px">
@@ -114,7 +124,7 @@
     <form class="form-card" method="post" action="{{ url_for('contract', suffix=base ~ '/depart') }}" style="margin-top:8px">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="field"><label>Austritt per (Monatsletzter)</label><input type="date" name="end_date" required></div>
-      <div class="field"><label>Grund</label><input type="text" name="exit_reason" required placeholder="Kündigung, Wegzug, Verkauf, …"></div>
+      <div class="field"><label>Grund</label><input type="text" name="exit_reason" required maxlength="200" placeholder="Kündigung, Wegzug, Verkauf, …"></div>
       <button type="submit" class="btn-small btn-danger">Austritt bestätigen</button>
     </form>
   </details>

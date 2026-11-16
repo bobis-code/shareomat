@@ -236,6 +236,9 @@ class RuntimeConfig:
     sparkplug: SparkplugConfig = field(default_factory=SparkplugConfig)
     wan: WanConfig = field(default_factory=WanConfig)
     swisseldex: SwisseldexConfig = field(default_factory=SwisseldexConfig)
+    # Paperless-ngx base URL for evidence links (shareomat.core.paperless). Only
+    # a link target for the operator's browser — Shareomat never calls it.
+    paperless_url: str = ""
 
 
 @dataclass
@@ -387,6 +390,18 @@ def _parse_swisseldex(raw: dict[str, Any]) -> SwisseldexConfig:
     )
 
 
+def _parse_paperless(raw: dict[str, Any]) -> str:
+    """The validated Paperless base URL; an invalid one disables the links (logged), never the add-on."""
+    from shareomat.core.paperless import PaperlessValueError, normalize_base_url
+
+    value = str((raw.get("paperless") or {}).get("url", "") or "")
+    try:
+        return normalize_base_url(value)
+    except PaperlessValueError as exc:
+        logger.error("paperless.url ignored: %s", exc)
+        return ""
+
+
 def load_runtime_config(config_path: Path) -> RuntimeConfig:
     """Read the technical runtime configuration YAML (paths, MQTT, e-mail, web port)."""
     logger.info("Loading runtime config from %s", config_path)
@@ -402,6 +417,7 @@ def load_runtime_config(config_path: Path) -> RuntimeConfig:
         sparkplug=_parse_sparkplug(raw),
         wan=_parse_wan(raw),
         swisseldex=_parse_swisseldex(raw),
+        paperless_url=_parse_paperless(raw),
     )
 
 

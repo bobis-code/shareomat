@@ -1,0 +1,61 @@
+{#- Notice (and, for versions "with consent of all", consent) for one assignment `a` the member did not sign directly. -#}
+{% from "contract/_macros.html" import back, paperless_fields, paperless_ref, reason_field with context %}
+<div class="doc-details" style="padding:10px">
+  <strong>Version {{ a.version_number }}</strong>{% if a.consent_based %} — «mit Zustimmung aller»{% endif %}
+  <p style="margin:6px 0">Mitteilung:
+    {% if a.notified_at %}✓ {{ a.notified_at.strftime('%d.%m.%Y') }}{% if a.notice_method %} · {{ notice_methods.get(a.notice_method, a.notice_method) }}{% endif %}
+      {% if a.notice_evidence %} · {{ a.notice_evidence }}{% endif %}{{ paperless_ref(a.notice_paperless_id, a.notice_paperless_asn) }}
+      {% if a.notice_batch_id %}<span class="ts">· Sammel-Nr. {{ a.notice_batch_id }}</span>{% endif %}
+    {% else %}✗ offen{% endif %}</p>
+  {% if a.consent_based %}
+  <p style="margin:6px 0">Zustimmung (nötig für die Abrechnung):
+    {% if a.consent_at %}✓ {{ a.consent_at.strftime('%d.%m.%Y') }}{% if a.consent_evidence %} · {{ a.consent_evidence }}{% endif %}{{ paperless_ref(a.consent_paperless_id, a.consent_paperless_asn) }}
+    {% else %}✗ fehlt — eine Mitteilung ersetzt die Zustimmung nicht{% endif %}</p>
+  {% endif %}
+  {% if not a.notified_at %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/notify') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <div class="field"><label>Mitgeteilt am</label><input type="date" name="notified_at" required></div>
+    <div class="field"><label>Versandart</label><select name="notice_method">
+      {% for key, label in notice_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label>Nachweis (optional)</label><input type="text" name="notice_evidence" maxlength="500" placeholder="z. B. E-Mail vom … mit Vertrag als PDF"></div>
+    {{ paperless_fields('notice_') }}
+    <button type="submit" class="btn-secondary">Mitteilung erfassen</button>
+  </form>
+  {% endif %}
+  {% if a.consent_based and not a.consent_at %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/consent') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <div class="field"><label>Zustimmung erhalten am</label><input type="date" name="consent_at" required max="{{ today.isoformat() }}"></div>
+    <div class="field"><label>Nachweis der Zustimmung</label><input type="text" name="consent_evidence" maxlength="500" placeholder="z. B. unterschriebene Änderung vom …"></div>
+    {{ paperless_fields('consent_') }}
+    <button type="submit">Zustimmung erfassen</button>
+  </form>
+  {% endif %}
+  {% if a.notified_at or a.consent_at %}
+  <details class="doc-details"><summary>Mitteilung/Zustimmung korrigieren</summary>
+    {% if a.notified_at %}
+    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/correct') }}" class="form-card" style="padding:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <input type="hidden" name="section" value="notice">
+      <div class="field"><label>Mitgeteilt am (leer = nicht mitgeteilt)</label><input type="date" name="notified_at" value="{{ a.notified_at.isoformat() }}"></div>
+      <div class="field"><label>Versandart</label><select name="notice_method"><option value="">—</option>
+        {% for key, label in notice_methods.items() %}<option value="{{ key }}" {{ 'selected' if key == a.notice_method }}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label>Nachweis</label><input type="text" name="notice_evidence" maxlength="500" value="{{ a.notice_evidence }}"></div>
+      {{ reason_field() }}
+      <button type="submit" class="btn-secondary">Korrektur speichern</button>
+    </form>
+    {% endif %}
+    {% if a.consent_at %}
+    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/correct') }}" class="form-card" style="padding:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+      <input type="hidden" name="section" value="consent">
+      <div class="field"><label>Zustimmung am (leer = keine Zustimmung)</label><input type="date" name="consent_at" value="{{ a.consent_at.isoformat() }}"></div>
+      <div class="field"><label>Nachweis</label><input type="text" name="consent_evidence" maxlength="500" value="{{ a.consent_evidence }}"></div>
+      {{ reason_field() }}
+      <button type="submit" class="btn-secondary">Korrektur speichern</button>
+    </form>
+    {% endif %}
+  </details>
+  {% endif %}
+</div>

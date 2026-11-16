@@ -50,6 +50,7 @@ _POST_PERMISSIONS = {
     "live_energy": "masterdata.edit",
     "tariffs": "masterdata.edit",
     "contract": "contract.manage",
+    "checklist": "contract.manage",
     "settings": "system.configure",
     "automation": "system.configure",
     "external_data": "system.configure",

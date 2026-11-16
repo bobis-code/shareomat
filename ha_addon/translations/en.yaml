@@ -1,4 +1,10 @@
 configuration:
+  paperless_url:
+    name: Paperless-ngx (optional)
+    description: >-
+      Address of Paperless-ngx, e.g. http://homeassistant.local:8000. Signatures, reports and notices
+      can then hold document numbers that open as links. Shareomat never calls Paperless itself.
+      Leave empty if Paperless is not used.
   sparkplug:
     name: Connection to Emsomat
     description: >-

@@ -34,6 +34,7 @@ ROUTE_PATHS: dict[str, str] = {
     "tariffs": "/tariffs",
     "tariffs_new": "/tariffs/new",
     "contract": "/contract",
+    "checklist": "/checklist",
     "meter_data": "/meter-data",
     "analysis": "/analysis",
     "billing": "/billing",
@@ -56,6 +57,7 @@ ROUTE_PATHS: dict[str, str] = {
 NAV_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
     ("", [("dashboard", "Übersicht")]),
     ("VERWALTUNG", [
+        ("checklist", "Checkliste"),
         ("community", "Gemeinschaft"),
         ("participants", "Teilnehmer"),
         ("meters", "Messpunkte"),

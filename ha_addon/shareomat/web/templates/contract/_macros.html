@@ -1,0 +1,24 @@
+{#- Shared by the contract detail page and the checklist (one set of forms, one set of rules). -#}
+{% macro back() -%}
+{% if return_to_checklist %}
+<input type="hidden" name="return_to" value="checklist">
+<input type="hidden" name="return_participant" value="{{ selected_id }}">
+{% endif %}
+{%- endmacro %}
+{% macro paperless_fields(prefix, number=None, asn=None) -%}
+{% if paperless_url %}
+<div class="field"><label>Paperless: Dokument-Nr. (optional)</label>
+  <input type="text" inputmode="numeric" pattern="[0-9]*" name="{{ prefix }}paperless_id" maxlength="10" value="{{ number or '' }}"></div>
+<div class="field"><label>Paperless: ASN (optional)</label>
+  <input type="text" inputmode="numeric" pattern="[0-9]*" name="{{ prefix }}paperless_asn" maxlength="10" value="{{ asn or '' }}"></div>
+{% endif %}
+{%- endmacro %}
+{% macro paperless_ref(number, asn) -%}
+{% if number %}{% set link = paperless_link(number) %}
+· Paperless {% if link %}<a href="{{ link }}" target="_blank" rel="noopener noreferrer">Nr. {{ number }}</a>{% else %}Nr. {{ number }}{% endif %}{% if asn %} (ASN {{ asn }}){% endif %}
+{% endif %}
+{%- endmacro %}
+{% macro reason_field() -%}
+<div class="field"><label>Begründung (nötig, wenn eine freigegebene Abrechnung betroffen ist)</label>
+  <input type="text" name="correction_reason" maxlength="500"></div>
+{%- endmacro %}

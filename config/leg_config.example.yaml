@@ -13,6 +13,9 @@ paths:
   share_inbox: ""
   backups: "data/backups"   # "Sicherung erstellen" on the settings page
 
+paperless:
+  url: ""   # optional, e.g. http://homeassistant.local:8000 (links only, never called)
+
 mqtt:
   enabled: false
   broker: "localhost"

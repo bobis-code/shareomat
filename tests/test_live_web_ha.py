@@ -114,7 +114,7 @@ def _deliver(service, *samples):
 
 NAV_BEFORE_LIVE_ENERGY = [
     ("", [("dashboard", "Übersicht")]),
-    ("VERWALTUNG", [("community", "Gemeinschaft"), ("participants", "Teilnehmer"), ("meters", "Messpunkte"),
+    ("VERWALTUNG", [("checklist", "Checkliste"), ("community", "Gemeinschaft"), ("participants", "Teilnehmer"), ("meters", "Messpunkte"),
                     ("tariffs", "Tarife"), ("contract", "Vertrag")]),
     ("BETRIEB", [("meter_data", "Messdaten"), ("analysis", "Analyse"), ("billing", "Abrechnungen"),
                  ("invoices", "Rechnungen"), ("automation", "Automatisierung"), ("reports", "Berichte")]),

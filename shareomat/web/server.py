@@ -47,6 +47,7 @@ from shareomat.web.pages import (
     apps,
     automation,
     billing,
+    checklist,
     community,
     contract,
     dashboard,
@@ -114,6 +115,7 @@ _PAGE_MODULES = {
     "meters": meters,
     "tariffs": tariffs,
     "contract": contract,
+    "checklist": checklist,
     "meter_data": meter_data,
     "analysis": analysis,
     "billing": billing,
@@ -461,6 +463,12 @@ class _Handler(BaseHTTPRequestHandler):
             )
             redirect_to = None
 
+        if redirect_to is None and form.get("return_to") == "checklist":
+            # Forms on the checklist post to the existing pages and come back here.
+            # Only this fixed target is accepted (no open redirect).
+            participant = form.get("return_participant") or ""
+            redirect_to = url_for(ingress_path, "checklist") + (
+                f"?p={quote(participant, safe='')}#detail" if participant else "")
         if redirect_to is None:
             redirect_to = url_for(ingress_path, route)
         self._redirect(redirect_to)

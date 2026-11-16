@@ -71,6 +71,7 @@ from shareomat.database.contract_versions import (
     get_contract_version,
     get_contract_version_for_date,
     get_latest_relevant_version,
+    contract_gap,
     get_participant_version,
     list_contract_versions,
     publish_version,
@@ -85,12 +86,17 @@ from shareomat.database.participant_contract import (
     assign_contract,
     get_assignment,
     list_assignments_for_version,
+    CORRECTION_FIELDS,
+    NOTICE_METHODS,
+    correct_assignment,
     mark_accepted,
+    mark_consent,
     mark_declaration_issued,
     mark_notified,
     mark_vnb_confirmed,
     mark_vnb_notified,
     record_departure,
+    remove_signature,
 )
 from shareomat.database.meters import list_meters
 from shareomat.database.participants import get_participant, list_participants
@@ -101,6 +107,8 @@ from shareomat.models.participant import Participant
 from shareomat.models.external_data import SupplierTariff
 from shareomat.models.tariff import RATE_MODE_FLAT
 from shareomat.web.pages.meters import METER_ROLE_STORAGE_HINT
+from shareomat.database.memberships import list_memberships
+from shareomat.core.paperless import PaperlessValueError, document_link, parse_number
 from shareomat.web.rendering import (
     FormError, RequestContext, form_bool, form_date, form_decimal, form_required, render_page,
 )
@@ -457,6 +465,17 @@ def _declaration_context(ctx: RequestContext):
     if assignment.declaration_snapshot:
         # Frozen when handed out/signed: never re-rendered from today's master data.
         return assignment, participant, version, assignment.declaration_snapshot, []
+    if assignment.signature_assignment_id and assignment.signature_assignment_id != assignment.id:
+        # Carried into this version: show what was actually signed (on the earlier
+        # version), never a freshly rendered declaration that nobody signed (P4).
+        signed = get_assignment(ctx.db_path, assignment.signature_assignment_id)
+        if signed is not None and signed.declaration_snapshot:
+            return assignment, participant, version, signed.declaration_snapshot, []
+        return assignment, participant, version, (
+            f"<p>Unterschrieben wurde die Beitrittserklärung zu Version {assignment.signature_version} am "
+            f"{assignment.accepted_at.strftime('%d.%m.%Y')}. Ihr Text wurde damals nicht eingefroren "
+            "(vor Einführung dieser Funktion); massgebend ist das Original (Nachweis oben).</p>"
+        ), []
     text = render_declaration(assignment, participant, version, community.name if community else "", roles)
     return assignment, participant, version, text, _declaration_issues(participant, version, roles)
 
@@ -542,10 +561,12 @@ def handle_get(ctx: RequestContext) -> str:
             return render_page("placeholders/coming_soon.html", ctx, "contract",
                                 title="Beitrittserklärung nicht gefunden", description="")
         assignment, participant, version, declaration_text, issues = found
+        paperless_url = getattr(ctx.runtime, "paperless_url", "") if ctx.runtime else ""
         return render_page(
             "contract/declaration.html", ctx, "contract",
             declaration_text=declaration_text, participant=participant, version=version, assignment=assignment,
-            issues=issues,
+            issues=issues, current=assignment, m=assignment, notice_methods=NOTICE_METHODS, today=date.today(),
+            paperless_url=paperless_url, paperless_link=lambda number: document_link(paperless_url, number),
             acceptance_methods=ACCEPTANCE_METHODS,
             events=list_events(ctx.db_path, entity="participant", entity_id=participant.participant_id),
         )
@@ -563,10 +584,11 @@ def handle_get(ctx: RequestContext) -> str:
     # "unassigned" = not yet on the LAST joinable version, where new members go by default.
     version_assignments = [(v, list_assignments_for_version(ctx.db_path, v.id)) for v in joinable]
     assignments: list[ParticipantContractAssignment] = version_assignments[0][1] if version_assignments else []
-    unassigned_participants = all_participants
-    if version_assignments:
-        assigned_ids = {a.participant_id for a in version_assignments[-1][1]}
-        unassigned_participants = [p for p in all_participants if p.participant_id not in assigned_ids]
+    # Who can be added: everyone without a running membership (new members and
+    # re-entries after a departure — ADR-0009).
+    running = {m.participant_id for m in list_memberships(ctx.db_path)
+               if m.left_at is None or m.left_at >= date.today()}
+    unassigned_participants = [p for p in all_participants if p.participant_id not in running]
 
     form_version: ContractVersion | None = None
     form_mode = "create"
@@ -606,6 +628,8 @@ def handle_get(ctx: RequestContext) -> str:
         assignments=assignments, participant_lookup=participant_lookup,
         unassigned_participants=unassigned_participants,
         participant_roles=roles_by_participant(list_meters(ctx.db_path)),
+        draft_gaps={v.id: contract_gap(get_latest_relevant_version(ctx.db_path), v.valid_from)
+                    for v in versions if v.status == CONTRACT_STATUS_DRAFT},
     )
 
 
@@ -699,13 +723,16 @@ def handle_post(ctx: RequestContext) -> str | None:
         is_founding = get_latest_relevant_version(ctx.db_path) is None
         consent_of_all = form_bool(ctx, "consent_of_all")
         try:
-            version = publish_version(ctx.db_path, version_id, consent_of_all=consent_of_all)
+            version = publish_version(ctx.db_path, version_id, consent_of_all=consent_of_all,
+                                      accept_gap=form_bool(ctx, "accept_gap"))
         except ContractWorkflowError as exc:
             raise FormError(str(exc))
         message = f"Vertragsversion {version.version} veröffentlicht."
         if version.consent_based:
             message += (" Ohne Ankündigungsfrist, weil alle Gesellschafter zustimmen — die Zustimmung jedes "
-                        "Teilnehmers jetzt unter „Details“ mit Nachweis erfassen.")
+                        "Teilnehmers jetzt unter „Checkliste“ mit Nachweis erfassen.")
+        elif get_latest_relevant_version(ctx.db_path) and not is_founding:
+            message += " Die Mitteilung an die Teilnehmer ist jetzt unter „Checkliste“ offen."
         if is_founding and version.valid_from and version.valid_from < _add_months(date.today(), 3):
             message += (
                 " Hinweis: Die Bildung der LEG ist dem Netzbetreiber üblicherweise 3 Monate im Voraus zu "
@@ -825,11 +852,12 @@ def handle_post(ctx: RequestContext) -> str | None:
                 raise FormError("Das Datum der Unterschrift ist erforderlich.")
             method = form_required(ctx, "acceptance_method", label="Art der Zustimmung")
             signed_by = form_required(ctx, "signed_by", label="Unterzeichnet von")
-            paper_location = (ctx.form.get("paper_original_location") or "").strip()
-            if not ctx.form.get("_uploaded_sha256") and not paper_location:
+            paper_location = (ctx.form.get("paper_original_location") or "").strip()[:200]
+            paperless_id, paperless_asn = _paperless(ctx, "signed_")
+            if not ctx.form.get("_uploaded_sha256") and not paper_location and paperless_id is None:
                 raise FormError(
-                    "Nachweis fehlt: das unterschriebene Dokument hochladen oder den Ablageort des "
-                    "Papieroriginals angeben."
+                    "Nachweis fehlt: das unterschriebene Dokument hochladen, die Paperless-Nr. oder den Ablageort "
+                    "des Papieroriginals angeben."
                 )
             snapshot = _current_declaration_text(ctx, assignment_id)
             _run(lambda: mark_accepted(
@@ -838,20 +866,42 @@ def handle_post(ctx: RequestContext) -> str | None:
                 document_location=ctx.form.get("_uploaded_location", ""),
                 document_sha256=ctx.form.get("_uploaded_sha256", ""),
                 paper_location=paper_location, snapshot=snapshot,
-            ), "Unterschrift erfasst." + (" Dokument gespeichert." if ctx.form.get("_uploaded_sha256") else
-                                          f" Papieroriginal: {paper_location}."))
+                paperless_id=paperless_id, paperless_asn=paperless_asn,
+            ), "Unterschrift erfasst." + (" Dokument gespeichert." if ctx.form.get("_uploaded_sha256") else ""))
             return None
 
         if action == "notify":
             notified_at = form_date(ctx, "notified_at") or date.today()
-            evidence = form_required(ctx, "notice_evidence", label="Art der Mitteilung")
-            _run(lambda: mark_notified(ctx.db_path, assignment_id, notified_at, evidence=evidence),
-                 "Mitteilung über die aktuelle Vertragsversion erfasst.")
+            evidence = (ctx.form.get("notice_evidence") or "").strip()[:500]
+            method = (ctx.form.get("notice_method") or "").strip()
+            if method and method not in NOTICE_METHODS:
+                raise FormError("Unbekannte Versandart.")
+            if not method and not evidence:
+                raise FormError("Bitte die Versandart wählen oder angeben, wie mitgeteilt wurde.")
+            paperless_id, paperless_asn = _paperless(ctx, "notice_")
+            _run(lambda: mark_notified(ctx.db_path, assignment_id, notified_at, evidence=evidence, method=method,
+                                       paperless_id=paperless_id, paperless_asn=paperless_asn,
+                                       recorded_by=_recorded_by(ctx)),
+                 "Mitteilung über die Vertragsversion erfasst (keine Zustimmung).")
+            return None
+
+        if action == "consent":
+            consent_at = form_date(ctx, "consent_at")
+            if consent_at is None:
+                raise FormError("Das Datum der Zustimmung ist erforderlich.")
+            evidence = (ctx.form.get("consent_evidence") or "").strip()[:500]
+            paperless_id, paperless_asn = _paperless(ctx, "consent_")
+            _run(lambda: mark_consent(ctx.db_path, assignment_id, consent_at, evidence=evidence,
+                                      paperless_id=paperless_id, paperless_asn=paperless_asn,
+                                      recorded_by=_recorded_by(ctx)),
+                 "Zustimmung zur Vertragsversion erfasst.")
             return None
 
         if action == "vnb-notified":
             notified_at = form_date(ctx, "vnb_notified_at") or date.today()
-            _run(lambda: mark_vnb_notified(ctx.db_path, assignment_id, notified_at),
+            paperless_id, paperless_asn = _paperless(ctx, "")
+            _run(lambda: mark_vnb_notified(ctx.db_path, assignment_id, notified_at,
+                                           paperless_id=paperless_id, paperless_asn=paperless_asn),
                  "Meldung an den Netzbetreiber erfasst.")
             return None
 
@@ -860,7 +910,9 @@ def handle_post(ctx: RequestContext) -> str | None:
             effective_start = form_date(ctx, "effective_start_at")
             if effective_start is None:
                 raise FormError("Der vom Netzbetreiber bestätigte Beginn ist erforderlich.")
-            _run(lambda: mark_vnb_confirmed(ctx.db_path, assignment_id, confirmed_at, effective_start),
+            paperless_id, paperless_asn = _paperless(ctx, "")
+            _run(lambda: mark_vnb_confirmed(ctx.db_path, assignment_id, confirmed_at, effective_start,
+                                            paperless_id=paperless_id, paperless_asn=paperless_asn),
                  "Bestätigung des Netzbetreibers erfasst.")
             return None
 
@@ -871,8 +923,78 @@ def handle_post(ctx: RequestContext) -> str | None:
             _require_month_end(end_date, label="Austritt per")
             reason = form_required(ctx, "exit_reason", label="Grund")
             _run(lambda: record_departure(ctx.db_path, assignment_id, end_date, reason=reason),
-                 "Austritt erfasst. Meldung an den Netzbetreiber mindestens 1 Monat im Voraus "
-                 "(Art. 19g Abs. 1 StromVV); danach gegebenenfalls eine Schlussabrechnung erstellen.")
+                 "Austritt erfasst. Er gilt für alle Vertragsversionen dieser Mitgliedschaft. Meldung an den "
+                 "Netzbetreiber mindestens 1 Monat im Voraus (Art. 19g Abs. 1 StromVV); danach gegebenenfalls "
+                 "eine Schlussabrechnung erstellen.")
+            return None
+
+        if action == "correct":
+            section = ctx.form.get("section") or ""
+            values = _correction_values(ctx, section)
+            reason = (ctx.form.get("correction_reason") or "").strip()[:500]
+            try:
+                result = correct_assignment(ctx.db_path, assignment_id, section, values, reason=reason,
+                                            recorded_by=_recorded_by(ctx))
+            except ParticipantContractError as exc:
+                raise FormError(str(exc))
+            _flash_correction(ctx, result)
+            return None
+
+        if action == "remove-signature":
+            reason = (ctx.form.get("correction_reason") or "").strip()[:500]
+            try:
+                result = remove_signature(ctx.db_path, assignment_id, reason=reason)
+            except ParticipantContractError as exc:
+                raise FormError(str(exc))
+            _flash_correction(ctx, result)
             return None
 
     raise FormError("Unbekannte Aktion.")
+
+
+# ── Corrections (form parsing) ──────────────────────────────────────────────
+
+
+def _paperless(ctx: RequestContext, prefix: str) -> tuple[int | None, int | None]:
+    try:
+        return (parse_number(ctx.form.get(f"{prefix}paperless_id"), label="Paperless-Nr."),
+                parse_number(ctx.form.get(f"{prefix}paperless_asn"), label="ASN"))
+    except PaperlessValueError as exc:
+        raise FormError(str(exc))
+
+
+def _correction_values(ctx: RequestContext, section: str) -> dict:
+    """The submitted fields of one correction section, typed (empty = clear)."""
+    if section not in CORRECTION_FIELDS:
+        raise FormError("Unbekannter Bereich für eine Korrektur.")
+    values: dict = {}
+    for name in CORRECTION_FIELDS[section]:
+        if name not in ctx.form:
+            continue
+        if name.endswith("_at"):
+            values[name] = form_date(ctx, name)
+        elif name.endswith("_paperless_id") or name.endswith("_paperless_asn"):
+            try:
+                values[name] = parse_number(ctx.form.get(name), label="Paperless-Nr./ASN")
+            except PaperlessValueError as exc:
+                raise FormError(str(exc))
+        else:
+            values[name] = (ctx.form.get(name) or "").strip()[:500]
+    return values
+
+
+def _flash_correction(ctx: RequestContext, result) -> None:
+    changed = "; ".join(f"{label}: {old} → {new}" for label, old, new in result.changes)
+    message = f"Korrigiert ({changed})."
+    if result.affected_run_ids and ctx.runtime is not None:
+        from shareomat.database.billing import released_runs_differing
+        differing = released_runs_differing(ctx.db_path, ctx.runtime, result.affected_run_ids)
+        for run in differing:
+            label = run.period_label or f"{run.period_start} – {run.period_end}"
+            get_state().add_warning(
+                f"Freigegebene Abrechnung {label} würde nach einer Korrektur bei den Teilnehmerdaten anders "
+                "ausfallen. Sie bleibt unverändert – bitte prüfen, ob eine Korrekturabrechnung nötig ist."
+            )
+        if differing:
+            message += " Korrekturabrechnung prüfen: siehe Hinweis auf der Übersicht."
+    get_state().set_flash(message, ok=True)

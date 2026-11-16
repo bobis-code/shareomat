@@ -51,7 +51,7 @@ _SPARKPLUG_ID = re.compile(r"^[^/+#\s\x00-\x1f\x7f]{1,64}$")
 # Runtime (technical) keys this script owns; every other top-level key in an
 # existing CONFIG_OUTPUT file (legacy "leg"/"participants"/"meters"/"tariffs")
 # is preserved as-is until Shareomat's one-time database import consumes it.
-_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex"}
+_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex", "paperless"}
 
 _SWISSELDEX_HOST = "datahub.swisseldex.ch"
 _SWISSELDEX_INTERVALS = (1, 3, 6, 12, 24)
@@ -197,7 +197,9 @@ def main() -> None:
         },
     }
 
-    config = {**legacy_sections, **runtime_config, "swisseldex": _swisseldex_section(opts)}
+    config = {**legacy_sections, **runtime_config, "swisseldex": _swisseldex_section(opts),
+              # Link target for evidence in Paperless-ngx; validated by shareomat.config.
+              "paperless": {"url": str(opts.get("paperless_url", "") or "").strip()}}
     sparkplug = _sparkplug_section(opts, existing)
     if sparkplug is not None:
         config["sparkplug"] = sparkplug

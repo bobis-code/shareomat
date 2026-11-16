@@ -370,3 +370,21 @@ abbr[title] { text-decoration: underline dotted; cursor: help; }
   input[type=checkbox] { width: 22px; height: 22px; vertical-align: middle; }
   .form-card input, .form-card select { min-height: 44px; font-size: 1rem; }
 }
+
+/* Checklist (VERWALTUNG → Checkliste): every state is symbol + word; colour only adds to it. */
+.ck { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .82rem; white-space: nowrap;
+      border: 1px solid transparent; }
+.ck-done { background: #dcfce7; color: #166534; }
+.ck-open { background: #fee2e2; color: #991b1b; }
+.ck-waiting { background: #fef3c7; color: #92400e; }
+.ck-na { background: #f3f4f6; color: #4b5563; }
+.ck-check { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+.ck-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+.ck-table td { vertical-align: top; }
+.ck-selected { background: #eff6ff; }
+@media (max-width: 720px) {
+  .ck-table thead { display: none; }
+  .ck-table tr { display: block; border-bottom: 1px solid #e5e7eb; padding: 8px 0; }
+  .ck-table td { display: flex; gap: 8px; justify-content: space-between; padding: 4px 0; }
+  .ck-table td::before { content: attr(data-label); font-weight: 600; color: #4b5563; }
+}

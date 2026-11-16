@@ -44,8 +44,9 @@
     {{ participant_version.valid_from.strftime('%d.%m.%Y') }} in Kraft. Teilnehmer können bereits jetzt zugeordnet
     und ihre Beitrittserklärungen erstellt werden.</p>
   {% endif %}
-  <p class="field-hint" style="margin-bottom:10px">Ablauf pro Teilnehmer: angelegt → Erklärung ausgestellt →
-    Unterschrift eingegangen → beim Netzbetreiber gemeldet → vom Netzbetreiber bestätigt. Nachweise unter „Details“.</p>
+  <p class="field-hint" style="margin-bottom:10px">Pro Teilnehmer: Erklärung, Unterschrift, Meldung und Bestätigung
+    durch den Netzbetreiber — in beliebiger Reihenfolge, jederzeit korrigierbar. Was wem fehlt, zeigt die
+    <a href="{{ url_for('checklist') }}">Checkliste</a>; Nachweise unter „Details“.</p>
   {% for v, v_assignments in version_assignments %}
   <h3 style="margin-top:12px">Version {{ v.version }} — {{ 'gültig' if current_version and v.id == current_version.id else 'gilt ab' }}
     {{ v.valid_from.strftime('%d.%m.%Y') }}</h3>
@@ -431,6 +432,15 @@
                   <input type="checkbox" id="consent_{{ v.id }}" name="consent_of_all">
                   <label for="consent_{{ v.id }}" style="margin:0">Alle Gesellschafter stimmen dieser Änderung zu
                     (keine Ankündigungsfrist; Zustimmung jedes Teilnehmers wird danach mit Nachweis erfasst)</label>
+                </div>
+                {% endif %}
+                {% set gap = draft_gaps.get(v.id) %}
+                {% if gap %}
+                <div class="error-box">Vom {{ gap[0].strftime('%d.%m.%Y') }} bis {{ gap[1].strftime('%d.%m.%Y') }} gilt kein
+                  Vertrag — die bisherige Version ist befristet und wird nicht verlängert. In dieser Zeit wird nicht abgerechnet.</div>
+                <div class="field checkbox-row">
+                  <input type="checkbox" id="gap_{{ v.id }}" name="accept_gap">
+                  <label for="gap_{{ v.id }}" style="margin:0">Ich habe verstanden: in dieser Zeit gilt kein Vertrag.</label>
                 </div>
                 {% endif %}
                 <button type="submit" class="btn-small">Jetzt veröffentlichen</button>

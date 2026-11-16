@@ -66,6 +66,9 @@ options:
     password: ""
     auto_sync: false
     sync_interval_hours: "6"
+  # Optional: Adresse von Paperless-ngx (z. B. http://homeassistant.local:8000) für
+  # Links zu Nachweisen. Shareomat ruft Paperless nie selbst auf.
+  paperless_url: ""
 
 schema:
   mqtt_host: str
@@ -103,3 +106,4 @@ schema:
     password: password?
     auto_sync: bool
     sync_interval_hours: list(1|3|6|12|24)
+  paperless_url: str?
