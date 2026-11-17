@@ -35,6 +35,7 @@ ROUTE_PATHS: dict[str, str] = {
     "tariffs_new": "/tariffs/new",
     "contract": "/contract",
     "checklist": "/checklist",
+    "email_templates": "/email-templates",
     "meter_data": "/meter-data",
     "analysis": "/analysis",
     "billing": "/billing",
@@ -63,6 +64,7 @@ NAV_SECTIONS: list[tuple[str, list[tuple[str, str]]]] = [
         ("meters", "Messpunkte"),
         ("tariffs", "Tarife"),
         ("contract", "Vertrag"),
+        ("email_templates", "E-Mail-Vorlagen"),
     ]),
     ("BETRIEB", [
         ("meter_data", "Messdaten"),

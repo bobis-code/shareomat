@@ -459,3 +459,14 @@ details.ck-more > summary:hover { text-decoration: underline; }
 .contract-text .decl-sign td { font-size: .8rem; color: var(--muted); border: none; padding: 3px 0; }
 .contract-text .decl-sign td.decl-gap { width: 8%; }
 .contract-text .decl-sign td.decl-line { border-bottom: 1px solid #111; height: 32px; }
+
+/* E-Mail-Vorlagen */
+.mail-layout { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 16px; }
+.mail-layout > .card { margin-bottom: 0; }
+textarea.mail-body { width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 4px;
+  font-family: inherit; font-size: .9rem; line-height: 1.45; resize: vertical; }
+.mail-preview { border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa; padding: 12px 14px; max-width: 720px; }
+.mail-preview-subject { font-weight: 600; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb; margin-bottom: 10px; }
+.mail-preview-body { white-space: pre-wrap; word-break: break-word; font-size: .9rem; line-height: 1.5; }
+.mail-preview-attachment { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
+@media (max-width: 900px) { .mail-layout { grid-template-columns: 1fr; } }

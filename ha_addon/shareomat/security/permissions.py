@@ -51,6 +51,7 @@ _POST_PERMISSIONS = {
     "tariffs": "masterdata.edit",
     "contract": "contract.manage",
     "checklist": "contract.manage",
+    "email_templates": "masterdata.edit",
     "settings": "system.configure",
     "automation": "system.configure",
     "external_data": "system.configure",

@@ -234,6 +234,7 @@ database/                   SQLite, Quelle der Wahrheit für Stammdaten
                                Korrekturen und Sammelaktionen mit denselben Regeln
   participant_checklist.py     Checkliste pro Teilnehmer, nur lesend (Abrechnung über billing_eligibility)
   backup.py                    «Sicherung erstellen» (Einstellungen): geprüfte ZIP-Kopie
+  email_templates.py           E-Mail-Vorlagen (Willkommen, Rechnung, Gutschrift) in der settings-Tabelle
   config_builder.py            RuntimeConfig + SQLite → LegConfig
   billing.py                   Interaktiver Abrechnungs-Workflow (Ausnahme: enthält Kernlogik, siehe Docstring dort)
   yaml_import.py               Einmaliger Import aus einer vorbestehenden leg_config.yaml
@@ -262,7 +263,7 @@ layout".
 
 ```text
 Übersicht     — Dashboard
-VERWALTUNG    — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag
+VERWALTUNG    — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag, E-Mail-Vorlagen
 BETRIEB       — Messdaten, Analyse, Abrechnungen, Rechnungen, Automatisierung, Berichte
 INTEGRATIONEN — Apps & Integrationen
 SYSTEM        — Einstellungen, Externe Daten
@@ -526,5 +527,6 @@ architektur-relevanten Punkte, Stand 2026-08-13:
 | **E31 / E66** | SDAT-Nachrichtentypen: E31 = aggregierte LEG-Daten, E66 = Messdaten je Teilnehmer |
 | **Mitgliedschaft** | Zeitraum eines Teilnehmers in der LEG (Beitritt bis Austritt) mit EBL-Meldung und -Bestätigung; ein Wiedereintritt ist eine neue Mitgliedschaft (ADR-0009) |
 | **Mitteilung / Zustimmung** | Mitteilung = Teilnehmer wurde über eine Vertragsversion informiert; Zustimmung = ausdrückliches Einverständnis, nur nötig bei Versionen «mit Zustimmung aller». Eine Mitteilung ist nie eine Zustimmung |
+| **E-Mail-Vorlage** | VERWALTUNG → E-Mail-Vorlagen: Betreff und Text einer E-Mail an Teilnehmer, nur Text mit festen {platzhaltern} (kein Template-Code). Der spätere Versand, von Hand und automatisch, füllt sie mit `core.email_templates.fill_template` |
 | **Checkliste** | VERWALTUNG → Checkliste: zeigt pro Teilnehmer, was erledigt ist, was fehlt und worauf gewartet wird; speichert selbst nichts |
 | **Vertrag** | Der öffentliche LEG-Mustervertrag inkl. Preisen — Quelle der Wahrheit für Tarife, nicht die Tarife-Seite (die ist nur Fallback) |

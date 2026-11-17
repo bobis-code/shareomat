@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}E-Mail-Vorlagen{% endblock %}
+{% block heading %}E-Mail-Vorlagen{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Vorlagen</h2>
+  <p class="ts">Texte der E-Mails an die Teilnehmer. Der Versand aus Shareomat (von Hand und
+    automatisch) folgt in einem späteren Schritt und verwendet genau diese Vorlagen. Bis dahin
+    kann der Text aus der Vorschau kopiert werden.</p>
+  <div class="table-wrap" style="margin-top:12px">
+    <table>
+      <thead>
+        <tr><th>Vorlage</th><th>Wofür</th><th>Anhang beim Versand</th><th>Stand</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for spec in specs %}
+        {% set t = templates[spec.kind] %}
+        <tr>
+          <td><strong>{{ spec.label }}</strong></td>
+          <td>{{ spec.purpose }}</td>
+          <td class="ts">{{ spec.attachment }}</td>
+          <td>
+            <span class="status-pill {{ 'status-pill-inactive' if t.is_default else 'status-pill-active' }}">
+              {{ 'Standardtext' if t.is_default else 'angepasst' }}
+            </span>
+          </td>
+          <td><a class="btn-small" href="{{ url_for('email_templates', suffix='/' + spec.kind) }}">Bearbeiten</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

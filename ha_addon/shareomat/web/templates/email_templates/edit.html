@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}E-Mail-Vorlage {{ spec.label }}{% endblock %}
+{% block heading %}E-Mail-Vorlage: {{ spec.label }}{% endblock %}
+{% block content %}
+<p><a href="{{ url_for('email_templates') }}">← Alle Vorlagen</a></p>
+
+<div class="mail-layout">
+  <div class="card">
+    <h2>Text</h2>
+    <p class="ts" style="margin-bottom:14px">{{ spec.purpose }} Anhang beim Versand: {{ spec.attachment }}.
+      {% if template.is_default %}Derzeit gilt der Standardtext.{% else %}Angepasst, zuletzt gespeichert {{ template.updated_at[:16].replace('T', ' ') }}.{% endif %}</p>
+    {% if rejected %}
+    <p class="status-error">Der zuletzt eingegebene Text wurde nicht gespeichert. Er steht unten zum Korrigieren bereit.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('email_templates', suffix='/' + spec.kind) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="field">
+        <label for="subject">Betreff</label>
+        <input type="text" id="subject" name="subject" required maxlength="{{ max_subject }}"
+               value="{{ rejected[0] if rejected else template.subject }}">
+      </div>
+      <div class="field">
+        <label for="body">Text</label>
+        <textarea id="body" name="body" required rows="18" maxlength="{{ max_body }}"
+                  class="mail-body">{{ rejected[1] if rejected else template.body }}</textarea>
+        <div class="field-hint">Nur Text, ohne Formatierung. Platzhalter in geschweiften Klammern,
+          z. B. {name}; erlaubt sind die rechts aufgeführten.</div>
+      </div>
+      <div class="actions-row">
+        <button type="submit">Speichern</button>
+      </div>
+    </form>
+    {% if not template.is_default %}
+    <form method="post" action="{{ url_for('email_templates', suffix='/' + spec.kind + '/reset') }}"
+          onsubmit="return confirm('Eigenen Text verwerfen und den Standardtext wiederherstellen?')"
+          style="margin-top:10px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-small btn-muted">Standardtext wiederherstellen</button>
+    </form>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Platzhalter</h2>
+    <table>
+      <tbody>
+        {% for name, description in spec.placeholders %}
+        <tr><td><code>{{ '{' ~ name ~ '}' }}</code></td><td class="ts">{{ description }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Vorschau (gespeicherter Text, Beispielwerte)</h2>
+  <p class="ts">Gemeinschaft und LEG-Vertreter aus Ihren Angaben, Teilnehmer und Beträge sind Beispiele.</p>
+  <div class="mail-preview">
+    <div class="mail-preview-subject"><span class="ts">Betreff:</span> {{ preview_subject }}</div>
+    <div class="mail-preview-body">{{ preview_body }}</div>
+    <div class="mail-preview-attachment ts">Anhang: {{ spec.attachment }}</div>
+  </div>
+</div>
+{% endblock %}
