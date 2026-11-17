@@ -553,9 +553,9 @@ def test_declaration_ticks_role_and_lists_meters_from_participant_meters(db_path
     assignment = list_assignments_for_version(db_path, current_version.id)[0]
 
     html = contract.handle_get(_ctx(segments=["participants", str(assignment.id), "declaration"]))
-    assert "Messpunktnummer: CH-BEZUG-1, CH-PV-1" in html  # list_meters sorts by label
-    assert "☑ LEG Strom beziehen und liefern (Prosumer)" in html
-    assert "☐ LEG Strom beziehen (Endverbraucher)" in html
+    assert '<th>Messpunktnummer</th><td class="decl-id">CH-BEZUG-1, CH-PV-1</td>' in html  # sorted by label
+    assert "☑ LEG-Strom beziehen und liefern (Bezüger und Produzent)" in html
+    assert "☐ LEG-Strom beziehen (Endverbraucher)" in html
 
 
 def test_declaration_view_unknown_assignment_shows_placeholder(db_path) -> None:

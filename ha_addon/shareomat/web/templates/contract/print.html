@@ -7,12 +7,35 @@
   <meta charset="utf-8">
   <title>{{ title }}</title>
   <style>
-    body { font-family: Georgia, "Times New Roman", serif; max-width: 46rem; margin: 2rem auto; line-height: 1.45; color: #111; }
-    h2 { font-size: 1.4rem; } h3 { font-size: 1.1rem; margin-top: 1.4rem; } h4 { font-size: 1rem; }
+    /* Print layout modelled on the structure of the LEG-Mustervertrag (A4, sans-serif, clear
+       section headings, form with lines) in Shareomat's own colours, without third-party branding.
+       Only the presentation: the stored text (and its SHA-256) is not affected. */
+    @page { size: A4; margin: 22mm 20mm 20mm 25mm;
+            @bottom-right { content: "Seite " counter(page) " / " counter(pages); font: 8pt Arial, Helvetica, sans-serif; color: #666; } }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5pt; max-width: 46rem; margin: 2rem auto;
+           line-height: 1.5; color: #111; padding: 0 1rem; }
+    h2 { font-size: 17pt; font-weight: bold; color: #1d4ed8; margin: 0 0 .8rem; line-height: 1.25; }
+    h3 { font-size: 12.5pt; font-weight: bold; margin: 1.5rem 0 .4rem; break-after: avoid; page-break-after: avoid; }
+    h4 { font-size: 11pt; font-weight: bold; margin: 1.1rem 0 .3rem; break-after: avoid; page-break-after: avoid; }
+    p { margin: 0 0 .6rem; text-align: left; orphans: 3; widows: 3; }
+    ul { margin: 0 0 .6rem 1.2rem; }
     .ts { color: #444; font-size: .85rem; }
-    .meta { border-top: 1px solid #999; margin-top: 2rem; padding-top: .5rem; font-size: .8rem; color: #444; }
+    .decl-title { color: #1d4ed8; font-size: 11.5pt; margin-top: 1.3rem; }
+    .decl-fields { width: 100%; border-collapse: collapse; margin: .3rem 0 .8rem; }
+    .decl-fields th { width: 34%; text-align: left; font-weight: normal; color: #444; padding: .45rem .5rem .2rem 0;
+                      vertical-align: bottom; }
+    .decl-fields td { border-bottom: 1px solid #888; padding: .45rem 0 .2rem; vertical-align: bottom; }
+    .decl-roles { list-style: none; margin: .3rem 0 .4rem; padding: 0; }
+    .decl-roles li { margin: .25rem 0; }
+    .decl-note { font-size: 8.5pt; color: #444; }
+    .decl-id { font-family: "Courier New", monospace; word-break: break-all; }
+    .decl-sign { width: 100%; border-collapse: collapse; margin: 2.2rem 0 1rem; break-inside: avoid; }
+    .decl-sign td { width: 45%; font-size: 9pt; color: #444; padding-top: .2rem; }
+    .decl-sign td.decl-gap { width: 10%; }
+    .decl-sign td.decl-line { border-bottom: 1px solid #111; height: 2.2rem; }
+    .meta { border-top: 1px solid #999; margin-top: 2rem; padding-top: .5rem; font-size: 8pt; color: #555; }
     .noprint { margin-bottom: 1rem; }
-    @media print { .noprint { display: none; } body { margin: 0 auto; } }
+    @media print { .noprint { display: none; } body { margin: 0; padding: 0; max-width: none; } }
   </style>
 </head>
 <body>

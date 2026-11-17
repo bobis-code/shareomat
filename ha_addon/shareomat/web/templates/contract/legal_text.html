@@ -1,7 +1,9 @@
 {# Rendered standalone (not extending base.html) — the result string is stored
    verbatim as a contract_versions.contract_text_snapshot, so a historical
    version's wording never changes even if this template changes later.
-   Base text: docs/examples/MusterVertrag/LEG-Gesellschaftsvertrag_Lokaler-Strom_de.docx,
+   Base text: the LEG-Mustervertrag of lokalerstrom.ch ("Gesellschaftsvertrag LEG Muster",
+   Word template, last edited 12/2025; not kept in this repository, see
+   docs/examples/MusterVertrag/README.md),
    with the "ODER"/checkbox variants resolved per the community's decisions
    (VNB-Verhältnis Variante A; Preis-Varianten "Einheitstarif", HT/NT-fähig
    angepasst; Kostentragung "Rp./kWh bezogener Solarstrom") — see
@@ -20,7 +22,9 @@
    to "der definierten Zahlungsfrist", which the Mustervertrag never
    defines), §5 notice period as its own parameter (rendered as the
    Mustervertrag's "viermonatigen"). Everything else is the Mustervertrag's
-   wording on purpose.
+   wording on purpose — except "Prosumer" (17.11.2026, operator's decision): the
+   contract only defines LEG-Bezüger, LEG-Produzent and "beide Rollen" (§1), so
+   §3.2/§3.4 say "Gesellschafter in beiden Rollen" instead of the undefined term.
    Any change here changes template_sha256 and therefore needs the contract
    notice period for the next version. #}
 <h2>Gesellschaftsvertrag «{{ community_name }}»</h2>
@@ -118,9 +122,9 @@ inklusive Mehrwertsteuer zu verstehen.</p>
 
 <h4>3.2 Preis für den Bezug von LEG-Strom von der Gesellschaft «{{ community_name }}»</h4>
 <p>Die nachfolgende Preisdefinition bezieht sich ausschliesslich auf den
-Anteil «Energie» (exkl. Netz und Abgaben). Bei Teilnahme eines Prosumers
-gelten für den Prosumer die Ziffern 3.1 und 3.2. Individualtarife werden
-hier nicht vereinbart.</p>
+Anteil «Energie» (exkl. Netz und Abgaben). Für Gesellschafter in beiden
+Rollen (LEG-Bezüger und LEG-Produzent) gelten die Ziffern 3.1 und 3.2.
+Individualtarife werden hier nicht vereinbart.</p>
 {% if tariff.rate_mode == "ht_nt" %}
 <p>Der Preis für den Bezug von LEG-Strom von der Gesellschaft «LEG» beträgt
 {{ "%.2f"|format(tariff.local_rate_chf_kwh * 100) }} Rp./kWh (Hochtarif)
@@ -164,7 +168,7 @@ Preisänderung gemäss Ziffer 3.1 und 3.2.</p>
 <p>Der LEG-Vertreter rechnet den LEG-Strom {{ billing_cycle_label }} ab,
 sobald die Messdaten des VNB für die Abrechnungsperiode vorliegen. Die
 LEG-Bezüger erhalten eine Rechnung, die LEG-Produzenten eine Gutschrift.
-Bezieht und liefert ein Gesellschafter LEG-Strom (Prosumer), werden Bezug
+Bezieht und liefert ein Gesellschafter LEG-Strom (beide Rollen), werden Bezug
 und Lieferung mit Mengen und Beträgen getrennt ausgewiesen und anschliessend
 miteinander verrechnet; der Saldo wird in Rechnung gestellt bzw.
 gutgeschrieben.</p>

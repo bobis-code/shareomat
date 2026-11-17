@@ -444,3 +444,18 @@ details.ck-more > summary:hover { text-decoration: underline; }
   .ck-kv dd { margin-bottom: 8px; }
   form.ck-form { grid-template-columns: 1fr; }
 }
+
+/* Beitrittserklärung inside the app (same structure as the printout, see contract/print.html). */
+.contract-text .decl-title { margin-top: 18px; }
+.contract-text .decl-fields { width: 100%; max-width: 560px; border-collapse: collapse; margin: 4px 0 10px; font-size: .9rem; }
+.contract-text .decl-fields th { width: 38%; text-align: left; font-weight: normal; color: var(--muted); background: none;
+                                 border-bottom: none; padding: 6px 8px 3px 0; }
+.contract-text .decl-fields td { border-bottom: 1px solid #9ca3af; padding: 6px 0 3px; }
+.contract-text .decl-roles { list-style: none; margin: 4px 0 6px; }
+.contract-text .decl-roles li { margin: 3px 0; }
+.contract-text .decl-note { font-size: .78rem; color: var(--muted); margin: 6px 0; }
+.contract-text .decl-id { font-family: ui-monospace, Consolas, monospace; word-break: break-all; }
+.contract-text .decl-sign { width: 100%; max-width: 560px; margin: 26px 0 12px; border-collapse: collapse; }
+.contract-text .decl-sign td { font-size: .8rem; color: var(--muted); border: none; padding: 3px 0; }
+.contract-text .decl-sign td.decl-gap { width: 8%; }
+.contract-text .decl-sign td.decl-line { border-bottom: 1px solid #111; height: 32px; }

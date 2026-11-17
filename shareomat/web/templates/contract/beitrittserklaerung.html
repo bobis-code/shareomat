@@ -1,9 +1,11 @@
 {# Rendered standalone (not extending base.html), like contract/legal_text.html.
-   Wording follows the Beitrittserklärung section of the reference Mustervertrag
-   (docs/examples/MusterVertrag/LEG-Gesellschaftsvertrag_Lokaler-Strom_de.docx)
+   Wording follows the Beitrittserklärung section of the LEG-Mustervertrag of
+   lokalerstrom.ch (see docs/examples/MusterVertrag/README.md)
    closely, but references the currently assigned contract version instead of
    embedding the full contract text — an existing participant is informed of a
-   later version, not asked to sign again (LEG-Mustervertrag §8). #}
+   later version, not asked to sign again (LEG-Mustervertrag §8).
+   Layout classes (decl-*) are styled in contract/print.html and app.css
+   (.contract-text); a declaration already handed out keeps its frozen HTML. #}
 <h2>Beitrittserklärung zur Gesellschaft «{{ community_name }}»</h2>
 
 <p>Mit Ihren Angaben und Ihrer Unterschrift melden Sie sich verbindlich zur
@@ -11,35 +13,37 @@ Teilnahme an und akzeptieren den Gesellschaftsvertrag «{{ community_name }}»,
 Version {{ version.version }}{% if version.valid_from %}, gültig ab
 {{ version.valid_from.strftime('%d.%m.%Y') }}{% endif %}, der dieser Erklärung
 vollständig beiliegt.</p>
+
+<h3 class="decl-title">LEG-Teilnehmer</h3>
+<table class="decl-fields">
+  <tr><th>Name</th><td>{{ participant.label }}</td></tr>
+  <tr><th>Adresse</th><td>{{ participant.address_line or "" }}</td></tr>
+  <tr><th>PLZ / Ort</th><td>{{ participant.postal_code }} {{ participant.city }}</td></tr>
+  <tr><th>E-Mail</th><td>{{ participant.email or "" }}</td></tr>
+  <tr><th>Tel.</th><td></td></tr>
+  <tr><th>Messpunktnummer</th><td class="decl-id">{{ roles.meter_ids | join(", ") if roles.meter_ids else "" }}</td></tr>
+  <tr><th>Beitritt per</th><td>{{ assignment.joined_at.strftime('%d.%m.%Y') if assignment.joined_at else "" }}</td></tr>
+</table>
+
+<h3 class="decl-title">Rolle in der LEG</h3>
+<ul class="decl-roles">
+  <li>{{ "☑" if roles.consumes and not roles.produces else "☐" }} LEG-Strom beziehen (Endverbraucher)</li>
+  <li>{{ "☑" if roles.produces and not roles.consumes else "☐" }} LEG-Strom liefern (Produzent)</li>
+  <li>{{ "☑" if roles.produces and roles.consumes and not roles.storage else "☐" }} LEG-Strom beziehen und liefern (Bezüger und Produzent)</li>
+  <li>{{ "☑" if roles.storage else "☐" }} LEG-Speicherbetreiber*</li>
+</ul>
+<p class="decl-note">*{{ storage_hint }}</p>
+
+<table class="decl-sign">
+  <tr><td class="decl-line"></td><td class="decl-gap"></td><td class="decl-line"></td></tr>
+  <tr><td>Ort, Datum</td><td></td><td>Unterschrift LEG-Teilnehmer</td></tr>
+</table>
+
 {% if version.text_sha256 %}
-<p class="ts">Prüfsumme des beiliegenden Vertragstexts (SHA-256):<br>
-<span style="font-family:monospace;word-break:break-all">{{ version.text_sha256 }}</span></p>
+<p class="decl-note">Prüfsumme des beiliegenden Vertragstexts (SHA-256):
+<span class="decl-id">{{ version.text_sha256 }}</span></p>
 {% endif %}
-
-<p><strong>LEG-Teilnehmer:</strong></p>
-<p>
-  Name: {{ participant.label }}<br>
-  Adresse: {{ participant.address_line or "—" }}<br>
-  PLZ/Ort: {{ participant.postal_code }} {{ participant.city }}<br>
-  E-Mail: {{ participant.email or "—" }}<br>
-  Tel: ____________________<br>
-  Messpunktnummer: {{ roles.meter_ids | join(", ") if roles.meter_ids else "—" }}
-</p>
-
-<p>
-  {{ "☑" if roles.consumes and not roles.produces else "☐" }} LEG Strom beziehen (Endverbraucher)<br>
-  {{ "☑" if roles.produces and not roles.consumes else "☐" }} LEG Strom liefern (Produzent)<br>
-  {{ "☑" if roles.produces and roles.consumes and not roles.storage else "☐" }} LEG Strom beziehen und liefern (Prosumer)<br>
-  {{ "☑" if roles.storage else "☐" }} LEG Speicherbetreiber*
-</p>
-<p><em>*{{ storage_hint }}</em></p>
-
-<p>Beitritt per: {{ assignment.joined_at.strftime('%d.%m.%Y') if assignment.joined_at else "—" }}</p>
-
-<p>__________________________________<br>
-Datum, Unterschrift LEG-Teilnehmer</p>
-
-<p class="ts">Hinweis: Der LEG-Vertreter meldet Beitritte mindestens 1 Monat im
+<p class="decl-note">Hinweis: Der LEG-Vertreter meldet Beitritte mindestens 1 Monat im
 Voraus dem Netzbetreiber, die Bildung der LEG 3 Monate im Voraus
 (Art. 19g Abs. 1 StromVV). LEG-Strom wird erst ab dem vom Netzbetreiber
 bestätigten Beginn zugeteilt.</p>
