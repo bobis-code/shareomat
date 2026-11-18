@@ -53,7 +53,8 @@
   {% if v_assignments %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Teilnehmer</th><th>Rolle</th><th>Beitritt per</th><th>Status</th><th>Unterschrift</th><th></th></tr></thead>
+      <thead><tr><th>Teilnehmer</th><th>Rolle</th><th>Beitritt per</th><th>Teilnahme (Netzbetreiber)</th>
+        <th>Vertrag v{{ v.version }}</th><th>Unterschrift</th><th></th></tr></thead>
       <tbody>
         {% for a in v_assignments %}
         {% set p = participant_lookup.get(a.participant_id) %}
@@ -64,10 +65,16 @@
           <td>
             <span class="status-pill {{ 'status-pill-active' if a.vnb_confirmed_at and not a.left_at else 'status-pill-inactive' }}">
               {{ a.status_label }}</span>
-            {% if a.accepted_version and a.accepted_version != v.version %}
-            {% set word = 'Zustimmung zu' if v.consent_based else 'Mitteilung über' %}
-            <div class="ts">{{ word ~ ' v' ~ v.version ~ ' am ' ~ a.notified_at.strftime('%d.%m.%Y') if a.notified_at
-                              else '⏳ ' ~ word ~ ' v' ~ v.version ~ ' ausstehend' }}</div>
+          </td>
+          {# What this version still needs from the participant (not from the grid operator):
+             own signature, or for a later version consent (versions "mit Zustimmung aller") or a notice. #}
+          <td>
+            {% if not a.accepted_at %}⏳ Unterschrift ausstehend
+            {% elif a.accepted_version == v.version or not a.accepted_version %}✓ unterschrieben
+            {% elif v.consent_based %}{{ '✓ zugestimmt am ' ~ a.consent_at.strftime('%d.%m.%Y') if a.consent_at
+                                         else '⏳ Zustimmung des Teilnehmers ausstehend' }}
+            {% else %}{{ '✓ mitgeteilt am ' ~ a.notified_at.strftime('%d.%m.%Y') if a.notified_at
+                         else '⏳ Mitteilung ausstehend' }}
             {% endif %}
           </td>
           <td class="ts">

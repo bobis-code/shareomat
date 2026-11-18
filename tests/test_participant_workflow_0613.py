@@ -232,6 +232,35 @@ def test_consent_version_needs_consent_not_a_notice(db, monkeypatch):
     assert _billed(db, date(2027, 1, 15), "p3") == (True, "")
 
 
+def test_contract_page_shows_consent_of_the_participant_not_only_the_grid_operator(db, monkeypatch):
+    """Regression 18.11.2026: the v2 column showed the notice instead of the recorded consent."""
+    from shareomat.web.pages import contract
+    from shareomat.web.rendering import RequestContext
+    from shareomat.web.state import get_state
+
+    get_state().register_db(db)
+    v1 = _v1(db, monkeypatch)
+    a = assign_contract(db, "p2", v1.id, v1.tariff_id, joined_at=date(2026, 1, 1))
+    _sign(db, a.id)
+    mark_vnb_notified(db, a.id, date(2025, 11, 2))
+    mark_vnb_confirmed(db, a.id, date(2025, 12, 5), date(2026, 1, 1))
+    v2 = _successor(db, monkeypatch, date(2026, 9, 1), date(2027, 1, 1), local_rate_chf_kwh=Decimal("0.12"),
+                    feed_in_rate_chf_kwh=Decimal("0.115"), consent_of_all=True)
+    [row] = list_assignments_for_version(db, v2.id)
+
+    def page():
+        return contract.handle_get(RequestContext(method="GET", ingress_path="", segments=[], query={}))
+
+    html = page()
+    assert "Teilnahme (Netzbetreiber)" in html and "Vertrag v2" in html
+    assert "vom Netzbetreiber bestätigt" in html
+    assert "⏳ Zustimmung des Teilnehmers ausstehend" in html
+    mark_consent(db, row.id, date(2026, 9, 6), evidence="unterschriebene Änderung")
+    html = page()
+    assert "✓ zugestimmt am 06.09.2026" in html
+    assert "Zustimmung des Teilnehmers ausstehend" not in html
+
+
 # ── P5: a fixed-term version is never extended ─────────────────────────────
 
 
