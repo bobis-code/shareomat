@@ -132,6 +132,12 @@ def _chf(value: Decimal) -> Decimal:
     return value.quantize(_CHF_CENT, rounding=ROUND_HALF_UP)
 
 
+# SDAT-CH values have 3 decimals (kWh). The grid operator rounds total, LEG and
+# residual energy of a quarter hour each on its own, so total and LEG + residual
+# can differ by one last digit (seen in the first real EBL deliveries, 11.2026).
+# Such a difference is rounding, not contradictory data.
+_SDAT_RESOLUTION_KWH = Decimal("0.001")
+
 _REQUIRED_CHANNELS = {
     "consumer": ("import",),
     "producer": ("export",),
@@ -269,7 +275,7 @@ def _collect_official_for_period(
 ) -> tuple[list[IntervalReading], list[BillingSourceFile], list[str], list[str], dict]:
     """Official SDAT data source (ADR-0008): measured totals plus the grid operator's split.
 
-    Returns (total readings, sources, hard issues, soft issues, splits). The
+    Returns (total readings, sources, hard issues, soft issues, splits, notes). The
     totals go through the same eligibility and completeness gates as file
     readings; the split replaces the internal allocation. A quarter hour is
     only used when total, LEG and residual energy are all present - a missing
@@ -283,7 +289,7 @@ def _collect_official_for_period(
     soft: list[str] = []
     if not data.community_id:
         hard.append("Datenquelle SDAT: Es sind noch keine offiziellen E66-Daten des Netzbetreibers importiert.")
-        return [], [], hard, soft, {}
+        return [], [], hard, soft, {}, []
 
     meter_id_of = {m.meter_id.strip().upper(): m.meter_id for m in list_meters(db_path)}
     channels: dict[tuple[str, str, datetime], dict[str, object]] = {}
@@ -294,6 +300,8 @@ def _collect_official_for_period(
     splits: dict[tuple[str, str, datetime], OfficialSplit] = {}
     incomplete: dict[str, int] = {}
     inconsistent: dict[str, int] = {}
+    rounded: dict[str, int] = {}
+    notes: list[str] = []
     temporary = estimated = 0
     for (point, direction, slot), parts in sorted(channels.items(), key=lambda item: (item[0][0], item[0][1], item[0][2])):
         meter_id = meter_id_of.get(point, point)
@@ -301,9 +309,12 @@ def _collect_official_for_period(
             incomplete[meter_id] = incomplete.get(meter_id, 0) + 1
             continue
         total, local, residual = parts["total"], parts["local"], parts["residual"]
-        if total.value != local.value + residual.value:
+        difference = total.value - (local.value + residual.value)
+        if abs(difference) > _SDAT_RESOLUTION_KWH:
             inconsistent[meter_id] = inconsistent.get(meter_id, 0) + 1
             continue
+        if difference:
+            rounded[meter_id] = rounded.get(meter_id, 0) + 1
         conditions = {total.condition, local.condition, residual.condition}
         temporary += "21" in conditions
         estimated += "56" in conditions and "21" not in conditions
@@ -317,6 +328,11 @@ def _collect_official_for_period(
 
     for meter_id, count in sorted(incomplete.items()):
         hard.append(f"Messpunkt {meter_id}: für {count} Viertelstunde(n) fehlt LEG- oder Restenergie des Netzbetreibers.")
+    for meter_id, count in sorted(rounded.items()):
+        notes.append(
+            f"Messpunkt {meter_id}: in {count} Viertelstunde(n) weicht Total um 0.001 kWh von LEG-Energie + "
+            "Restenergie ab (Rundung des Netzbetreibers, abgerechnet wird die LEG-Energie)."
+        )
     for meter_id, count in sorted(inconsistent.items()):
         hard.append(
             f"Messpunkt {meter_id}: in {count} Viertelstunde(n) ist Total ≠ LEG-Energie + Restenergie "
@@ -336,7 +352,7 @@ def _collect_official_for_period(
     sources = [BillingSourceFile(filename=name, sha256=sha, origin="sdat") for sha, name in sorted(data.sources.items())]
     if persist_readings and readings:
         save_meter_readings(db_path, readings)
-    return readings, sources, hard, soft, splits
+    return readings, sources, hard, soft, splits, notes
 
 
 def _e31_crosscheck(db_path: Path, start_dt: datetime, end_dt: datetime, e66) -> list[str]:
@@ -402,7 +418,7 @@ def compute_billing_preview(
     official = get_operation_settings(db_path).meter_data_source == METER_DATA_SOURCE_SDAT_LEG
     splits: dict = {}
     if official:
-        readings, sources, hard, soft, splits = _collect_official_for_period(
+        readings, sources, hard, soft, splits, notes = _collect_official_for_period(
             db_path, period_start, period_end, persist_readings=persist_readings,
         )
     else:
@@ -410,6 +426,7 @@ def compute_billing_preview(
             db_path, runtime, period_start, period_end, persist_readings=persist_readings,
         )
         soft: list[str] = []
+        notes: list[str] = []
     resolver = EligibilityResolver(db_path)
     if resolver.contract_mode:
         # Conflicting data from before schema 18 (ADR-0009): never billed on a guess.
@@ -547,7 +564,10 @@ def compute_billing_preview(
     supplied_total = sum(acc["local_supplied"] for acc in totals.values())
     if official:
         hard.extend(_official_energy_outside_billing(readings, billable, splits))
-    if abs(received_total - supplied_total) > 1e-6:
+        clearing_hard, clearing_notes = _official_clearing(billable, splits)
+        hard.extend(clearing_hard)
+        notes.extend(clearing_notes)
+    elif abs(received_total - supplied_total) > 1e-6:
         hard.append(
             f"Energie-Clearing stimmt nicht: bezogen {received_total:.4f} kWh ≠ geliefert {supplied_total:.4f} kWh."
         )
@@ -578,6 +598,7 @@ def compute_billing_preview(
         blocking_issues=hard + soft,
         hard_issues=hard,
         excluded=excluded,
+        notes=notes,
     )
     tariff_names = sorted({t.name for t in tariff_obj.values()}) or [reference_tariff.name]
     return BillingPreview(
@@ -601,6 +622,53 @@ _RUN_SELECT = """
     FROM billing_runs
     JOIN billing_periods ON billing_periods.id = billing_runs.billing_period_id
 """
+
+
+def _official_clearing(billable, splits) -> tuple[list[str], list[str]]:
+    """Energy clearing per quarter hour for the official split: (hard issues, notes).
+
+    Every LEG kWh received must have been supplied in the same quarter hour.
+    The grid operator rounds each meter's LEG share to 0.001 kWh on its own,
+    so the sums of a quarter hour may differ by up to half a digit per rounded
+    value (n values -> at most n x 0.0005 kWh). Within that it is rounding and
+    only noted; beyond it the data does not add up and blocks.
+    """
+    per_slot: dict[datetime, list] = {}
+    for r in billable:
+        split = splits.get((r.meter_id, r.direction, r.slot_start))
+        if split is None or not split.local_kwh:
+            continue
+        entry = per_slot.setdefault(r.slot_start, [Decimal(0), Decimal(0), 0])
+        amount = Decimal(str(split.local_kwh))
+        if r.direction == "import":
+            entry[0] += amount
+        else:
+            entry[1] += amount
+        entry[2] += 1
+    rounded_slots, rounded_kwh, off_slots, off_kwh = 0, Decimal(0), 0, Decimal(0)
+    for received, supplied, values in per_slot.values():
+        difference = received - supplied
+        if not difference:
+            continue
+        if abs(difference) <= _SDAT_RESOLUTION_KWH / 2 * values:
+            rounded_slots += 1
+            rounded_kwh += difference
+        else:
+            off_slots += 1
+            off_kwh += difference
+    hard = []
+    if off_slots:
+        hard.append(
+            f"Energie-Clearing stimmt nicht: in {off_slots} Viertelstunde(n) weicht die bezogene von der gelieferten "
+            f"LEG-Energie ab (zusammen {off_kwh:+.3f} kWh, mehr als Rundung)."
+        )
+    notes = []
+    if rounded_slots:
+        notes.append(
+            f"Energie-Clearing: in {rounded_slots} Viertelstunde(n) Rundungsdifferenz des Netzbetreibers "
+            f"(zusammen {rounded_kwh:+.3f} kWh). Abgerechnet werden die Werte des Netzbetreibers."
+        )
+    return hard, notes
 
 
 def _official_energy_outside_billing(readings, billable, splits) -> list[str]:

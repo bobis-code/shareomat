@@ -105,6 +105,20 @@ durch den Betreiber.
     VSE-Beispielen gilt es),
   * die Quittungspflicht (siehe `docs/development/Swisseldex-SDAT-Auftrag_2026-11-12.md`).
 
+## Nachtrag 18.11.2026: erste echte Lieferungen
+
+Die Entscheidung bleibt unverändert. Zu den Punkten «Needs verification»:
+
+* Total = LEG-Energie + Restenergie gilt in den echten EBL-Daten **nicht exakt**, weil jeder
+  Wert einzeln auf 0.001 kWh gerundet ist. Eine Abweichung um eine Stelle gilt seither als
+  Rundung (Hinweis, keine Sperre). Dasselbe gilt für das Energie-Clearing je Viertelstunde.
+  Grössere Abweichungen sperren weiterhin.
+* EBL verlangt in jeder Datei eine Quittung (`isIntelligibleCheckRequired`). Die Klärung
+  läuft.
+* Stornierungen: noch keine erhalten.
+
+Details: `docs/sdat_leg_import.md`, Abschnitt «Erste echte Lieferungen».
+
 ## Betroffene Dateien
 
 * `shareomat/core/pipeline/raw/sdat_ch.py` (Parser E66/E31)

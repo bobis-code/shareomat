@@ -126,6 +126,9 @@ class DataAvailability:
     hard_issues: list[str] = field(default_factory=list)
     # Meters with data that were deliberately not counted, with the reason.
     excluded: dict[str, str] = field(default_factory=dict)
+    # Information only, never blocking (e.g. rounding of the grid operator's
+    # values to 0.001 kWh). Not part of the stored quality issues.
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass

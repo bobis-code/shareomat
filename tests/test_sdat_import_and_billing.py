@@ -328,3 +328,113 @@ def test_default_source_ignores_sdat_data_completely(leg):
     after = billing.compute_billing_preview(db, runtime, DAY, DAY, persist_readings=False)
     assert billing._result_fingerprint(before) == billing._result_fingerprint(after)
     assert {i.participant_id: i.local_received_kwh for i in after.line_items}["test-load"] == Decimal("192.0000")
+
+
+# ── rounding of the grid operator (first real EBL deliveries, 11.2026) ──
+
+
+def _with_consumer(doc, energy_type, slot_values: dict[int, str]):
+    for s in doc.series:
+        if s.point == CONSUMER and s.energy_type == energy_type:
+            values = list(s.values)
+            for index, value in slot_values.items():
+                values[index] = value
+            s.values = values
+    return doc
+
+
+def test_total_off_by_one_digit_is_rounding_not_a_contradiction(leg):
+    db, runtime, tmp = leg
+    # 2.000 total vs 1.500 + 0.501: EBL rounds each value on its own.
+    _import(db, tmp, "e66.xml", _with_consumer(_official_day(), "residual", {3: "0.501", 40: "0.499", 77: "0.501"}))
+    _use_sdat_source(db)
+    preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
+    assert not any("Total ≠" in issue for issue in preview.availability.blocking_issues)
+    assert any(CONSUMER in note and "3 Viertelstunde(n)" in note and "Rundung" in note
+               for note in preview.availability.notes)
+    # The LEG energy is billed as delivered, the rounding changes nothing.
+    consumer = next(i for i in preview.line_items if i.participant_id == "test-load")
+    assert consumer.local_received_kwh == Decimal("144.0000")
+
+
+def test_total_off_by_two_digits_still_blocks(leg):
+    db, runtime, tmp = leg
+    _import(db, tmp, "e66.xml", _with_consumer(_official_day(), "residual", {3: "0.502"}))
+    _use_sdat_source(db)
+    hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
+    assert any("Total ≠ LEG-Energie + Restenergie" in issue for issue in hard)
+
+
+def test_clearing_rounding_per_quarter_hour_is_only_a_note(leg):
+    db, runtime, tmp = leg
+    doc = _with_consumer(_official_day(), "local", {5: "1.501", 6: "1.501"})
+    _with_consumer(doc, "residual", {5: "0.499", 6: "0.499"})
+    _import(db, tmp, "e66.xml", doc)
+    _use_sdat_source(db)
+    preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
+    assert not any("Energie-Clearing" in issue for issue in preview.availability.blocking_issues)
+    assert any("Energie-Clearing: in 2 Viertelstunde(n) Rundungsdifferenz" in note and "+0.002 kWh" in note
+               for note in preview.availability.notes)
+
+
+def test_clearing_difference_beyond_rounding_blocks(leg):
+    db, runtime, tmp = leg
+    doc = _with_consumer(_official_day(), "local", {5: "1.502"})
+    _with_consumer(doc, "residual", {5: "0.498"})
+    _import(db, tmp, "e66.xml", doc)
+    _use_sdat_source(db)
+    hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
+    assert any("Energie-Clearing stimmt nicht: in 1 Viertelstunde(n)" in issue for issue in hard)
+
+
+# ── month overview on the "Messdaten" page (read-only) ──
+
+
+def test_month_overview_per_participant_and_day(leg):
+    from shareomat.database.sdat_overview import month_overview
+
+    db, runtime, tmp = leg
+    assert not month_overview(db, date(2026, 12, 1)).has_data
+    _import(db, tmp, "e66.xml", _official_day())
+    overview = month_overview(db, date(2026, 12, 15))
+    assert overview.month == date(2026, 12, 1) and overview.files == 1
+    by_point = {p.metering_point_id: p for p in overview.points}
+    consumer, producer = by_point[CONSUMER], by_point[PRODUCER]
+    assert consumer.known and consumer.label.startswith("test-load")
+    assert (consumer.totals.consumption_total, consumer.totals.consumption_local) == (Decimal("192.000"), Decimal("144.000"))
+    assert (producer.totals.production_total, producer.totals.production_local) == (Decimal("288.000"), Decimal("144.000"))
+    [day] = overview.days
+    assert day.day == DAY and day.quarter_hours == 96 and (day.complete_points, day.points) == (2, 2)
+    assert overview.total.consumption_local == overview.total.production_local == Decimal("144.000")
+    assert not month_overview(db, date(2026, 11, 1)).has_data      # 01.12. local time is not in November
+
+
+def test_month_overview_marks_gaps_and_temporary_values(leg):
+    from shareomat.database.sdat_overview import month_overview
+
+    db, runtime, tmp = leg
+    doc = _official_day(conditions=["21"] * SLOTS)
+    for s in doc.series:
+        if s.point == PRODUCER:
+            s.values = s.values[:50]
+            s.conditions = s.conditions[:50]
+    _import(db, tmp, "e66.xml", doc)
+    [day] = month_overview(db, date(2026, 12, 1)).days
+    assert (day.complete_points, day.points) == (1, 2)
+    assert day.totals.temporary > 0
+
+
+def test_meter_data_page_shows_the_overview_and_escapes_labels(leg):
+    from shareomat.web.pages import meter_data
+    from shareomat.web.rendering import RequestContext
+
+    db, runtime, tmp = leg
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE participants SET label = '<b>Haus</b>' WHERE participant_id = 'test-load'")
+    _import(db, tmp, "e66.xml", _official_day())
+    html = meter_data.handle_get(RequestContext(method="GET", ingress_path="", query={"monat": "2026-12"}))
+    assert "Dezember 2026" in html and "192.000" in html and "Di 01.12.2026" in html
+    assert "&lt;b&gt;Haus&lt;/b&gt;" in html and "<b>Haus</b>" not in html
+    assert "bisherigen Messdateien" in html                  # billing still uses the files
+    empty = meter_data.handle_get(RequestContext(method="GET", ingress_path="", query={"monat": "2026-13"}))
+    assert "keine offiziellen Daten importiert" in empty      # invalid month -> current month, no data

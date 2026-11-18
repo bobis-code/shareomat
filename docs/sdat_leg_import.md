@@ -1195,6 +1195,45 @@ Keine vollständige XSD-Validierung: Dafür bräuchte es den kompletten VSE-, UN
 und eCH-Schemasatz und eine zusätzliche Bibliothek. Der Parser prüft jedes
 verwendete Element gegen Typ und Codeliste der XSDs und weist alles andere ab.
 
+### Erste echte Lieferungen (Stand 18.11.2026)
+
+Am 18.11.2026 lagen 7 Tageslieferungen E66 von EBL im Postfach (erstellt 12. bis
+18.11.2026). Ausgewertet nur lesend mit einer Kopie; die Dateien sind echte
+Messdaten und gehören nie ins Repository.
+
+| Nr. | Ergebnis |
+|---|---|
+| O1 | ✓ Anmeldung und TLS im Datenkanal funktionieren (Verbindungstest, Synchronisation) |
+| O2 | ✓ für E66: 7 Dateien empfangen, archiviert und importiert, Duplikaterkennung bestätigt. E31 kam noch keine |
+| O3 | Gilt **nicht exakt**: EBL rundet Total, LEG- und Restenergie je auf 0.001 kWh. In 5 von 2112 Viertelstunden weicht Total um −0.001 kWh ab, im Energie-Clearing in 2 Viertelstunden um +0.001 kWh. Darum ab 0.6.18 Toleranz von einer Stelle (siehe unten) |
+| O4 | offen, bisher nur Status 9 (Original) |
+| O5 | EBL setzt `isIntelligibleCheckRequired` in jeder Datei. Format und Weg der Quittung bei EBL/Swisseldex klären; Shareomat sendet weiterhin keine |
+| O6 | Tageslieferungen tragen **kein** Qualitätskennzeichen (weder 21 noch 56), obwohl sie nach VSE nicht plausibilisiert sind. Shareomat kann sie darum nicht von der Monatslieferung unterscheiden: erst nach der Monatslieferung abrechnen |
+| O7 | ✓ Add-on wird in Home Assistant gebaut (0.6.17 installiert) |
+
+Weitere Beobachtungen:
+
+* Kopf: E66, Status 9, Geschäftsgrund C40, Absender-Rolle MDR, Empfänger-Rolle CEM,
+  CommunityType CT01. Jede Tageslieferung enthält die **letzten 5 Tage**; zwischen den
+  Lieferungen hat sich kein Wert geändert.
+* Jeder Messpunkt hat beide Richtungen (Bezug und Einspeisung, je Total/LEG/Rest), auch ein
+  reiner Bezüger (Einspeisung dann 0).
+* Die ersten Lieferungen reichen bis 07.11.2026 zurück; 01. bis 06.11. fehlen. Die
+  Monatslieferung für November muss den ganzen Monat bringen.
+
+**Toleranz ab 0.6.18** (`shareomat/database/billing.py`, `_SDAT_RESOLUTION_KWH`):
+
+* Total − (LEG + Rest) von höchstens 0.001 kWh je Viertelstunde gilt als Rundung. Sie wird als
+  Hinweis gezählt und sperrt nicht. Abgerechnet wird ohnehin die LEG-Energie des
+  Netzbetreibers. Mehr sperrt weiterhin.
+* Energie-Clearing im SDAT-Modus je Viertelstunde: bezogene minus gelieferte LEG-Energie darf
+  höchstens 0.0005 kWh je gerundetem Wert abweichen. Das ist die Rundung, nur ein Hinweis. Mehr
+  sperrt.
+
+Die Seite «Messdaten» zeigt die offiziellen Werte pro Monat, pro Teilnehmer und pro Tag, mit
+Vollständigkeit und Qualitätskennzeichen. Sie verwendet dieselben Werte wie die Abrechnung
+(neueste Lieferung je Viertelstunde).
+
 ---
 
 # 33. Quellen / technische Referenzen

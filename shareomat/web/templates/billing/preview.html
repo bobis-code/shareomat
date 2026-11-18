@@ -12,6 +12,12 @@
   </div>
 </div>
 {% endif %}
+{% if preview.availability.notes %}
+<div class="card">
+  <strong>Hinweise (sperren die Freigabe nicht):</strong>
+  <ul style="margin:.3rem 0 0 1rem;padding:0">{% for n in preview.availability.notes %}<li>ℹ️ {{ n }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
 
 <div class="card">
   <h2>2. Verfügbare Messdaten</h2>

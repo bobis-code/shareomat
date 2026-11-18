@@ -470,3 +470,7 @@ textarea.mail-body { width: 100%; padding: 8px 10px; border: 1px solid #ddd; bor
 .mail-preview-body { white-space: pre-wrap; word-break: break-word; font-size: .9rem; line-height: 1.5; }
 .mail-preview-attachment { margin-top: 10px; padding-top: 8px; border-top: 1px dashed #e5e7eb; }
 @media (max-width: 900px) { .mail-layout { grid-template-columns: 1fr; } }
+
+/* Messdaten: official SDAT month overview */
+.sdat-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sdat-table tfoot th { border-top: 2px solid #e5e7eb; }
