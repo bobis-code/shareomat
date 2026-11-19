@@ -45,6 +45,11 @@
     <ul>{% for i in detail.run.quality_issues %}<li>{{ i }}</li>{% endfor %}</ul></div>
   {% endif %}
 
+  {% if detail.run.notes %}
+  <div class="ts" style="margin-top:8px"><strong>Hinweise zur Berechnung</strong> (mit dem Lauf gespeichert):
+    <ul style="margin:.3rem 0 0 1rem;padding:0">{% for n in detail.run.notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+  {% endif %}
+
   {% if detail.run.status == 'draft' %}
   <div class="actions-row">
     <form method="post" action="{{ url_for('billing', suffix='/' + detail.run.id|string + '/release') }}">

@@ -26,7 +26,9 @@ Notes:
 
     Data is expected for a metering point only on days it belongs to the
     LEG: its participant's membership covers the day (joined, not left, not
-    before the grid operator's effective start) and the meter is valid then -
+    before the grid operator's effective start), the day is not before the
+    LEG start the grid operator confirmed (Gemeinschaft) and the meter is
+    valid then -
     the same rule as the billing (billing_eligibility). A participant who
     joins later is not "incomplete" before that day.
 
@@ -48,6 +50,7 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from shareomat.database.community import get_community
 from shareomat.database.memberships import list_memberships
 from shareomat.database.meters import list_meters
 from shareomat.database.participants import list_participants
@@ -279,6 +282,8 @@ def _in_leg_rules(db_path: Path):
     for membership in list_memberships(db_path):
         memberships.setdefault(membership.participant_id, []).append(membership)
     meters = {meter.meter_id.strip().upper(): meter for meter in list_meters(db_path)}
+    community = get_community(db_path)
+    leg_start = community.vnb_confirmed_start if community else None     # same hard lower bound as billing
     cache: dict[tuple[str, date], bool] = {}
 
     def in_leg(point: str, day: date) -> bool:
@@ -287,7 +292,7 @@ def _in_leg_rules(db_path: Path):
             meter = meters.get(point)
             valid = (meter is not None and (meter.valid_from is None or day >= meter.valid_from)
                      and (meter.valid_until is None or day <= meter.valid_until))
-            cache[key] = valid and any(
+            cache[key] = valid and (leg_start is None or day >= leg_start) and any(
                 m.covers(day) and (m.effective_start_at is None or day >= m.effective_start_at)
                 for m in memberships.get(meter.participant_id, []))
         return cache[key]

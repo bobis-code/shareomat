@@ -66,10 +66,20 @@ def leg(tmp_path):
     return db, runtime, tmp_path
 
 
+MONTH_START = datetime(2026, 11, 30, 23, 0, tzinfo=timezone.utc)      # 01.12.2026 00:00 local
+MONTH_END = datetime(2026, 12, 31, 23, 0, tzinfo=timezone.utc)        # 01.01.2027 00:00 local
+
+
 def _official_day(consumer_local="1.500", producer_local="1.500", conditions=None, **kwargs) -> Document:
-    """Consumer draws 2 kWh, producer feeds 3 kWh per quarter hour; EBL shares 1.5 kWh (not min(2, 3) = 2)."""
+    """Consumer draws 2 kWh, producer feeds 3 kWh per quarter hour; EBL shares 1.5 kWh (not min(2, 3) = 2).
+
+    By default the header's report period is the whole month, i.e. it stands for the grid operator's
+    monthly delivery (billing needs one, 0.6.22); pass report_start/report_end for a daily delivery.
+    """
     series = leg_day(["2.000"] * SLOTS, [consumer_local] * SLOTS, ["3.000"] * SLOTS, [producer_local] * SLOTS,
                      conditions=conditions)
+    kwargs.setdefault("report_start", MONTH_START)
+    kwargs.setdefault("report_end", MONTH_END)
     return Document(series=series, **kwargs)
 
 

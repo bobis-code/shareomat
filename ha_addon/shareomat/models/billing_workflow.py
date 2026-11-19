@@ -52,11 +52,15 @@ class BillingLineItem:
     grid_amount_chf: Decimal           # informational only — never added to local_amount_chf
     local_supplied_kwh: Decimal = Decimal(0)
     grid_export_kwh: Decimal = Decimal(0)
-    producer_credit_chf: Decimal = Decimal(0)   # Gutschrift for LEG energy supplied (unrounded, 4 dp)
-    charge_chf: Decimal = Decimal(0)            # local_amount_chf rounded to 0.01 — the invoice line
-    credit_chf: Decimal = Decimal(0)            # producer_credit_chf rounded to 0.01 — the credit line
+    producer_credit_chf: Decimal = Decimal(0)   # Gutschrift for LEG energy supplied (exact amount shown to 4 dp)
+    charge_chf: Decimal = Decimal(0)            # the exact amount rounded once to 0.01 — the invoice line
+    credit_chf: Decimal = Decimal(0)            # the exact credit rounded once to 0.01 — the credit line
     net_amount_chf: Decimal = Decimal(0)        # charge - credit: > 0 to pay, < 0 to be paid out
     id: int | None = None
+    # Exact, unrounded amounts of a fresh computation (not stored): charge/credit are rounded from
+    # these, never from the 4-dp values above (that would round twice). None for a stored line.
+    local_amount_exact_chf: Decimal | None = None
+    producer_credit_exact_chf: Decimal | None = None
 
 
 @dataclass
@@ -92,6 +96,7 @@ class BillingRun:
     total_producer_credit_chf: Decimal = Decimal(0)
     quality_issues: list[str] = field(default_factory=list)   # all (hard + soft)
     hard_issues: list[str] = field(default_factory=list)      # never releasable
+    notes: list[str] = field(default_factory=list)            # never blocking, kept with the run (rounding etc.)
     release_override_reason: str = ""
     result_fingerprint: str = ""
     period_start: date | None = None  # joined in from billing_periods for display convenience

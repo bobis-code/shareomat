@@ -139,6 +139,19 @@ def test_a_participant_joining_later_is_not_incomplete_before(leg):
     assert "nicht in der LEG" in html and "kein Wert geliefert" not in html
 
 
+def test_confirmed_leg_start_is_respected_like_in_billing(leg):
+    from dataclasses import replace
+    from shareomat.database.community import get_community, save_community
+
+    db, _, tmp = leg
+    save_community(db, replace(get_community(db), vnb_confirmed_start=NEXT_DAY))
+    _import(db, tmp, "e66.xml", _official_day())
+    sums = period_sums(db, DAY, NEXT_DAY)
+    assert sums.total_check.expected == 192                               # delivered values still count
+    values = point_values(db, CONSUMER, DAY - timedelta(days=1), DAY, today=NEXT_DAY)
+    assert not any(r.member for r in values.rows) and values.total_check.expected == 0
+
+
 def test_columns_fed_in_left_drawn_right_and_css_url_versioned(leg):
     db, _, tmp = leg
     _import(db, tmp, "e66.xml", _official_day())

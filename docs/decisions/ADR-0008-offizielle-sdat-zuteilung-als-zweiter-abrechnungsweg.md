@@ -119,6 +119,38 @@ Die Entscheidung bleibt unverändert. Zu den Punkten «Needs verification»:
 
 Details: `docs/sdat_leg_import.md`, Abschnitt «Erste echte Lieferungen».
 
+## Nachtrag 20.11.2026: Prüfung der Abrechnung (0.6.22)
+
+Die Entscheidung bleibt unverändert: Die Aufteilung des Netzbetreibers wird übernommen, nicht
+neu gerechnet. Nachgerechnet mit den echten Daten 07.–17.11.2026: Die LEG-Werte von EBL
+entsprechen in allen 2112 Werten Art. 19g Abs. 4 StromVV (kleinere Summe je Viertelstunde,
+verteilt nach Anteil am Bezug), mit höchstens 0.0005 kWh Rundung. Ein Prosumer erhält auch
+auf seinen eigenen Bezug LEG-Energie (VSE BD LEG 2025 V2, Kap. 5 (1): innerhalb einer
+Viertelstunde wird nicht saldiert).
+
+Nach einer externen Prüfung (zweite KI) geändert:
+
+* **Abrechnung nur mit der Monatslieferung.** Die Tageslieferungen von EBL sind nicht
+  plausibilisiert, tragen aber kein Qualitätskennzeichen (O6). Freigegeben wird darum nur, wenn
+  eine Lieferung den ganzen Kalendermonat abdeckt (Berichtszeitraum des Kopfs). Ein Wert, der nur
+  in Tageslieferungen steht, sperrt. Eine spätere Tageslieferung, die von der Monatslieferung
+  abweicht, braucht eine schriftliche Begründung.
+  Assumption / needs verification: Die Monatslieferung von EBL hat einen Berichtszeitraum über
+  den ganzen Monat. Prüfen an der ersten Monatslieferung (um den 5. Arbeitstag im Dezember
+  2026).
+* **Vollständig oder gar nicht.** Mit offiziellen Daten sperren fehlende Viertelstunden eines
+  abrechnungsberechtigten Messpunkts und Tage ohne gültigen LEG-Preis hart, statt mit
+  Begründung freigegeben zu werden.
+* **Geld exakt.** Die Beträge werden in `compute_billing()` mit Decimal gerechnet und erst für den
+  Beleg einmal auf Rappen gerundet. Vorher wurden sie auf 4 Stellen und dann auf Rappen
+  gerundet: 0.045 kWh × 0.111 CHF = 0.004995 CHF ergab 0.01 statt 0.00 CHF.
+* **Hinweise bleiben beim Lauf.** Rundungshinweise (z. B. Energie-Clearing) werden mit dem
+  Abrechnungslauf gespeichert und angezeigt.
+
+Nicht geändert, bewusst: Die Verwaltungsgebühr gilt auch auf LEG-Energie, die ein Prosumer
+rechnerisch von sich selbst bezieht. Der Vertrag sieht das vor (§ 3.2: für beide Rollen
+gelten 3.1 und 3.2; § 3.4: getrennt ausweisen, dann verrechnen).
+
 ## Betroffene Dateien
 
 * `shareomat/core/pipeline/raw/sdat_ch.py` (Parser E66/E31)
@@ -126,7 +158,8 @@ Details: `docs/sdat_leg_import.md`, Abschnitt «Erste echte Lieferungen».
 * `shareomat/database/sdat_store.py`, `shareomat/database/sqlite.py` (Schema 17, Backup vor
   Migration)
 * `shareomat/core/pipeline/official_allocation.py`
-* `shareomat/database/billing.py` (Weg 2, Sperren, Korrekturhinweis)
+* `shareomat/database/billing.py` (Weg 2, Sperren, Korrekturhinweis, Monatslieferung, Rappenrundung)
+* `shareomat/core/pipeline/leg_billing.py` (exakte Beträge)
 * `main.py` (Verdrahtung Import und Hinweis)
 
 ## Überprüfung

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal
 
 
 @dataclass
@@ -83,6 +84,12 @@ class BillingRecord:
     # consumer). Grid feed-in outside the LEG is still settled directly
     # between the participant and the grid operator, not here.
     producer_payout_chf: float = 0.0
+
+    # The same two amounts exactly (Decimal, unrounded) - the basis of
+    # invoices and credits, rounded once to the cent there. None only for
+    # records built elsewhere (e.g. tests) without them.
+    local_cost_exact_chf: Decimal | None = None
+    producer_payout_exact_chf: Decimal | None = None
 
     # Audit
     slot_count: int = 0

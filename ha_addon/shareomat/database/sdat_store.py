@@ -222,12 +222,14 @@ def store_document(db_path: Path, *, sha256: str, file_name: str, origin: str, d
 
 
 def load_official_values(db_path: Path, start: datetime, end: datetime, *, document_type: str = "E66",
-                         metering_point_ids: Iterable[str] | None = None) -> OfficialData:
+                         metering_point_ids: Iterable[str] | None = None,
+                         documents: Iterable[str] | None = None) -> OfficialData:
     """Effective values per (metering point | grid area, direction, energy type, quarter hour) in [start, end).
 
     Key[0] is the metering point for E66 and the grid area EIC for E31.
     Only documents of the established community are used. `metering_point_ids`
-    (E66 only) limits the result to these points; the rule per value is the same.
+    (E66 only) limits the result to these points; `documents` (SHA-256) to
+    these deliveries. The rule per value is the same.
     """
     data = OfficialData(community_id=established_community_id(db_path))
     if not data.community_id:
@@ -238,6 +240,12 @@ def load_official_values(db_path: Path, start: datetime, end: datetime, *, docum
         if not point_params:
             return data
         point_filter = f" AND UPPER(s.metering_point_id) IN ({', '.join('?' * len(point_params))})"
+    if documents is not None:
+        document_params = sorted(set(documents))
+        if not document_params:
+            return data
+        point_filter += f" AND d.sha256 IN ({', '.join('?' * len(document_params))})"
+        point_params = [*point_params, *document_params]
     with connect(db_path) as conn:
         rows = conn.execute(
             """
@@ -272,6 +280,32 @@ def load_official_values(db_path: Path, start: datetime, end: datetime, *, docum
             data.values[key] = entry[0]
             data.sources[entry[0].sha256] = entry[1]
     return data
+
+
+def covering_documents(db_path: Path, start: datetime, end: datetime, *, document_type: str = "E66") -> dict[str, str]:
+    """Imported deliveries of this LEG whose report period covers all of [start, end): SHA-256 -> file name.
+
+    Used to tell the grid operator's monthly delivery from its daily ones,
+    which carry no quality code (O6 in docs/sdat_leg_import.md) and each
+    cover only the last 5 days.
+    Assumption / needs verification with the first real EBL monthly delivery
+    (around the 5th working day of December 2026): its ReportPeriod covers the
+    whole month.
+    """
+    community_id = established_community_id(db_path)
+    if not community_id:
+        return {}
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT sha256, file_name FROM sdat_documents
+            WHERE outcome = ? AND document_type = ? AND community_id = ? AND status != ?
+              AND report_start IS NOT NULL AND report_end IS NOT NULL
+              AND report_start <= ? AND report_end >= ?
+            """,
+            (OUTCOME_IMPORTED, document_type, community_id, _STATUS_CANCELLATION, _iso(start), _iso(end)),
+        ).fetchall()
+    return {row["sha256"]: row["file_name"] for row in rows}
 
 
 def official_data_end(db_path: Path) -> datetime | None:

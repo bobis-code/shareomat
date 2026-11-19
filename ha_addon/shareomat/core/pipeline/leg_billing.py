@@ -10,8 +10,15 @@ Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
-    No rounding is applied here. Full float precision is preserved.
-    Rounding to CHF display precision happens in leg_report exclusively.
+    No rounding is applied here. The money amounts (local cost, producer
+    payout) are computed exactly in Decimal: every quarter-hour kWh value is
+    taken over via its shortest string form (an official SDAT value of
+    0.123 kWh stays exactly 0.123) and multiplied by the Decimal tariff
+    rates. BillingRecord carries these exact amounts (…_exact_chf) for the
+    invoices, which round once to the cent (shareomat.database.billing);
+    the float fields are the same amounts for reports and sensors.
+    Before 20.11.2026 the amounts were float and rounded to 4 decimals
+    first, which could shift a cent (0.004995 -> 0.0050 -> 0.01).
 
     Both sides are aggregated:
         Import side: local_received_kwh, grid_import_kwh (basis for cost)
@@ -40,6 +47,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from shareomat.config import LegConfig, ProcessingConfig
@@ -58,6 +66,11 @@ def _participant_label(config: LegConfig, participant_id: str) -> str:
         if p.participant_id == participant_id:
             return p.label
     return participant_id
+
+
+def _exact(kwh: float) -> Decimal:
+    """A kWh float as Decimal via its shortest string form - never Decimal(float) (AGENTS.md rule 10)."""
+    return Decimal(repr(kwh))
 
 
 def _participant_meter_ids(config: LegConfig, participant_id: str) -> list[str]:
@@ -92,6 +105,9 @@ def compute_billing(
     totals_local_supplied_ht: dict[str, float] = {}
     totals_local_supplied_nt: dict[str, float] = {}
     totals_grid_export: dict[str, float] = {}
+    # The same LEG quantities in exact Decimal: the basis of the money amounts.
+    exact_received: dict[tuple[str, bool], Decimal] = {}     # (participant, peak) -> kWh
+    exact_supplied: dict[tuple[str, bool], Decimal] = {}
 
     for result in results:
         peak = True
@@ -109,12 +125,14 @@ def compute_billing(
         for meter_id, kwh in result.meter_local_received_kwh.items():
             pid = meter_to_participant.get(meter_id, meter_id)
             received_bucket[pid] = received_bucket.get(pid, 0.0) + kwh
+            exact_received[(pid, peak)] = exact_received.get((pid, peak), Decimal(0)) + _exact(kwh)
         for meter_id, kwh in result.meter_grid_import_kwh.items():
             pid = meter_to_participant.get(meter_id, meter_id)
             totals_grid_import[pid] = totals_grid_import.get(pid, 0.0) + kwh
         for meter_id, kwh in result.meter_local_supplied_kwh.items():
             pid = meter_to_participant.get(meter_id, meter_id)
             supplied_bucket[pid] = supplied_bucket.get(pid, 0.0) + kwh
+            exact_supplied[(pid, peak)] = exact_supplied.get((pid, peak), Decimal(0)) + _exact(kwh)
         for meter_id, kwh in result.meter_grid_export_kwh.items():
             pid = meter_to_participant.get(meter_id, meter_id)
             totals_grid_export[pid] = totals_grid_export.get(pid, 0.0) + kwh
@@ -123,14 +141,14 @@ def compute_billing(
     # settlement math itself stays float, matching every other kWh/CHF value here.
     # NT rates fall back to the HT rate when unset (flat mode, or an HT/NT
     # tariff that only bothered to set the HT rate) — never a silent 0.
-    local_rate_ht = float(config.tariff.local_rate_chf_kwh)
+    local_rate_ht = config.tariff.local_rate_chf_kwh
     local_rate_nt = (
-        float(config.tariff.local_rate_nt_chf_kwh)
+        config.tariff.local_rate_nt_chf_kwh
         if config.tariff.local_rate_nt_chf_kwh is not None else local_rate_ht
     )
-    feed_in_rate_ht = float(config.tariff.feed_in_rate_chf_kwh)
+    feed_in_rate_ht = config.tariff.feed_in_rate_chf_kwh
     feed_in_rate_nt = (
-        float(config.tariff.feed_in_rate_nt_chf_kwh)
+        config.tariff.feed_in_rate_nt_chf_kwh
         if config.tariff.feed_in_rate_nt_chf_kwh is not None else feed_in_rate_ht
     )
     grid_rate = float(config.tariff.grid_rate_chf_kwh)
@@ -152,9 +170,13 @@ def compute_billing(
         local_supplied = local_supplied_ht + local_supplied_nt
         grid_export = totals_grid_export.get(pid, 0.0)
 
-        local_cost = local_received_ht * local_rate_ht + local_received_nt * local_rate_nt
+        local_cost_exact = (exact_received.get((pid, True), Decimal(0)) * local_rate_ht
+                            + exact_received.get((pid, False), Decimal(0)) * local_rate_nt)
+        payout_exact = (exact_supplied.get((pid, True), Decimal(0)) * feed_in_rate_ht
+                        + exact_supplied.get((pid, False), Decimal(0)) * feed_in_rate_nt)
+        local_cost = float(local_cost_exact)
         grid_cost = grid_import * grid_rate
-        producer_payout = local_supplied_ht * feed_in_rate_ht + local_supplied_nt * feed_in_rate_nt
+        producer_payout = float(payout_exact)
 
         records.append(BillingRecord(
             participant_id=pid,
@@ -168,12 +190,14 @@ def compute_billing(
             total_import_kwh=local_received + grid_import,
             local_received_kwh=local_received,
             grid_import_kwh=grid_import,
-            local_rate_chf=local_rate_ht,
+            local_rate_chf=float(local_rate_ht),
             grid_rate_chf=grid_rate,
             local_cost_chf=local_cost,
             grid_cost_chf=grid_cost,
             total_cost_chf=local_cost + grid_cost,
             producer_payout_chf=producer_payout,
+            local_cost_exact_chf=local_cost_exact,
+            producer_payout_exact_chf=payout_exact,
             slot_count=len(results),
             source_files=list(source_files) if source_files else [],
             created_at=now,

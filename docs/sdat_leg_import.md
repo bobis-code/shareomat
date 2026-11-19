@@ -1221,6 +1221,18 @@ Weitere Beobachtungen:
 * Die ersten Lieferungen reichen bis 07.11.2026 zurück; 01. bis 06.11. fehlen. Die
   Monatslieferung für November muss den ganzen Monat bringen.
 
+**Abrechnung ab 0.6.22** (Prüfung vom 20.11.2026, `shareomat/database/billing.py`,
+`_official_monthly_basis`):
+
+* Freigegeben wird nur mit einer Lieferung, deren Berichtszeitraum den ganzen Kalendermonat
+  abdeckt (Monatslieferung). Tageslieferungen allein sperren hart.
+* Ein abgerechneter Wert, der nur in Tageslieferungen steht, sperrt hart. Weicht eine spätere
+  Tageslieferung von der Monatslieferung ab, braucht die Freigabe eine Begründung.
+* Fehlende Viertelstunden eines abrechnungsberechtigten Messpunkts und Tage ohne LEG-Preis
+  sperren hart.
+* Assumption / needs verification: Berichtszeitraum der Monatslieferung = ganzer Monat. Prüfen
+  an der ersten Monatslieferung (Dezember 2026).
+
 **Toleranz ab 0.6.18** (`shareomat/database/billing.py`, `_SDAT_RESOLUTION_KWH`):
 
 * Total − (LEG + Rest) von höchstens 0.001 kWh je Viertelstunde gilt als Rundung. Sie wird als

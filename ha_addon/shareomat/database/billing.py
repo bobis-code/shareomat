@@ -94,6 +94,7 @@ class BillingWorkflowError(Exception):
 
 _TZ = ZoneInfo(os.environ.get("SHAREOMAT_TZ", "Europe/Zurich"))
 _CHF_CENT = Decimal("0.01")
+_FOUR_PLACES = Decimal("0.0001")      # how exact amounts are shown and stored (never rounded further)
 
 
 def _period_bounds(period_start: date, period_end: date) -> tuple[datetime, datetime]:
@@ -126,6 +127,15 @@ def _round4(value: float) -> Decimal:
     float's binary artifacts (Decimal(0.1) != Decimal("0.1")).
     """
     return Decimal(str(round(value, 4)))
+
+
+def _shown4(exact: Decimal) -> Decimal:
+    """An exact amount to 4 places for display and storage, in the textual form _round4 always gave
+    (0.44, 0.0 - not 0.4400): result fingerprints of released runs compare these strings.
+
+    Only for showing; invoices round the exact amount once (_allocate_cents).
+    """
+    return Decimal(repr(float(exact.quantize(_FOUR_PLACES, rounding=ROUND_HALF_UP))))
 
 
 def _chf(value: Decimal) -> Decimal:
@@ -167,8 +177,15 @@ def _largest_remainder(amounts: list[Decimal]) -> list[Decimal]:
     return result
 
 
+def _exact_or_shown(exact: Decimal | None, shown: Decimal) -> Decimal:
+    return exact if exact is not None else shown
+
+
 def _allocate_cents(items: list[BillingLineItem]) -> None:
     """Set charge/credit/net per participant so the rounded totals reconcile.
+
+    Rounds the exact amounts once (review 20.11.2026: rounding the 4-dp
+    amount again could add a cent, 0.004995 -> 0.0050 -> 0.01).
 
     Σ charges is the commercially rounded total of all consumer amounts,
     Σ credits the rounded total of all producer amounts — so with equal
@@ -176,8 +193,8 @@ def _allocate_cents(items: list[BillingLineItem]) -> None:
     difference is the (rounded) agreed fee. Prosumers keep both lines and
     are netted.
     """
-    charges = _largest_remainder([i.local_amount_chf for i in items])
-    credits = _largest_remainder([i.producer_credit_chf for i in items])
+    charges = _largest_remainder([_exact_or_shown(i.local_amount_exact_chf, i.local_amount_chf) for i in items])
+    credits = _largest_remainder([_exact_or_shown(i.producer_credit_exact_chf, i.producer_credit_chf) for i in items])
     for item, charge, credit in zip(items, charges, credits):
         item.charge_chf, item.credit_chf, item.net_amount_chf = charge, credit, charge - credit
 
@@ -485,9 +502,14 @@ def compute_billing_preview(
             if present == 0:
                 hard.append(f"Messpunkt {meter_id}: keine Messwerte für {label} im ganzen Zeitraum.")
             elif present < expected:
-                soft.append(f"Messpunkt {meter_id} ({label}): {expected - present} von {expected} Viertelstunden ohne Messwert.")
+                # Official data: a final month must be complete - a missing value is never billed as 0
+                # and can't be waved through with a written reason (review 20.11.2026).
+                (hard if official else soft).append(
+                    f"Messpunkt {meter_id} ({label}): {expected - present} von {expected} Viertelstunden ohne Messwert."
+                    + (" Beim Netzbetreiber nachfordern oder Beitritt / bestätigten LEG-Start prüfen." if official else "")
+                )
     if days_without_tariff:
-        soft.append(
+        (hard if official else soft).append(
             f"Kein gültiger LEG-Preis für {len(days_without_tariff)} Tag(e) ab "
             f"{days_without_tariff[0].strftime('%d.%m.%Y')} — diese Tage wurden nicht abgerechnet."
         )
@@ -525,23 +547,23 @@ def compute_billing_preview(
         records = compute_billing(match_results, config, start_dt, end_dt, source_files=[x.filename for x in sources])
         for rec in records:
             acc = totals.setdefault(rec.participant_id, {
-                "label": rec.label, "meter_ids": set(), "local_received": 0.0, "local_cost": 0.0,
-                "grid_import": 0.0, "grid_cost": 0.0, "local_supplied": 0.0, "grid_export": 0.0, "payout": 0.0,
+                "label": rec.label, "meter_ids": set(), "local_received": 0.0, "local_cost": Decimal(0),
+                "grid_import": 0.0, "grid_cost": 0.0, "local_supplied": 0.0, "grid_export": 0.0, "payout": Decimal(0),
             })
             acc["meter_ids"].update(rec.meter_ids)
             acc["local_received"] += rec.local_received_kwh
-            acc["local_cost"] += rec.local_cost_chf
+            acc["local_cost"] += rec.local_cost_exact_chf          # exact Decimal, rounded once below
             acc["grid_import"] += rec.grid_import_kwh
             acc["grid_cost"] += rec.grid_cost_chf
             acc["local_supplied"] += rec.local_supplied_kwh
             acc["grid_export"] += rec.grid_export_kwh
-            acc["payout"] += rec.producer_payout_chf
+            acc["payout"] += rec.producer_payout_exact_chf
 
     line_items: list[BillingLineItem] = []
     for pid in sorted(totals, key=lambda k: totals[k]["label"]):
         acc = totals[pid]
-        local_amount = _round4(acc["local_cost"])
-        producer_credit = _round4(acc["payout"])
+        local_amount = _shown4(acc["local_cost"])
+        producer_credit = _shown4(acc["payout"])
         charge, credit = Decimal(0), Decimal(0)  # set by _allocate_cents below
         line_items.append(BillingLineItem(
             participant_id=pid,
@@ -557,6 +579,8 @@ def compute_billing_preview(
             charge_chf=charge,
             credit_chf=credit,
             net_amount_chf=charge - credit,
+            local_amount_exact_chf=acc["local_cost"],
+            producer_credit_exact_chf=acc["payout"],
         ))
     _allocate_cents(line_items)
 
@@ -564,6 +588,9 @@ def compute_billing_preview(
     received_total = sum(acc["local_received"] for acc in totals.values())
     supplied_total = sum(acc["local_supplied"] for acc in totals.values())
     if official:
+        basis_hard, basis_soft = _official_monthly_basis(db_path, period_start, period_end, billable)
+        hard.extend(basis_hard)
+        soft.extend(basis_soft)
         hard.extend(_official_energy_outside_billing(readings, billable, splits))
         clearing_hard, clearing_notes = _official_clearing(billable, splits)
         hard.extend(clearing_hard)
@@ -672,6 +699,74 @@ def _official_clearing(billable, splits) -> tuple[list[str], list[str]]:
     return hard, notes
 
 
+def _month_parts(period_start: date, period_end: date) -> list[tuple[date, date]]:
+    """The period cut at month ends: [(first day, last day), ...] (local days)."""
+    parts = []
+    day = period_start
+    while day <= period_end:
+        month_end = date(day.year + (day.month == 12), day.month % 12 + 1, 1) - timedelta(days=1)
+        last = min(month_end, period_end)
+        parts.append((day, last))
+        day = last + timedelta(days=1)
+    return parts
+
+
+def _official_monthly_basis(db_path: Path, period_start: date, period_end: date, billable) -> tuple[list[str], list[str]]:
+    """(hard, soft): bill official data only from the grid operator's monthly delivery.
+
+    The grid operator sends non-plausibilised values daily (information only)
+    and the plausibilised month by the 5th working day (VSE SDAT-CH process
+    1.12). EBL's daily deliveries carry no quality code (O6), so the month is
+    recognised by a delivery whose report period covers the whole calendar
+    month (sdat_store.covering_documents - assumption until the first real
+    monthly delivery). Hard: no such delivery, or a billed value only exists in daily
+    deliveries. Soft: a later daily delivery differs from the monthly value
+    (the newer value would be billed - clarify with the grid operator).
+    """
+    from shareomat.database.sdat_store import covering_documents, load_official_values
+
+    direction_of = {"import": "consumption", "export": "production"}
+    wanted = {(r.meter_id.strip().upper(), direction_of[r.direction], r.slot_start) for r in billable}
+    hard: list[str] = []
+    soft: list[str] = []
+    for first, last in _month_parts(period_start, period_end):
+        start_dt, end_dt = _period_bounds(first, last)
+        if not any(start_dt <= slot < end_dt for _, _, slot in wanted):
+            continue
+        span = f"{first.strftime('%d.%m.')}–{last.strftime('%d.%m.%Y')}"
+        # The delivery must cover the whole calendar month - a daily one (5 days) never does,
+        # even when the billing period itself is only a few days long.
+        month_last = date(first.year + (first.month == 12), first.month % 12 + 1, 1) - timedelta(days=1)
+        covering = covering_documents(db_path, *_period_bounds(first.replace(day=1), month_last))
+        if not covering:
+            hard.append(
+                f"Datenquelle SDAT: Für {first.strftime('%m.%Y')} liegt noch keine Monatslieferung des "
+                "Netzbetreibers vor (eine Lieferung für den ganzen Monat, um den 5. Arbeitstag des Folgemonats). "
+                "Tageslieferungen sind nicht plausibilisiert und genügen für die Abrechnung nicht."
+            )
+            continue
+        effective = load_official_values(db_path, start_dt, end_dt).values
+        monthly = load_official_values(db_path, start_dt, end_dt, documents=covering).values
+        only_daily: dict[str, int] = {}
+        differing = 0
+        for key, value in effective.items():
+            point, direction, _, slot = key
+            if (point.strip().upper(), direction, slot) not in wanted or value.sha256 in covering:
+                continue
+            base = monthly.get(key)
+            if base is None:
+                only_daily[point] = only_daily.get(point, 0) + 1
+            elif base.value != value.value:
+                differing += 1
+        for point, count in sorted(only_daily.items()):
+            hard.append(f"Messpunkt {point}: {count} Wert(e) in {span} nur aus Tageslieferungen, nicht in der "
+                        "Monatslieferung des Netzbetreibers.")
+        if differing:
+            soft.append(f"{differing} Wert(e) in {span} aus einer Tageslieferung, die nach der Monatslieferung kam "
+                        "und von ihr abweicht. Abgerechnet würde der neuere Wert; beim Netzbetreiber klären.")
+    return hard, soft
+
+
 def _official_energy_outside_billing(readings, billable, splits) -> list[str]:
     """LEG energy the grid operator allocated to meters Shareomat does not bill on that day.
 
@@ -751,6 +846,12 @@ def _load_issues(raw: str) -> tuple[list[str], list[str]]:
     return data.get("hard", []), data.get("soft", [])
 
 
+def _load_notes(raw: str) -> list[str]:
+    """Notes (never blocking) stored with the run; runs saved before 0.6.22 have none."""
+    data = json.loads(raw) if raw else {}
+    return data.get("notes", []) if isinstance(data, dict) else []
+
+
 def _row_to_run(row) -> BillingRun:
     return BillingRun(
         id=row["id"],
@@ -773,6 +874,7 @@ def _row_to_run(row) -> BillingRun:
         total_producer_credit_chf=Decimal(row["total_producer_credit_chf"]),
         quality_issues=_load_issues(row["quality_issues"])[0] + _load_issues(row["quality_issues"])[1],
         hard_issues=_load_issues(row["quality_issues"])[0],
+        notes=_load_notes(row["quality_issues"]),
         result_fingerprint=row["result_fingerprint"],
         release_override_reason=row["release_override_reason"],
         period_start=str_to_date(row["bp_start"]),
@@ -877,6 +979,7 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
                         "hard": preview.availability.hard_issues,
                         "soft": [i for i in preview.availability.blocking_issues
                                  if i not in preview.availability.hard_issues],
+                        "notes": preview.availability.notes,     # e.g. rounding of the grid operator
                     }, ensure_ascii=False),
                     _result_fingerprint(preview),
                     now, now, now,
