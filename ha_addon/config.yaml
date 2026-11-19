@@ -6,6 +6,9 @@ url: https://github.com/bobis-code/shareomat
 startup: application
 timeout: 30
 boot: auto
+# Home Assistant stops Shareomat while it backs up the add-on, so /data/shareomat.db
+# is never copied in the middle of a write (hot would copy the running database).
+backup: cold
 arch:
   - aarch64
   - amd64

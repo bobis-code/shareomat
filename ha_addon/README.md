@@ -146,6 +146,21 @@ the whole add-on, use a Home Assistant backup (it contains `/data`). The
 Shareomat backup is the copy to file away, inspect and keep outside Home
 Assistant.
 
+### Home Assistant backups
+
+The add-on is backed up **cold** (`backup: cold` in `config.yaml`): Home
+Assistant stops Shareomat for the duration of its backup, so
+`/data/shareomat.db` is never copied in the middle of a write. For
+Shareomat this is the same as a normal add-on stop.
+
+For daily backups set up Home Assistant's automatic backup (Settings →
+System → Backups) with Shareomat among the apps and a location outside the
+machine (external disk or network storage with usage "Backup"). Home
+Assistant backups are encrypted by default: keep the emergency kit (encryption key)
+and the login outside the Home Assistant machine, otherwise a backup can't
+be restored on new hardware. `/share/shareomat/backups/` is only in a Home
+Assistant backup if the share folder is selected.
+
 Drop meter data files into `/config/shareomat/inbox/` via SSH or the
 HA File Editor add-on. Shareomat scans inbox on each startup and on
 every `shareomat/cmd/run_once` MQTT command.

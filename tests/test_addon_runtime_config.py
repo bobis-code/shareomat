@@ -134,3 +134,10 @@ def test_translations_cover_the_section(language):
     text = (ADDON_DIR / "translations" / f"{language}.yaml").read_text(encoding="utf-8")
     fields = yaml.safe_load(text)["configuration"]["sparkplug"]["fields"]
     assert set(fields) == set(manifest["schema"]["sparkplug"])
+
+
+def test_addon_is_backed_up_cold():
+    """HA must stop Shareomat for its backup: a hot copy of the running SQLite database can be torn."""
+    manifest = yaml.safe_load((ADDON_DIR / "config.yaml").read_text(encoding="utf-8"))
+    assert manifest["backup"] == "cold"
+    assert "backup_pre" not in manifest and "backup_post" not in manifest      # ignored with cold anyway
