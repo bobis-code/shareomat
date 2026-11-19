@@ -16,6 +16,7 @@ Part of:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from datetime import date
@@ -39,6 +40,20 @@ _env = jinja2.Environment(
     autoescape=True,
 )
 _env.filters["path_segment"] = lambda value: quote(str(value), safe="")
+
+
+def _asset_version() -> str:
+    """Checksum of app.css: part of its URL, so a browser never keeps the style of an older version.
+
+    The file is cached for a day (web/server.py); a new add-on version changes the URL.
+    """
+    try:
+        return hashlib.sha256((Path(__file__).parent / "static" / "app.css").read_bytes()).hexdigest()[:12]
+    except OSError:
+        return "0"
+
+
+_env.globals["asset_version"] = _asset_version()
 
 _UPLOAD_FLASH_PREFIX = "shareomat-upload-v1:"
 

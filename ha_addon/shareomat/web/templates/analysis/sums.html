@@ -15,6 +15,11 @@
   {% if flows.temporary %}<div class="ts">{{ flows.temporary }} vorläufig</div>{% endif %}
   {% if flows.estimated %}<div class="ana-warn">{{ flows.estimated }} Ersatzwerte</div>{% endif %}
 {% endmacro %}
+{# Fed in left, drawn right (operator's decision 20.11.2026), each group set off by a line. #}
+{% macro flow_groups() %}<th colspan="3" class="ana-out ana-sep">Einspeisung kWh</th><th colspan="3" class="ana-in ana-sep">Bezug kWh</th>{% endmacro %}
+{% macro flow_heads() %}<th class="num ana-sep">Total</th><th class="num">an LEG</th><th class="num">ins Netz</th><th class="num ana-sep">Total</th><th class="num">aus LEG</th><th class="num">vom Netz</th>{% endmacro %}
+{% macro cell(tag, value, cls, href) %}<{{ tag }} class="num {{ cls }}">{% if href %}<a class="num-link" href="{{ href }}">{{ kwh(value) }}</a>{% else %}{{ kwh(value) }}{% endif %}</{{ tag }}>{% endmacro %}
+{% macro flow_cells(f, tag='td', out_href='', in_href='') %}{{ cell(tag, f.production_total, 'ana-sep', out_href) }}{{ cell(tag, f.production_local, 'ana-out', out_href) }}{{ cell(tag, f.production_residual, '', out_href) }}{{ cell(tag, f.consumption_total, 'ana-sep', in_href) }}{{ cell(tag, f.consumption_local, 'ana-in', in_href) }}{{ cell(tag, f.consumption_residual, '', in_href) }}{% endmacro %}
 {% block content %}
 <div class="card">
   <nav class="seg" aria-label="Zeitraum">
@@ -72,12 +77,8 @@
   <div class="table-wrap">
     <table class="sdat-table ana-table">
       <thead>
-        <tr class="ana-groups"><th colspan="2"></th><th colspan="3" class="ana-in">Bezug kWh</th>
-          <th colspan="3" class="ana-out">Einspeisung kWh</th><th colspan="2"></th></tr>
-        <tr><th>Messpunkt</th><th>Teilnehmer</th>
-          <th class="num">Total</th><th class="num">aus LEG</th><th class="num">vom Netz</th>
-          <th class="num">Total</th><th class="num">an LEG</th><th class="num">ins Netz</th>
-          <th>Vollständigkeit</th><th>Prüfung</th></tr>
+        <tr class="ana-groups"><th colspan="2"></th>{{ flow_groups() }}<th colspan="2" class="ana-sep"></th></tr>
+        <tr><th>Messpunkt</th><th>Teilnehmer</th>{{ flow_heads() }}<th class="ana-sep">Vollständigkeit</th><th>Prüfung</th></tr>
       </thead>
       <tbody>
         {% for p in points %}
@@ -86,24 +87,17 @@
           <td class="mono" title="{{ p.metering_point_id }}"><a href="{{ values_link(p.metering_point_id, start, end) }}">…{{ p.metering_point_id[-4:] }}</a></td>
           <td>{% if p.known %}{{ p.participant }}{% if p.meter_label %} <span class="ts">{{ p.meter_label }}</span>{% endif %}
               {% else %}<span class="status-error">Messpunkt nicht in den Stammdaten</span>{% endif %}</td>
-          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'bezug') }}">{{ kwh(f.consumption_total) }}</a></td>
-          <td class="num ana-in"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'bezug') }}">{{ kwh(f.consumption_local) }}</a></td>
-          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'bezug') }}">{{ kwh(f.consumption_residual) }}</a></td>
-          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'einspeisung') }}">{{ kwh(f.production_total) }}</a></td>
-          <td class="num ana-out"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'einspeisung') }}">{{ kwh(f.production_local) }}</a></td>
-          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'einspeisung') }}">{{ kwh(f.production_residual) }}</a></td>
-          <td>{{ completeness(p.check) }}</td>
+          {{ flow_cells(f, out_href=values_link(p.metering_point_id, start, end, 'einspeisung'),
+                        in_href=values_link(p.metering_point_id, start, end, 'bezug')) }}
+          <td class="ana-sep">{{ completeness(p.check) }}</td>
           <td>{{ checks(p.check, f) }}</td>
         </tr>
         {% endfor %}
       </tbody>
       <tfoot>
         {% set f = sums.total %}
-        <tr><th colspan="2">Summe Auswahl ({{ points | length }})</th>
-          <th class="num">{{ kwh(f.consumption_total) }}</th><th class="num ana-in">{{ kwh(f.consumption_local) }}</th>
-          <th class="num">{{ kwh(f.consumption_residual) }}</th><th class="num">{{ kwh(f.production_total) }}</th>
-          <th class="num ana-out">{{ kwh(f.production_local) }}</th><th class="num">{{ kwh(f.production_residual) }}</th>
-          <th>{{ completeness(sums.total_check) }}</th><th>{{ checks(sums.total_check, f) }}</th></tr>
+        <tr><th colspan="2">Summe Auswahl ({{ points | length }})</th>{{ flow_cells(f, tag='th') }}
+          <th class="ana-sep">{{ completeness(sums.total_check) }}</th><th>{{ checks(sums.total_check, f) }}</th></tr>
       </tfoot>
     </table>
   </div>
@@ -122,11 +116,8 @@
   <div class="table-wrap">
     <table class="sdat-table ana-table">
       <thead>
-        <tr class="ana-groups"><th></th><th colspan="3" class="ana-in">Bezug kWh</th>
-          <th colspan="3" class="ana-out">Einspeisung kWh</th><th></th></tr>
-        <tr><th>{{ 'Tag' if sums.row_unit == 'day' else 'Monat' }}</th>
-          <th class="num">Total</th><th class="num">aus LEG</th><th class="num">vom Netz</th>
-          <th class="num">Total</th><th class="num">an LEG</th><th class="num">ins Netz</th><th>Daten</th></tr>
+        <tr class="ana-groups"><th></th>{{ flow_groups() }}<th class="ana-sep"></th></tr>
+        <tr><th>{{ 'Tag' if sums.row_unit == 'day' else 'Monat' }}</th>{{ flow_heads() }}<th class="ana-sep">Daten</th></tr>
       </thead>
       <tbody>
         {% for r in sums.rows %}
@@ -141,14 +132,11 @@
               <a href="{{ link(zeitraum='monat', datum=r.start.isoformat(), von=None, bis=None) }}">{{ month_names[r.start.month - 1] }} {{ r.start.year }}</a>
             {% endif %}
           </td>
-          {% if r.check.complete == 0 %}<td class="num ts" colspan="6">—</td>
-          {% else %}
-          <td class="num">{{ kwh(f.consumption_total) }}</td><td class="num ana-in">{{ kwh(f.consumption_local) }}</td>
-          <td class="num">{{ kwh(f.consumption_residual) }}</td><td class="num">{{ kwh(f.production_total) }}</td>
-          <td class="num ana-out">{{ kwh(f.production_local) }}</td><td class="num">{{ kwh(f.production_residual) }}</td>
-          {% endif %}
-          <td>
-            {% if r.check.expected == 0 %}<span class="ts">noch nicht geliefert</span>
+          {% if r.check.complete == 0 %}<td class="num ts ana-sep" colspan="6">—</td>
+          {% else %}{{ flow_cells(f) }}{% endif %}
+          <td class="ana-sep">
+            {% if r.check.expected == 0 and (not sums.data_until or r.start > sums.data_until) %}<span class="ts">noch nicht geliefert</span>
+            {% elif r.check.expected == 0 %}<span class="ts">kein Mitglied in der LEG</span>
             {% elif r.check.complete == 0 %}<span class="ana-warn">⚠ keine Daten geliefert</span>
             {% elif r.check.missing and r.points == 1 %}<span class="ana-warn">⚠ {{ r.check.missing }} Viertelstunde(n) fehlen</span>
             {% elif r.check.missing %}<span class="ana-warn">⚠ unvollständig bei {{ r.incomplete_points }} von {{ r.points }} Messpunkten</span>

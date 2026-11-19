@@ -563,3 +563,8 @@ textarea.mail-body { width: 100%; padding: 8px 10px; border: 1px solid #ddd; bor
 .ana-inuse { background: #f0fdf4; font-weight: 600; }
 .ana-changed { background: #fff7ed; }
 .ana-tag { font-size: .7rem; text-transform: uppercase; color: #6b7280; font-weight: 500; }
+.ana-nomember td { color: #9ca3af; }
+.ana-nomember .ana-gap-text { color: #9ca3af; }
+/* Group separator: Einspeisung | Bezug | checks */
+.ana-table .ana-sep { border-left: 2px solid #cbd5e1; }
+.ana-groups th.ana-sep:empty { border-bottom: 0; }

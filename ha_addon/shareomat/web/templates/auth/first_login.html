@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ 'Neues Passwort' if reset else 'Ersteinrichtung' }} — Shareomat</title>
-  <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}?v={{ asset_version }}">
 </head>
 <body class="auth-body">
   <main class="auth-card">

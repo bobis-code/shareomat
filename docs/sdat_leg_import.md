@@ -1237,6 +1237,10 @@ Monatstabelle auf «Messdaten»):
   Einspeisung, je Total / LEG / Netz, mit Vollständigkeit (Viertelstunden bis zur neuesten
   Lieferung) und der Prüfung Total = LEG + Netz (Rundung bis 0.001 kWh ist nur ein Hinweis).
   Darunter dieselben Summen je Tag oder Monat. Jede Zahl öffnet die Messwerte.
+  Daten werden nur an Tagen erwartet, an denen der Teilnehmer in der LEG ist (Mitgliedschaft
+  «Beitritt per» bis Austritt, nicht vor dem vom Netzbetreiber bestätigten Start, Messpunkt
+  gültig), wie bei der Abrechnung. Wer später beitritt, ist vorher nicht «unvollständig».
+  Spaltenfolge: Einspeisung links, Bezug rechts.
 * **Messwerte:** ein Messpunkt je Viertelstunde, Stunde oder Tag. Jede Viertelstunde hat eine
   Zeile, auch ohne Lieferung («kein Wert geliefert» / «noch nicht geliefert»). ⓘ zeigt alle
   Lieferungen dieser Viertelstunde und welcher Wert gilt.

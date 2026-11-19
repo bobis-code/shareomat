@@ -32,6 +32,22 @@ from tests.test_sdat_import_and_billing import (  # noqa: F401  (leg is a fixtur
 NEXT_DAY = DAY + timedelta(days=1)
 
 
+def _join(db, participant_id: str, day: date) -> None:
+    """Membership from `day` (as "Beitritt per" under Vertrag)."""
+    with sqlite3.connect(db) as conn:
+        conn.execute("INSERT INTO memberships (participant_id, joined_at, created_at, updated_at) "
+                     "SELECT id, ?, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00' FROM participants "
+                     "WHERE participant_id = ?",
+                     (day.isoformat(), participant_id))
+
+
+@pytest.fixture(autouse=True)
+def _members(leg):
+    db, _, _ = leg
+    _join(db, "test-load", date(2026, 1, 1))
+    _join(db, "test-pv", date(2026, 1, 1))
+
+
 @pytest.fixture(autouse=True)
 def _today(monkeypatch):
     """The synthetic data is in December 2026: the pages see 02.12.2026 as today."""
@@ -95,10 +111,40 @@ def test_gaps_differences_rounding_and_points_without_data_stand_out(leg):
     by_point = _points(period_sums(db, DAY, NEXT_DAY))
     assert (by_point[CONSUMER].check.mismatched, by_point[CONSUMER].check.rounded) == (1, 1)
     assert (by_point[PRODUCER].check.complete, by_point[PRODUCER].check.missing) == (50, 46)
-    [day] = period_sums(db, DAY, NEXT_DAY).rows
-    assert (day.points, day.incomplete_points) == (3, 2)                # producer and the silent meter
-    silent = by_point["CH1000000000000000000000000000009"]
+    assert "CH1000000000000000000000000000009" not in by_point          # not a member: nothing expected
+    _join(db, "test-new", DAY)
+    silent = _points(period_sums(db, DAY, NEXT_DAY))["CH1000000000000000000000000000009"]
     assert silent.known and (silent.check.complete, silent.check.expected) == (0, 96)
+    [day] = period_sums(db, DAY, NEXT_DAY).rows
+    assert (day.points, day.incomplete_points) == (3, 2)                # producer and the silent member
+
+
+def test_a_participant_joining_later_is_not_incomplete_before(leg):
+    """Operator's report 20.11.2026: a new participant (joins later) made every day "unvollständig"."""
+    db, _, tmp = leg
+    create_participant(db, Participant("test-new", "test-new"))
+    create_meter(db, Meter("CH1000000000000000000000000000009", "test-new", "Neu", "consumer"))
+    _join(db, "test-new", NEXT_DAY)
+    _import(db, tmp, "e66.xml", _official_day())
+    sums = period_sums(db, DAY, NEXT_DAY)
+    [day] = sums.rows
+    assert (day.points, day.incomplete_points) == (2, 0) and sums.total_check.missing == 0
+    assert "CH1000000000000000000000000000009" not in _points(sums)
+    alone = period_sums(db, DAY, NEXT_DAY, metering_point_id="CH1000000000000000000000000000009")
+    assert alone.points[0].check.expected == 0                            # chosen on purpose: shown, not missing
+    values = point_values(db, "CH1000000000000000000000000000009", DAY, NEXT_DAY, today=NEXT_DAY)
+    assert not any(r.member for r in values.rows) and values.total_check.expected == 0
+    html = analysis.handle_get(_get("values", mp="CH1000000000000000000000000000009", zeitraum="tag",
+                                    datum=DAY.isoformat()))
+    assert "nicht in der LEG" in html and "kein Wert geliefert" not in html
+
+
+def test_columns_fed_in_left_drawn_right_and_css_url_versioned(leg):
+    db, _, tmp = leg
+    _import(db, tmp, "e66.xml", _official_day())
+    html = analysis.handle_get(_get("sums", zeitraum="tag", datum=DAY.isoformat()))
+    assert html.index("Einspeisung kWh") < html.index("Bezug kWh") and "ana-sep" in html
+    assert "app.css?v=" in html
 
 
 def test_long_periods_are_broken_down_per_month_and_limited(leg):

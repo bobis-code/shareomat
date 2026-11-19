@@ -24,6 +24,12 @@ Notes:
     cancellations, no downgrade of plausibilised values). Writes nothing.
     Days are local days (Europe/Zurich): 92, 96 or 100 quarter hours.
 
+    Data is expected for a metering point only on days it belongs to the
+    LEG: its participant's membership covers the day (joined, not left, not
+    before the grid operator's effective start) and the meter is valid then -
+    the same rule as the billing (billing_eligibility). A participant who
+    joins later is not "incomplete" before that day.
+
     The check total = LEG + grid uses the same resolution as the billing
     (SDAT_RESOLUTION_KWH): a difference up to 0.001 kWh is rounding.
 
@@ -42,6 +48,7 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from shareomat.database.memberships import list_memberships
 from shareomat.database.meters import list_meters
 from shareomat.database.participants import list_participants
 from shareomat.database.sdat_store import (
@@ -179,6 +186,7 @@ class ValueRow:
     flows: Flows = field(default_factory=Flows)
     check: Check = field(default_factory=Check)
     has_values: bool = False    # at least one value of the shown directions delivered
+    member: bool = True         # False: the participant was not in the LEG then (nothing expected)
     delivered: bool = True      # False: after the latest delivery ("noch nicht geliefert")
     zone: str = ""              # "MEZ"/"MESZ" on days with a clock change, else ""
 
@@ -260,6 +268,30 @@ def _meter_index(db_path: Path) -> dict[str, MeterChoice]:
             role=meter.role)
         for meter in list_meters(db_path)
     }
+
+
+def _in_leg_rules(db_path: Path):
+    """in_leg(point, day) -> bool: data of this metering point is expected on this local day.
+
+    Points outside the master data are never expected (they only show up with data).
+    """
+    memberships: dict[str, list] = {}
+    for membership in list_memberships(db_path):
+        memberships.setdefault(membership.participant_id, []).append(membership)
+    meters = {meter.meter_id.strip().upper(): meter for meter in list_meters(db_path)}
+    cache: dict[tuple[str, date], bool] = {}
+
+    def in_leg(point: str, day: date) -> bool:
+        key = (point, day)
+        if key not in cache:
+            meter = meters.get(point)
+            valid = (meter is not None and (meter.valid_from is None or day >= meter.valid_from)
+                     and (meter.valid_until is None or day <= meter.valid_until))
+            cache[key] = valid and any(
+                m.covers(day) and (m.effective_start_at is None or day >= m.effective_start_at)
+                for m in memberships.get(meter.participant_id, []))
+        return cache[key]
+    return in_leg
 
 
 def _by_point_and_slot(values) -> dict[str, dict[datetime, dict[tuple[str, str], object]]]:
@@ -363,14 +395,19 @@ def period_sums(db_path: Path, start: date, end: date, *, metering_point_id: str
     result.files = len(data.sources)
     grouped = _by_point_and_slot(data.values)
     meters = _meter_index(db_path)
-    # Metering points without any delivery in the period are shown too: that is exactly what must stand out.
-    expected_points = ([metering_point_id.strip().upper()] if metering_point_id else
-                       [key for key, meter in meters.items() if meter.active and meter.role != METER_ROLE_GRID])
-    for point in expected_points:
-        grouped.setdefault(point, {})
+    in_leg = _in_leg_rules(db_path)
     by_day = _rows_by_day(rows)
     data_end = official_data_end(db_path) or begin
     checked_until = min(finish, data_end)
+    # Members without any delivery in the period are shown too: that is exactly what must stand out.
+    # A meter of someone who joins later (or has left) is not expected and not listed.
+    if metering_point_id:
+        grouped.setdefault(metering_point_id.strip().upper(), {})
+    else:
+        for point, meter in meters.items():
+            if (meter.active and meter.role != METER_ROLE_GRID and point not in grouped
+                    and any(in_leg(point, day) for day in by_day)):
+                grouped[point] = {}
     for point, slots in grouped.items():
         meter = meters.get(point)
         sums = PointSums(metering_point_id=meter.metering_point_id if meter else point,
@@ -383,16 +420,22 @@ def period_sums(db_path: Path, start: date, end: date, *, metering_point_id: str
             if row is not None:
                 _add_slot(row.flows, series, DIRECTIONS)
         incomplete_rows: set[date] = set()
+        counted_rows: set[date] = set()
         for slot in _slots(begin, checked_until):
-            check = _check_slot(slots.get(slot), directions)
+            series = slots.get(slot)
+            day = slot.astimezone(_TZ).date()
+            if not series and not in_leg(point, day):
+                continue                    # not in the LEG that day: nothing expected
+            check = _check_slot(series, directions)
             sums.check.merge(check)
-            row = by_day.get(slot.astimezone(_TZ).date())
+            row = by_day.get(day)
             if row is not None:
                 row.check.merge(check)
+                counted_rows.add(row.start)
                 if not check.complete:
                     incomplete_rows.add(row.start)
         for row in rows:
-            row.points += 1
+            row.points += row.start in counted_rows
             row.incomplete_points += row.start in incomplete_rows
         result.points.append(sums)
         result.total.merge(sums.flows)
@@ -424,6 +467,8 @@ def point_values(db_path: Path, metering_point_id: str, start: date, end: date, 
     slots = _by_point_and_slot(data.values).get(metering_point_id.strip().upper(), {})
     present = _directions_of(slots) & set(directions) or set(directions)
     data_end = official_data_end(db_path) or begin
+    in_leg = _in_leg_rules(db_path)
+    point = metering_point_id.strip().upper()
 
     rows: dict[datetime, ValueRow] = {}
     for slot in _slots(begin, finish):
@@ -443,6 +488,9 @@ def point_values(db_path: Path, metering_point_id: str, start: date, end: date, 
         _add_slot(row.flows, series, directions)
         if series and any(direction in directions for direction, _ in series):
             row.has_values = True
+        if not series and not in_leg(point, local.date()):
+            row.member = False
+            continue
         if slot >= data_end and not series:
             row.delivered = False
             continue
