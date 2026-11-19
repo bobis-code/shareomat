@@ -2,74 +2,22 @@
 {% block title %}Messdaten{% endblock %}
 {% block heading %}Messdaten{% endblock %}
 {% block content %}
-{% set weekdays = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'] %}
 <div class="card">
   <h2>Offizielle Daten des Netzbetreibers (SDAT)</h2>
-  <div class="actions-row" style="margin-top:0;align-items:center">
-    <a class="btn-small btn-muted" href="{{ url_for('meter_data') }}?monat={{ previous_month }}">&larr;</a>
-    <strong>{{ month_label }}</strong>
-    <a class="btn-small btn-muted" href="{{ url_for('meter_data') }}?monat={{ next_month }}">&rarr;</a>
+  {% if official_until %}
+  <p><span class="ana-ok">✓</span> Importierte E66-Lieferungen bis <strong>{{ official_until.strftime('%d.%m.%Y') }}</strong>.</p>
+  {% else %}
+  <p class="ts">Noch keine offiziellen Daten importiert. Empfang und Import:
+    <a href="{{ url_for('external_data') }}">Externe Daten</a> → Swisseldex Datahub.</p>
+  {% endif %}
+  <div class="actions-row">
+    <a class="btn-small" href="{{ url_for('analysis_sums') }}">Summen &amp; Auswertung</a>
+    <a class="btn-small btn-muted" href="{{ url_for('analysis_values') }}">Messwerte</a>
   </div>
-  <p class="ts" style="margin-top:8px">Werte aus den importierten E66-Lieferungen (Swisseldex), genau so, wie die
-    Abrechnung sie verwenden würde: pro Viertelstunde die neueste Lieferung. Nur Anzeige, hier wird nichts gespeichert.
+  <p class="ts" style="margin-top:8px">Summen je Messpunkt und Tag und alle Viertelstundenwerte stehen unter
+    Energie &amp; Analyse → Analyse.
     {% if not billing_uses_sdat %}Die Abrechnung verwendet derzeit noch die bisherigen Messdateien
     (Einstellungen → Messdaten-Quelle).{% endif %}</p>
-  {% if overview and overview.has_data %}
-  <h3 style="margin-top:14px">Pro Teilnehmer ({{ overview.files }} Lieferung(en) in Gebrauch)</h3>
-  <div class="table-wrap">
-    <table class="sdat-table">
-      <thead><tr><th>Teilnehmer</th><th class="num">Bezug kWh</th><th class="num">davon LEG</th>
-        <th class="num">Einspeisung kWh</th><th class="num">davon LEG</th><th class="num">Tage</th></tr></thead>
-      <tbody>
-        {% for p in overview.points %}
-        <tr>
-          <td>{{ p.label }}{% if not p.known %} <span class="status-error">(Messpunkt unbekannt)</span>{% endif %}</td>
-          <td class="num">{{ '%.3f'|format(p.totals.consumption_total) }}</td>
-          <td class="num">{{ '%.3f'|format(p.totals.consumption_local) }}</td>
-          <td class="num">{{ '%.3f'|format(p.totals.production_total) }}</td>
-          <td class="num">{{ '%.3f'|format(p.totals.production_local) }}</td>
-          <td class="num">{{ p.days_with_data }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-      <tfoot>
-        <tr><th>LEG gesamt</th>
-          <th class="num">{{ '%.3f'|format(overview.total.consumption_total) }}</th>
-          <th class="num">{{ '%.3f'|format(overview.total.consumption_local) }}</th>
-          <th class="num">{{ '%.3f'|format(overview.total.production_total) }}</th>
-          <th class="num">{{ '%.3f'|format(overview.total.production_local) }}</th>
-          <th class="num">{{ overview.days | length }}</th></tr>
-      </tfoot>
-    </table>
-  </div>
-
-  <h3 style="margin-top:16px">Pro Tag (ganze LEG)</h3>
-  <div class="table-wrap">
-    <table class="sdat-table">
-      <thead><tr><th>Tag</th><th class="num">Bezug kWh</th><th class="num">davon LEG</th>
-        <th class="num">Einspeisung kWh</th><th class="num">davon LEG</th><th>Vollständig</th><th>Qualität</th></tr></thead>
-      <tbody>
-        {% for d in overview.days %}
-        <tr>
-          <td>{{ weekdays[d.day.weekday()] }} {{ d.day.strftime('%d.%m.%Y') }}</td>
-          <td class="num">{{ '%.3f'|format(d.totals.consumption_total) }}</td>
-          <td class="num">{{ '%.3f'|format(d.totals.consumption_local) }}</td>
-          <td class="num">{{ '%.3f'|format(d.totals.production_total) }}</td>
-          <td class="num">{{ '%.3f'|format(d.totals.production_local) }}</td>
-          <td>{% if d.complete_points == d.points %}✓ alle {{ d.points }} Messpunkte{% else %}<span class="status-error">{{ d.complete_points }} von {{ d.points }} Messpunkten</span>{% endif %}</td>
-          <td class="ts">{% if d.totals.temporary %}{{ d.totals.temporary }} vorläufig {% endif %}{% if d.totals.estimated %}{{ d.totals.estimated }} Ersatzwerte{% endif %}{% if not d.totals.temporary and not d.totals.estimated %}ohne Kennzeichen{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <p class="ts" style="margin-top:8px">«Vollständig»: Messpunkte mit Werten für jede Viertelstunde des Tages.
-    Tageslieferungen des Netzbetreibers sind noch nicht plausibilisiert, auch wenn sie kein Kennzeichen tragen.
-    Abgerechnet wird erst nach der Monatslieferung (um den 5. Arbeitstag des Folgemonats).</p>
-  {% else %}
-  <p class="ts" style="margin-top:12px">Für {{ month_label }} sind keine offiziellen Daten importiert. Empfang und
-    Import: <a href="{{ url_for('external_data') }}">Externe Daten</a> → Swisseldex Datahub.</p>
-  {% endif %}
 </div>
 <div class="card">
   <h2>Eingang</h2>

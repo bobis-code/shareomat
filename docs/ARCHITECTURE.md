@@ -225,6 +225,9 @@ database/                   SQLite, Quelle der Wahrheit für Stammdaten
   sqlite.py                    Verbindung, Schema, additive Migrationen
   live_sources.py              Zuordnung der Live-Messquellen (ADR-0007)
   sdat_store.py                Offizielle SDAT-Zeitreihen und ihre Versionen (ADR-0008)
+  sdat_analysis.py             Auswertung der E66-Daten, nur lesend: Summen je Messpunkt und Zeitraum,
+                               Werte je Viertelstunde mit Lücken, Herkunft eines Werts (Seiten
+                               «Summen & Auswertung» und «Messwerte», web/pages/energy_analysis.py)
   community.py / participants.py / meters.py / tariffs.py / settings.py
   contract_versions.py         Versionierte Vertragskonditionen (draft/publish/withdraw/end)
   contract_settings.py         Vorbelegung für einen neuen Vertragsentwurf
@@ -268,7 +271,8 @@ Tabs (auf dem Handy als Leiste unten), die Seiten der offenen Gruppe in der Seit
 ```text
 Start              — Übersicht
 LEG-Verwaltung     — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, Tarife
-Energie & Analyse  — Messdaten, Analyse, Berichte · Live-Energie: Übersicht, Messquellen, Diagnose (ADR-0007)
+Energie & Analyse  — Messdaten, Berichte · Analyse: Übersicht, Summen & Auswertung, Messwerte
+                     · Live-Energie: Übersicht, Messquellen, Diagnose (ADR-0007)
 Abrechnung         — Abrechnungen, Rechnungen
 Dokumente          — EBL-Meldungen, E-Mail-Vorlagen
 System             — Einstellungen, Automatisierung, Externe Daten, Apps & Integrationen

@@ -65,6 +65,7 @@ from shareomat.database.meter_readings import save_meter_readings
 from shareomat.database.meters import list_meters
 from shareomat.database.participants import list_participants
 from shareomat.database.tariffs import get_tariff_for_date
+from shareomat.database.sdat_store import SDAT_RESOLUTION_KWH
 from shareomat.database.settings import get_operation_settings
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.leg_const import (
@@ -136,7 +137,7 @@ def _chf(value: Decimal) -> Decimal:
 # residual energy of a quarter hour each on its own, so total and LEG + residual
 # can differ by one last digit (seen in the first real EBL deliveries, 11.2026).
 # Such a difference is rounding, not contradictory data.
-_SDAT_RESOLUTION_KWH = Decimal("0.001")
+_SDAT_RESOLUTION_KWH = SDAT_RESOLUTION_KWH       # one constant, also used by the analysis pages
 
 _REQUIRED_CHANNELS = {
     "consumer": ("import",),

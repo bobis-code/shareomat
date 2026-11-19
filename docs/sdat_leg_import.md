@@ -1230,9 +1230,19 @@ Weitere Beobachtungen:
   höchstens 0.0005 kWh je gerundetem Wert abweichen. Das ist die Rundung, nur ein Hinweis. Mehr
   sperrt.
 
-Die Seite «Messdaten» zeigt die offiziellen Werte pro Monat, pro Teilnehmer und pro Tag, mit
-Vollständigkeit und Qualitätskennzeichen. Sie verwendet dieselben Werte wie die Abrechnung
-(neueste Lieferung je Viertelstunde).
+Die offiziellen Werte stehen unter **Energie & Analyse → Analyse** (seit 0.6.20; vorher als
+Monatstabelle auf «Messdaten»):
+
+* **Summen & Auswertung:** je Messpunkt und Zeitraum (Tag, Woche, Monat, Jahr, frei) Bezug und
+  Einspeisung, je Total / LEG / Netz, mit Vollständigkeit (Viertelstunden bis zur neuesten
+  Lieferung) und der Prüfung Total = LEG + Netz (Rundung bis 0.001 kWh ist nur ein Hinweis).
+  Darunter dieselben Summen je Tag oder Monat. Jede Zahl öffnet die Messwerte.
+* **Messwerte:** ein Messpunkt je Viertelstunde, Stunde oder Tag. Jede Viertelstunde hat eine
+  Zeile, auch ohne Lieferung («kein Wert geliefert» / «noch nicht geliefert»). ⓘ zeigt alle
+  Lieferungen dieser Viertelstunde und welcher Wert gilt.
+
+Beide verwenden dieselben Werte wie die Abrechnung (`load_official_values()`: neueste Lieferung
+je Viertelstunde, Stornos, kein Ersatz eines plausibilisierten Werts durch einen vorläufigen).
 
 ---
 

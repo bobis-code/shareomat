@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Summen & Auswertung{% endblock %}
+{% block heading %}Summen & Auswertung{% endblock %}
+{% macro kwh(value) %}{{ '%.3f'|format(value) }}{% endmacro %}
+{% macro completeness(check) %}
+  {% if check.expected == 0 %}<span class="ts">—</span>
+  {% elif check.complete == 0 %}<span class="status-error">⚠ keine Daten</span>
+  {% elif check.missing %}<span class="ana-warn">⚠ {{ check.complete }} / {{ check.expected }}</span>
+  {% else %}<span class="ana-ok">✓ {{ check.complete }} / {{ check.expected }}</span>{% endif %}
+{% endmacro %}
+{% macro checks(check, flows) %}
+  {% if check.mismatched %}<span class="status-error">⚠ {{ check.mismatched }} × Total ≠ LEG + Netz</span>
+  {% elif check.complete %}<span class="ana-ok">✓ Total = LEG + Netz</span>{% else %}<span class="ts">—</span>{% endif %}
+  {% if check.rounded %}<div class="ts">{{ check.rounded }} × Rundung (≤ 0.001)</div>{% endif %}
+  {% if flows.temporary %}<div class="ts">{{ flows.temporary }} vorläufig</div>{% endif %}
+  {% if flows.estimated %}<div class="ana-warn">{{ flows.estimated }} Ersatzwerte</div>{% endif %}
+{% endmacro %}
+{% block content %}
+<div class="card">
+  <nav class="seg" aria-label="Zeitraum">
+    {% for key, label in periods %}
+    <a class="seg-item{{ ' active' if key == kind }}" href="{{ link(zeitraum=key, von=None, bis=None, datum=(today.isoformat() if key == 'frei' else start.isoformat())) }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+  <form method="get" action="{{ url_for('analysis_sums') }}" class="filter-row ana-filter">
+    <input type="hidden" name="zeitraum" value="{{ kind }}">
+    {% if sort != 'messpunkt' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    <label class="ana-grow">Messpunkt
+      <select name="mp" onchange="this.form.submit()">
+        <option value="">Alle Messpunkte</option>
+        {% for c in choices %}
+        <option value="{{ c.metering_point_id }}" {{ 'selected' if c.metering_point_id|upper == point|upper }}>{{ c.title }}{{ '' if c.active else ' – inaktiv' }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% if kind == 'frei' %}
+    <label>Von <input type="date" name="von" value="{{ free[0].isoformat() if free[0] }}"></label>
+    <label>Bis <input type="date" name="bis" value="{{ free[1].isoformat() if free[1] }}"></label>
+    {% else %}
+    <label>Datum <input type="date" name="datum" value="{{ start.isoformat() }}" onchange="this.form.submit()"></label>
+    {% endif %}
+    <button type="submit" class="btn-small">Anzeigen</button>
+  </form>
+  <div class="ana-period">
+    {% if previous_link %}<a class="btn-small btn-muted" href="{{ previous_link }}" aria-label="früher">◀</a>{% endif %}
+    <strong>{{ title }}</strong>
+    {% if next_link %}<a class="btn-small btn-muted" href="{{ next_link }}" aria-label="später">▶</a>{% endif %}
+    <span class="ts ana-status">
+      {% if sums and sums.data_until %}Daten bis {{ sums.data_until.strftime('%d.%m.%Y') }} · {{ sums.files }} Lieferung(en) in Gebrauch
+      {% else %}Noch keine offiziellen Daten importiert{% endif %}
+    </span>
+  </div>
+  {% if notice %}<p class="ana-warn" style="margin-top:8px">{{ notice }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <div class="ana-head">
+    <h2>Summen je Messpunkt</h2>
+    <form method="get" action="{{ url_for('analysis_sums') }}" class="ana-sort">
+      <input type="hidden" name="zeitraum" value="{{ kind }}">
+      {% if point %}<input type="hidden" name="mp" value="{{ point }}">{% endif %}
+      {% if kind == 'frei' %}<input type="hidden" name="von" value="{{ free[0].isoformat() }}"><input type="hidden" name="bis" value="{{ free[1].isoformat() }}">
+      {% else %}<input type="hidden" name="datum" value="{{ start.isoformat() }}">{% endif %}
+      <label class="ts">Sortierung
+        <select name="sort" onchange="this.form.submit()">
+          {% for key, label in sorts %}<option value="{{ key }}" {{ 'selected' if key == sort }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+    </form>
+  </div>
+  {% if points %}
+  <div class="table-wrap">
+    <table class="sdat-table ana-table">
+      <thead>
+        <tr class="ana-groups"><th colspan="2"></th><th colspan="3" class="ana-in">Bezug kWh</th>
+          <th colspan="3" class="ana-out">Einspeisung kWh</th><th colspan="2"></th></tr>
+        <tr><th>Messpunkt</th><th>Teilnehmer</th>
+          <th class="num">Total</th><th class="num">aus LEG</th><th class="num">vom Netz</th>
+          <th class="num">Total</th><th class="num">an LEG</th><th class="num">ins Netz</th>
+          <th>Vollständigkeit</th><th>Prüfung</th></tr>
+      </thead>
+      <tbody>
+        {% for p in points %}
+        {% set f = p.flows %}
+        <tr>
+          <td class="mono" title="{{ p.metering_point_id }}"><a href="{{ values_link(p.metering_point_id, start, end) }}">…{{ p.metering_point_id[-4:] }}</a></td>
+          <td>{% if p.known %}{{ p.participant }}{% if p.meter_label %} <span class="ts">{{ p.meter_label }}</span>{% endif %}
+              {% else %}<span class="status-error">Messpunkt nicht in den Stammdaten</span>{% endif %}</td>
+          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'bezug') }}">{{ kwh(f.consumption_total) }}</a></td>
+          <td class="num ana-in"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'bezug') }}">{{ kwh(f.consumption_local) }}</a></td>
+          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'bezug') }}">{{ kwh(f.consumption_residual) }}</a></td>
+          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'einspeisung') }}">{{ kwh(f.production_total) }}</a></td>
+          <td class="num ana-out"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'einspeisung') }}">{{ kwh(f.production_local) }}</a></td>
+          <td class="num"><a class="num-link" href="{{ values_link(p.metering_point_id, start, end, 'einspeisung') }}">{{ kwh(f.production_residual) }}</a></td>
+          <td>{{ completeness(p.check) }}</td>
+          <td>{{ checks(p.check, f) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        {% set f = sums.total %}
+        <tr><th colspan="2">Summe Auswahl ({{ points | length }})</th>
+          <th class="num">{{ kwh(f.consumption_total) }}</th><th class="num ana-in">{{ kwh(f.consumption_local) }}</th>
+          <th class="num">{{ kwh(f.consumption_residual) }}</th><th class="num">{{ kwh(f.production_total) }}</th>
+          <th class="num ana-out">{{ kwh(f.production_local) }}</th><th class="num">{{ kwh(f.production_residual) }}</th>
+          <th>{{ completeness(sums.total_check) }}</th><th>{{ checks(sums.total_check, f) }}</th></tr>
+      </tfoot>
+    </table>
+  </div>
+  <p class="ts" style="margin-top:8px">Werte des Netzbetreibers (E66), genau so, wie die Abrechnung sie verwenden würde:
+    pro Viertelstunde die neueste Lieferung. Vollständigkeit: Viertelstunden mit allen Werten bis zur neuesten
+    Lieferung. Ein Klick auf eine Zahl öffnet die Messwerte dieses Messpunkts im gleichen Zeitraum.</p>
+  {% else %}
+  <p class="ts">Für diesen Zeitraum sind keine offiziellen Daten importiert. Empfang und Import:
+    <a href="{{ url_for('external_data') }}">Externe Daten</a> → Swisseldex Datahub.</p>
+  {% endif %}
+</div>
+
+{% if points and sums.rows | length > 1 %}
+<div class="card">
+  <h2>{{ 'Je Tag' if sums.row_unit == 'day' else 'Je Monat' }}{% if point %} · Messpunkt …{{ point[-4:] }}{% else %} · alle Messpunkte{% endif %}</h2>
+  <div class="table-wrap">
+    <table class="sdat-table ana-table">
+      <thead>
+        <tr class="ana-groups"><th></th><th colspan="3" class="ana-in">Bezug kWh</th>
+          <th colspan="3" class="ana-out">Einspeisung kWh</th><th></th></tr>
+        <tr><th>{{ 'Tag' if sums.row_unit == 'day' else 'Monat' }}</th>
+          <th class="num">Total</th><th class="num">aus LEG</th><th class="num">vom Netz</th>
+          <th class="num">Total</th><th class="num">an LEG</th><th class="num">ins Netz</th><th>Daten</th></tr>
+      </thead>
+      <tbody>
+        {% for r in sums.rows %}
+        {% set f = r.flows %}
+        <tr>
+          <td>
+            {% if sums.row_unit == 'day' %}
+              {% set label = weekdays[r.start.weekday()] ~ ' ' ~ r.start.strftime('%d.%m.%Y') %}
+              {% if point %}<a href="{{ values_link(point, r.start, r.end) }}">{{ label }}</a>
+              {% else %}<a href="{{ link(zeitraum='tag', datum=r.start.isoformat(), von=None, bis=None) }}">{{ label }}</a>{% endif %}
+            {% else %}
+              <a href="{{ link(zeitraum='monat', datum=r.start.isoformat(), von=None, bis=None) }}">{{ month_names[r.start.month - 1] }} {{ r.start.year }}</a>
+            {% endif %}
+          </td>
+          {% if r.check.complete == 0 %}<td class="num ts" colspan="6">—</td>
+          {% else %}
+          <td class="num">{{ kwh(f.consumption_total) }}</td><td class="num ana-in">{{ kwh(f.consumption_local) }}</td>
+          <td class="num">{{ kwh(f.consumption_residual) }}</td><td class="num">{{ kwh(f.production_total) }}</td>
+          <td class="num ana-out">{{ kwh(f.production_local) }}</td><td class="num">{{ kwh(f.production_residual) }}</td>
+          {% endif %}
+          <td>
+            {% if r.check.expected == 0 %}<span class="ts">noch nicht geliefert</span>
+            {% elif r.check.complete == 0 %}<span class="ana-warn">⚠ keine Daten geliefert</span>
+            {% elif r.check.missing and r.points == 1 %}<span class="ana-warn">⚠ {{ r.check.missing }} Viertelstunde(n) fehlen</span>
+            {% elif r.check.missing %}<span class="ana-warn">⚠ unvollständig bei {{ r.incomplete_points }} von {{ r.points }} Messpunkten</span>
+            {% elif r.check.mismatched %}<span class="status-error">⚠ {{ r.check.mismatched }} × Total ≠ LEG + Netz</span>
+            {% else %}<span class="ana-ok">✓ vollständig</span>{% endif %}
+            {% if f.temporary %}<span class="ts"> · vorläufig</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="ts" style="margin-top:8px">Tageslieferungen sind noch nicht plausibilisiert, auch ohne Kennzeichen.
+    Abgerechnet wird erst nach der Monatslieferung (um den 5. Arbeitstag des Folgemonats).</p>
+</div>
+{% endif %}
+{% endblock %}

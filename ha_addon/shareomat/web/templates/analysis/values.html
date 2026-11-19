@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Messwerte{% endblock %}
+{% block heading %}Messwerte{% endblock %}
+{% macro kwh(value) %}{{ '%.3f'|format(value) }}{% endmacro %}
+{% block content %}
+{% set show_in = 'consumption' in values.directions if values else true %}
+{% set show_out = 'production' in values.directions if values else true %}
+{% set series_labels = [('consumption', 'total', 'Bezug Total'), ('consumption', 'local', 'aus LEG'),
+                        ('consumption', 'residual', 'vom Netz'), ('production', 'total', 'Einsp. Total'),
+                        ('production', 'local', 'an LEG'), ('production', 'residual', 'ins Netz')] %}
+<div class="card">
+  <form method="get" action="{{ url_for('analysis_values') }}" class="ana-filter">
+    <div class="filter-row">
+      <label class="ana-grow">Messpunkt
+        <select name="mp" onchange="this.form.submit()">
+          {% for c in choices %}
+          <option value="{{ c.metering_point_id }}" {{ 'selected' if c.metering_point_id|upper == point|upper }}>{{ c.title }}{{ '' if c.active else ' – inaktiv' }}</option>
+          {% endfor %}
+          {% if point and not selected %}<option value="{{ point }}" selected>{{ point }} (nicht in den Stammdaten)</option>{% endif %}
+        </select>
+      </label>
+      <label>Zeitraum
+        <select name="zeitraum" onchange="this.form.submit()">
+          {% for key, label in periods %}<option value="{{ key }}" {{ 'selected' if key == kind }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      {% if kind == 'tag' %}
+      <label>Tag <input type="date" name="datum" value="{{ day.isoformat() if day }}" onchange="this.form.submit()"></label>
+      {% elif kind == 'frei' %}
+      <label>Von <input type="date" name="von" value="{{ free[0].isoformat() if free[0] }}"></label>
+      <label>Bis <input type="date" name="bis" value="{{ free[1].isoformat() if free[1] }}"></label>
+      {% endif %}
+    </div>
+    <div class="filter-row">
+      <label>Werte
+        <select name="werte" onchange="this.form.submit()">
+          {% for key, label in directions %}<option value="{{ key }}" {{ 'selected' if key == direction }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Auflösung
+        <select name="aufl" onchange="this.form.submit()">
+          {% for key, label in resolutions %}<option value="{{ key }}" {{ 'selected' if key == resolution }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Zeilen pro Seite
+        <select name="zeilen" onchange="this.form.submit()">
+          {% for n in page_sizes %}<option value="{{ n }}" {{ 'selected' if n == page_size }}>{{ n }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="checkbox-row" style="flex-direction:row;align-items:center">
+        <input type="hidden" name="luecken" value="0">
+        <input type="checkbox" name="luecken" value="1" {{ 'checked' if gaps }} onchange="this.form.submit()"> Lücken zeigen
+      </label>
+      <button type="submit" class="btn-small">Anzeigen</button>
+    </div>
+  </form>
+  <div class="ana-period">
+    <a class="btn-small btn-muted" href="{{ previous_link }}" aria-label="früher">◀</a>
+    <strong>{{ weekdays[start.weekday()] }} {{ start.strftime('%d.%m.%Y') }}{% if last_day != start %} – {{ weekdays[last_day.weekday()] }} {{ last_day.strftime('%d.%m.%Y') }}{% endif %}</strong>
+    <a class="btn-small btn-muted" href="{{ next_link }}" aria-label="später">▶</a>
+    <a class="btn-small btn-muted" href="{{ sums_link }}">Σ Summen dieses Zeitraums</a>
+    <span class="ts ana-status">
+      {% if values and values.data_until %}Daten bis {{ values.data_until.strftime('%d.%m.%Y') }} · {{ values.files }} Lieferung(en) in Gebrauch
+      {% else %}Noch keine offiziellen Daten importiert{% endif %}
+    </span>
+  </div>
+  {% for n in notices %}<p class="ana-warn" style="margin-top:8px">{{ n }}</p>{% endfor %}
+</div>
+
+{% if origin %}
+<div class="card ana-origin">
+  <div class="ana-head">
+    <h2>Herkunft · {{ origin.start.strftime('%d.%m.%Y %H:%M') }}–{{ origin.end.strftime('%H:%M') }} · Messpunkt …{{ origin.metering_point_id[-4:] }}</h2>
+    <a class="btn-small btn-muted" href="{{ link(seite=page_number if page_number > 1 else None) }}">Schliessen</a>
+  </div>
+  {% if origin.deliveries %}
+  <div class="table-wrap">
+    <table class="sdat-table ana-table">
+      <thead><tr><th>Lieferung</th><th>erstellt</th>
+        {% for d, t, label in series_labels %}{% if (d == 'consumption' and show_in) or (d == 'production' and show_out) %}<th class="num">{{ label }}</th>{% endif %}{% endfor %}
+      </tr></thead>
+      <tbody>
+        {% for r in origin.deliveries %}
+        <tr>
+          <td class="mono" style="word-break:break-all">{{ r.file_name }}{% if r.cancellation %} <span class="status-error">(Storno)</span>{% endif %}</td>
+          <td class="ts">{{ r.created_at.strftime('%d.%m.%Y %H:%M') if r.created_at else '—' }}</td>
+          {% for d, t, label in series_labels %}{% if (d == 'consumption' and show_in) or (d == 'production' and show_out) %}
+          {% set v = r.values.get((d, t)) %}
+          <td class="num{{ ' ana-inuse' if (d, t) in r.in_use }}{{ ' ana-changed' if (d, t) in r.changed }}">
+            {% if v %}{{ kwh(v[0]) }}{% if v[1] %} <span class="ts">({{ v[1] }})</span>{% endif %}{% else %}—{% endif %}
+            {% if (d, t) in r.in_use %}<div class="ana-tag">gilt</div>{% elif (d, t) in r.changed %}<div class="ana-tag">geändert</div>{% endif %}
+          </td>
+          {% endif %}{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="ts" style="margin-top:8px">Alle Lieferungen, die diese Viertelstunde enthalten, älteste zuerst. «gilt»: dieser Wert
+    wird verwendet (neueste Lieferung; ein vorläufiger Wert ersetzt nie einen plausibilisierten). «geändert»: anders als
+    in der Lieferung davor. Kennzeichen: (21) vorläufig, (56) Ersatzwert.</p>
+  {% else %}
+  <p class="ts">Für diese Viertelstunde wurde nichts geliefert.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  {% if values %}
+  <div class="ana-head">
+    <h2>{{ selected.title if selected else point }}</h2>
+    <span class="ts">{{ row_count }} Zeile(n){% if pages > 1 %} · Seite {{ page_number }} von {{ pages }}{% endif %}</span>
+  </div>
+  <div class="ana-kpis">
+    {% set t = values.total %}
+    {% if show_in %}<div><span class="ts">Bezug</span><strong>{{ kwh(t.consumption_total) }}</strong>
+      <span class="ana-in">aus LEG {{ kwh(t.consumption_local) }}</span><span class="ts">vom Netz {{ kwh(t.consumption_residual) }}</span></div>{% endif %}
+    {% if show_out %}<div><span class="ts">Einspeisung</span><strong>{{ kwh(t.production_total) }}</strong>
+      <span class="ana-out">an LEG {{ kwh(t.production_local) }}</span><span class="ts">ins Netz {{ kwh(t.production_residual) }}</span></div>{% endif %}
+    <div><span class="ts">Vollständigkeit</span>
+      {% if values.total_check.expected == 0 %}<strong>—</strong>
+      {% elif values.total_check.missing %}<strong class="ana-warn">{{ values.total_check.complete }} / {{ values.total_check.expected }}</strong>
+      {% else %}<strong class="ana-ok">✓ {{ values.total_check.complete }} / {{ values.total_check.expected }}</strong>{% endif %}
+      <span class="ts">Viertelstunden</span></div>
+    <div><span class="ts">Prüfung</span>
+      {% if values.total_check.mismatched %}<strong class="status-error">⚠ {{ values.total_check.mismatched }} × ≠</strong>
+      {% else %}<strong class="ana-ok">✓ Total = LEG + Netz</strong>{% endif %}
+      <span class="ts">{{ values.total_check.rounded }} × Rundung</span></div>
+  </div>
+  {% if rows %}
+  <div class="ana-scroll">
+    <table class="sdat-table ana-table ana-values">
+      <thead>
+        <tr class="ana-groups"><th colspan="2"></th>
+          {% if show_in %}<th colspan="3" class="ana-in">Bezug kWh</th>{% endif %}
+          {% if show_out %}<th colspan="3" class="ana-out">Einspeisung kWh</th>{% endif %}<th></th></tr>
+        <tr><th>Datum</th><th>Zeit</th>
+          {% if show_in %}<th class="num">Total</th><th class="num">aus LEG</th><th class="num">vom Netz</th>{% endif %}
+          {% if show_out %}<th class="num">Total</th><th class="num">an LEG</th><th class="num">ins Netz</th>{% endif %}
+          <th>Prüfung</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        {% set f = r.flows %}
+        <tr class="{{ 'ana-gap' if not r.has_values }}{{ ' ana-active' if resolution == '15min' and r.slot_key == detail }}">
+          <td>{{ weekdays[r.start.weekday()] }} {{ r.start.strftime('%d.%m.%Y') }}</td>
+          <td class="mono">{% if resolution == 'day' %}—{% else %}{{ r.start.strftime('%H:%M') }}–{{ r.end.strftime('%H:%M') }}{% if r.zone %} {{ r.zone }}{% endif %}{% endif %}</td>
+          {% if not r.has_values %}
+          <td colspan="{{ (3 if show_in else 0) + (3 if show_out else 0) }}" class="ana-gap-text">
+            {{ 'noch nicht geliefert' if not r.delivered else 'kein Wert geliefert' }}</td>
+          {% else %}
+          {% if show_in %}<td class="num">{{ kwh(f.consumption_total) }}</td><td class="num ana-in">{{ kwh(f.consumption_local) }}</td><td class="num">{{ kwh(f.consumption_residual) }}</td>{% endif %}
+          {% if show_out %}<td class="num">{{ kwh(f.production_total) }}</td><td class="num ana-out">{{ kwh(f.production_local) }}</td><td class="num">{{ kwh(f.production_residual) }}</td>{% endif %}
+          {% endif %}
+          <td>
+            {% if r.check.mismatched %}<span class="status-error">⚠ Total ≠ LEG + Netz</span>
+            {% elif r.has_values and r.check.missing %}<span class="ana-warn">⚠ {{ r.check.complete }} / {{ r.check.expected }}</span>
+            {% elif r.has_values %}<span class="ana-ok">✓</span>{% if r.check.rounded %} <span class="ts">Rundung</span>{% endif %}{% endif %}
+            {% if f.temporary %}<span class="ts"> vorläufig</span>{% endif %}
+            {% if f.estimated %}<span class="ana-warn"> Ersatzwert</span>{% endif %}
+            {% if resolution == '15min' and r.delivered %}<a class="ana-info" title="Herkunft des Werts" href="{{ link(detail=r.slot_key, seite=page_number if page_number > 1 else None) }}">ⓘ</a>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if pages > 1 %}
+  <div class="ana-pager">
+    {% if page_number > 1 %}<a class="btn-small btn-muted" href="{{ link(seite=None) }}">«</a>
+    <a class="btn-small btn-muted" href="{{ link(seite=page_number - 1) }}">‹ zurück</a>{% endif %}
+    <span class="ts">Seite {{ page_number }} von {{ pages }}</span>
+    {% if page_number < pages %}<a class="btn-small btn-muted" href="{{ link(seite=page_number + 1) }}">weiter ›</a>
+    <a class="btn-small btn-muted" href="{{ link(seite=pages) }}">»</a>{% endif %}
+  </div>
+  {% endif %}
+  <p class="ts" style="margin-top:8px">Jede Viertelstunde des Zeitraums hat eine Zeile, auch wenn nichts geliefert
+    wurde. Zeiten in Schweizer Ortszeit; an Tagen mit Zeitumstellung mit MEZ/MESZ. ⓘ zeigt alle Lieferungen einer
+    Viertelstunde und welcher Wert gilt.</p>
+  {% else %}
+  <p class="ts">Keine Zeilen{{ ' mit Werten' if not gaps }} in diesem Zeitraum.</p>
+  {% endif %}
+  {% else %}
+  <p class="ts">Noch keine Messpunkte erfasst: <a href="{{ url_for('meters') }}">LEG-Verwaltung → Messpunkte</a>.</p>
+  {% endif %}
+</div>
+{% endblock %}

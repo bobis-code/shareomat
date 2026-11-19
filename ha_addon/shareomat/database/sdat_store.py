@@ -35,6 +35,7 @@ Notes:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -47,6 +48,8 @@ OUTCOME_REJECTED = "rejected"
 
 _SLOT = timedelta(minutes=15)
 _CONDITION_TEMPORARY = "21"
+# Values arrive with 3 decimals: total and local + residual may differ by this much (O3, 18.11.2026).
+SDAT_RESOLUTION_KWH = Decimal("0.001")
 _STATUS_CANCELLATION = "1"
 
 
@@ -65,6 +68,17 @@ class OfficialData:
     sources: dict[str, str] = field(default_factory=dict)   # sha256 -> file name of documents in use
     downgrades: int = 0      # temporary values that arrived after a plausibilised one (ignored)
     community_id: str = ""
+
+
+@dataclass(frozen=True)
+class DeliveredValue:
+    """What one delivery said about one quarter hour of one metering point (raw, before the rule above)."""
+
+    file_name: str
+    sha256: str
+    created_at: str          # header Creation (UTC ISO), "" if unknown
+    cancellation: bool
+    values: dict[tuple[str, str], tuple[Decimal, str]]   # (direction, energy type) -> (kWh, condition)
 
 
 @dataclass(frozen=True)
@@ -207,15 +221,23 @@ def store_document(db_path: Path, *, sha256: str, file_name: str, origin: str, d
     return len(own)
 
 
-def load_official_values(db_path: Path, start: datetime, end: datetime, *, document_type: str = "E66") -> OfficialData:
+def load_official_values(db_path: Path, start: datetime, end: datetime, *, document_type: str = "E66",
+                         metering_point_ids: Iterable[str] | None = None) -> OfficialData:
     """Effective values per (metering point | grid area, direction, energy type, quarter hour) in [start, end).
 
     Key[0] is the metering point for E66 and the grid area EIC for E31.
-    Only documents of the established community are used.
+    Only documents of the established community are used. `metering_point_ids`
+    (E66 only) limits the result to these points; the rule per value is the same.
     """
     data = OfficialData(community_id=established_community_id(db_path))
     if not data.community_id:
         return data
+    point_filter, point_params = "", []
+    if metering_point_ids is not None:
+        point_params = sorted({point.strip().upper() for point in metering_point_ids})
+        if not point_params:
+            return data
+        point_filter = f" AND UPPER(s.metering_point_id) IN ({', '.join('?' * len(point_params))})"
     with connect(db_path) as conn:
         rows = conn.execute(
             """
@@ -223,10 +245,10 @@ def load_official_values(db_path: Path, start: datetime, end: datetime, *, docum
                    s.observations, d.sha256, d.file_name, d.status, d.source_created_at, d.id AS doc_id
             FROM sdat_series s JOIN sdat_documents d ON d.id = s.document_ref
             WHERE d.outcome = ? AND d.document_type = ? AND s.community_id = ?
-              AND s.interval_start < ? AND s.interval_end > ?
+              AND s.interval_start < ? AND s.interval_end > ?""" + point_filter + """
             ORDER BY d.source_created_at, d.id
             """,
-            (OUTCOME_IMPORTED, document_type, data.community_id, _iso(end), _iso(start)),
+            (OUTCOME_IMPORTED, document_type, data.community_id, _iso(end), _iso(start), *point_params),
         ).fetchall()
     current: dict[tuple, tuple[OfficialValue, str] | None] = {}
     for row in rows:
@@ -250,6 +272,56 @@ def load_official_values(db_path: Path, start: datetime, end: datetime, *, docum
             data.values[key] = entry[0]
             data.sources[entry[0].sha256] = entry[1]
     return data
+
+
+def official_data_end(db_path: Path) -> datetime | None:
+    """End of the latest quarter hour any imported E66 delivery of this LEG covers, None without data."""
+    community_id = established_community_id(db_path)
+    if not community_id:
+        return None
+    with connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT MAX(s.interval_end) AS last FROM sdat_series s JOIN sdat_documents d ON d.id = s.document_ref
+            WHERE d.outcome = ? AND d.document_type = 'E66' AND s.community_id = ? AND s.metering_point_id != ''
+            """,
+            (OUTCOME_IMPORTED, community_id),
+        ).fetchone()
+    return datetime.fromisoformat(row["last"]) if row and row["last"] else None
+
+
+def deliveries_of_quarter_hour(db_path: Path, metering_point_id: str, slot: datetime) -> list[DeliveredValue]:
+    """Every imported E66 delivery that contains this quarter hour of this point, oldest first.
+
+    Raw view for "where does this value come from": the effective value is
+    still the one load_official_values() picks from these.
+    """
+    community_id = established_community_id(db_path)
+    if not community_id:
+        return []
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT s.direction, s.energy_type, s.interval_start, s.observations,
+                   d.id AS doc_id, d.sha256, d.file_name, d.status, d.source_created_at
+            FROM sdat_series s JOIN sdat_documents d ON d.id = s.document_ref
+            WHERE d.outcome = ? AND d.document_type = 'E66' AND s.community_id = ?
+              AND UPPER(s.metering_point_id) = ? AND s.interval_start <= ? AND s.interval_end > ?
+            ORDER BY d.source_created_at, d.id
+            """,
+            (OUTCOME_IMPORTED, community_id, metering_point_id.strip().upper(), _iso(slot), _iso(slot)),
+        ).fetchall()
+    deliveries: dict[int, DeliveredValue] = {}
+    for row in rows:
+        index = int((slot - datetime.fromisoformat(row["interval_start"])) / _SLOT)
+        observations = _decode(row["observations"])
+        if not 0 <= index < len(observations):
+            continue
+        delivery = deliveries.setdefault(row["doc_id"], DeliveredValue(
+            file_name=row["file_name"], sha256=row["sha256"], created_at=row["source_created_at"] or "",
+            cancellation=row["status"] == _STATUS_CANCELLATION, values={}))
+        delivery.values[(row["direction"], row["energy_type"])] = observations[index]
+    return list(deliveries.values())
 
 
 def imported_period(db_path: Path, sha256: str) -> tuple[datetime, datetime] | None:

@@ -41,6 +41,8 @@ ROUTE_PATHS: dict[str, str] = {
     "documents": "/documents",
     "meter_data": "/meter-data",
     "analysis": "/analysis",
+    "analysis_sums": "/analysis/sums",
+    "analysis_values": "/analysis/values",
     "billing": "/billing",
     "invoices": "/invoices",
     "automation": "/automation",
@@ -100,8 +102,13 @@ NAV_GROUPS: tuple[NavGroup, ...] = (
     NavGroup("energy", "Energie & Analyse", "Energie", "chart", (
         ("", (
             ("meter_data", "Messdaten"),
-            ("analysis", "Analyse"),
             ("reports", "Berichte"),
+        )),
+        # Official E66 data of the grid operator (20.11.2026, operator's decision): sums and values apart.
+        ("ANALYSE", (
+            ("analysis", "Übersicht"),
+            ("analysis_sums", "Summen & Auswertung"),
+            ("analysis_values", "Messwerte"),
         )),
         # Kept apart from the official data above (ADR-0007): live values never feed billing.
         ("LIVE-ENERGIE", (

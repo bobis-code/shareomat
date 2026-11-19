@@ -3,7 +3,8 @@
 File: shareomat/web/pages/analysis.py
 
 Purpose:
-    "Analyse" admin page: server-rendered SVG charts of the local/grid
+    "Analyse → Übersicht" admin page (the sub-pages "Summen & Auswertung"
+    and "Messwerte" are in energy_analysis.py): server-rendered SVG charts of the local/grid
     settlement split (LEG-wide or per participant), sourced from
     shareomat.database.settlement_history — i.e. results already
     computed by the automatic settlement cycle, not a new computation.
@@ -27,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from shareomat.database.participants import list_participants
 from shareomat.database.price_forecasts import list_price_forecasts
 from shareomat.database.settlement_history import aggregate_leg_local_grid, aggregate_participant_local_grid
+from shareomat.web.pages import energy_analysis
 from shareomat.web.rendering import RequestContext, render_page
 
 _RANGE_DAYS = {"7d": 7, "30d": 30, "90d": 90}
@@ -35,6 +37,13 @@ _DEFAULT_RANGE = "30d"
 
 def handle_get(ctx: RequestContext) -> str:
     """Render local/grid history charts (LEG-wide or per participant), optionally with a price overlay."""
+    if ctx.segments == ["sums"]:
+        return energy_analysis.sums_page(ctx)
+    if ctx.segments == ["values"]:
+        return energy_analysis.values_page(ctx)
+    if ctx.segments:
+        return render_page("placeholders/coming_soon.html", ctx, "analysis", title="Seite nicht gefunden",
+                           description="")
     db_path = ctx.db_path
     range_key = ctx.query.get("range", _DEFAULT_RANGE)
     if range_key not in _RANGE_DAYS:
