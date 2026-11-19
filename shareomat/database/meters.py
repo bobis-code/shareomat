@@ -19,11 +19,17 @@ Notes:
 from __future__ import annotations
 
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 
 from shareomat.database.community import ensure_community_row_id
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.models.meter import Meter
+
+
+def _kwp_text(value: Decimal | None) -> str | None:
+    """kWp as exact decimal text (never via float), None when not entered."""
+    return None if value is None else format(value, "f")
 
 
 def _row_to_meter(row: sqlite3.Row, participant_business_id: str) -> Meter:
@@ -35,6 +41,8 @@ def _row_to_meter(row: sqlite3.Row, participant_business_id: str) -> Meter:
         valid_from=str_to_date(row["valid_from"]),
         valid_until=str_to_date(row["valid_until"]),
         active=bool(row["active"]),
+        generation_kwp=Decimal(row["generation_kwp"]) if row["generation_kwp"] else None,
+        connection_power=row["connection_power"] or "",
     )
 
 
@@ -91,13 +99,15 @@ def create_meter(db_path: Path, meter: Meter) -> Meter:
                 """
                 INSERT INTO meters
                     (community_id, participant_id, meter_id, label, role,
-                     valid_from, valid_until, active, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     valid_from, valid_until, active, created_at, updated_at,
+                     generation_kwp, connection_power)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     community_row_id, participant_row_id, meter.meter_id, meter.label,
                     meter.role, date_to_str(meter.valid_from), date_to_str(meter.valid_until),
                     int(meter.active), now, now,
+                    _kwp_text(meter.generation_kwp), meter.connection_power,
                 ),
             )
     result = get_meter(db_path, meter.meter_id)
@@ -149,13 +159,14 @@ def update_meter(db_path: Path, meter_id: str, meter: Meter) -> Meter:
                 """
                 UPDATE meters
                 SET meter_id=?, participant_id=?, label=?, role=?, valid_from=?, valid_until=?,
-                    active=?, updated_at=?
+                    active=?, updated_at=?, generation_kwp=?, connection_power=?
                 WHERE id=?
                 """,
                 (
                     meter.meter_id, participant_row_id, meter.label, meter.role,
                     date_to_str(meter.valid_from), date_to_str(meter.valid_until),
-                    int(meter.active), now, existing["id"],
+                    int(meter.active), now, _kwp_text(meter.generation_kwp), meter.connection_power,
+                    existing["id"],
                 ),
             )
     result = get_meter(db_path, meter.meter_id)

@@ -670,6 +670,14 @@ _SCHEMA_STATEMENTS = [
 # SQLite's ALTER TABLE ADD COLUMN only supports one column at a time with a
 # constant default, which is all these need.
 _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
+    # Fields of the grid operator's participation form (EBL "Eintritt in LEG"), 19.11.2026.
+    "participants": {
+        "phone": "TEXT NOT NULL DEFAULT ''",
+    },
+    "meters": {
+        "generation_kwp": "TEXT",
+        "connection_power": "TEXT NOT NULL DEFAULT ''",
+    },
     "communities": {
         "eic_code": "TEXT NOT NULL DEFAULT ''",
         # Founding notice to the grid operator (Art. 19g Abs. 1 StromVV: 3 months

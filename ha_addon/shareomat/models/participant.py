@@ -39,3 +39,4 @@ class Participant:
     postal_code: str = ""
     city: str = ""
     active: bool = True
+    phone: str = ""            # for the grid operator's participation form (EBL)

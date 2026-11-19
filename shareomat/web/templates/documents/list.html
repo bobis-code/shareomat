@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}EBL-Meldungen{% endblock %}
+{% block heading %}EBL-Meldungen{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Eintritt neuer Teilnehmender in die LEG</h2>
+  <p class="ts">Meldung an den Netzbetreiber mit den Angaben des EBL-Formulars «Teilnahmeformular neue
+    LEG-Teilnehmende». Ausdrucken, vom Teilnehmenden unterschreiben lassen und an EBL senden. Fehlende Angaben
+    können auf dem Ausdruck auch von Hand ergänzt werden.</p>
+  <p class="ts" style="margin-top:6px">Shareomat druckt die Angaben im eigenen Layout, nicht das Original von EBL.
+    Ob EBL diese Form annimmt, bitte bei EBL nachfragen; sonst die Werte ins EBL-Formular übertragen.</p>
+  {% if notices %}
+  <div class="table-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>Teilnehmer</th><th>Beitritt per</th><th>Messpunkt</th><th>Angaben</th><th></th></tr></thead>
+      <tbody>
+        {% for n in notices %}
+        <tr>
+          <td><a href="{{ url_for('participants', suffix='/' + (n.participant_id | path_segment) + '/edit') }}">{{ n.participant_name }}</a></td>
+          <td class="ts">{{ n.start.strftime('%d.%m.%Y') if n.start else '—' }}</td>
+          <td class="ts" style="font-family:ui-monospace,Consolas,monospace">{{ n.meter_ids | join(', ') if n.meter_ids else '—' }}</td>
+          <td>{% if n.complete %}<span class="status-pill status-pill-active">vollständig</span>
+              {% else %}<span class="status-error">fehlt: {{ n.missing | join(', ') }}</span>{% endif %}
+              {% if n.hints %}<div class="doc-hint">{{ n.hints | join(', ') }}</div>{% endif %}</td>
+          <td><a class="btn-small" target="_blank" rel="noopener"
+                 href="{{ url_for('documents', suffix='/ebl/' + (n.participant_id | path_segment)) }}">Drucken</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="ts" style="margin-top:8px">Telefon beim Teilnehmer, Leistung der Erzeugungsanlage und Anschlussleistung
+    beim Messpunkt erfassen.</p>
+  {% else %}
+  <p class="ts" style="margin-top:12px">Noch keine aktiven Teilnehmer.</p>
+  {% endif %}
+</div>
+{% endblock %}

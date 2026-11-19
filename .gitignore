@@ -259,3 +259,6 @@ docs/Temp/
 # draw.io editor backups/temp files
 .$*.bkp
 .$*.dtmp
+
+# Forms of the grid operator (EBL): their documents with their logo, never in this public repo.
+docs/examples/EBL_Teilnahmeformular/*.pdf

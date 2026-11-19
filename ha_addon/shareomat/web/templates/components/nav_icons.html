@@ -1,0 +1,15 @@
+{# Inline SVG icons of the menu groups (navigation.NavGroup.icon). Stroke icons in
+   currentColor, no external icon font or script. #}
+{% macro nav_icon(name) -%}
+<svg class="nav-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'home' %}<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h5v-6h4v6h5V9.5"/>
+{%- elif name == 'users' %}<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"/><path d="M18 14.3c2.2.7 3.5 2.8 3.5 5.7"/>
+{%- elif name == 'chart' %}<path d="M3 21h18"/><path d="M6 17v-5"/><path d="M11 17V8"/><path d="M16 17v-7"/><path d="M4 9l5-4 5 3 6-5"/>
+{%- elif name == 'receipt' %}<path d="M6 2.5h12v19l-3-2-3 2-3-2-3 2z"/><path d="M9 7.5h6"/><path d="M9 11.5h6"/><path d="M9 15.5h4"/>
+{%- elif name == 'folder' %}<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>
+{%- elif name == 'gear' %}<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>
+{%- elif name == 'account' %}<circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="10" r="3.2"/><path d="M6.2 18.4c1.3-2 3.3-3 5.8-3s4.5 1 5.8 3"/>
+{%- endif %}
+</svg>
+{%- endmacro %}

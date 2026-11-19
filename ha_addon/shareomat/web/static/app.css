@@ -474,3 +474,50 @@ textarea.mail-body { width: 100%; padding: 8px 10px; border: 1px solid #ddd; bor
 /* Messdaten: official SDAT month overview */
 .sdat-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .sdat-table tfoot th { border-top: 2px solid #e5e7eb; }
+
+/* ── Main menu: groups as tabs in the top bar, pages in the side bar (19.11.2026) ── */
+.topbar { display: flex; align-items: center; gap: 18px; background: var(--sidebar-bg); padding: 8px 16px;
+  border-bottom: 1px solid rgba(255,255,255,.08); position: sticky; top: 0; z-index: 20; }
+.topbar-brand { flex-shrink: 0; }
+.topbar-logo { height: 38px; width: auto; display: block; }
+.topnav { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
+.topnav-tab { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px;
+  color: var(--sidebar-text); text-decoration: none; font-size: .92rem; white-space: nowrap;
+  background: rgba(255,255,255,.05); }
+.topnav-tab:hover { background: rgba(255,255,255,.12); }
+.topnav-tab.active { background: var(--sidebar-active); color: #fff; font-weight: 600; }
+.topnav-short { display: none; }
+.nav-icon { flex-shrink: 0; }
+.topbar-account { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-shrink: 0; }
+.topbar-user { display: flex; align-items: center; gap: 6px; color: var(--sidebar-text); text-decoration: none;
+  font-size: .85rem; padding: 6px 8px; border-radius: 8px; }
+.topbar-user:hover, .topbar-user.active { background: rgba(255,255,255,.1); color: #fff; }
+.topbar-logout { background: transparent; border: 1px solid rgba(255,255,255,.3); color: #fff; padding: 5px 10px;
+  border-radius: 6px; font-size: .8rem; cursor: pointer; }
+.topbar-logout:hover { background: rgba(255,255,255,.1); }
+.layout { min-height: calc(100vh - 55px); }
+.sidebar { padding-top: 14px; }
+.nav-group-title { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: #94a3b8; padding: 2px 16px 8px; }
+
+@media (max-width: 720px) {
+  /* Phones: the groups become a bar at the bottom of the screen (thumb reach),
+     the pages of the open group stay behind the "☰" toggle at the top. */
+  .topbar { position: static; padding: 8px 12px; gap: 10px; }
+  .topbar-logo { height: 30px; }
+  .topbar-user span { display: none; }
+  .topnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: var(--sidebar-bg);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom)); gap: 2px; overflow: visible;
+    border-top: 1px solid rgba(255,255,255,.12); }
+  .topnav-tab { flex: 1; flex-direction: column; justify-content: center; gap: 3px; padding: 6px 2px;
+    font-size: .66rem; background: transparent; min-width: 0; }
+  .topnav-tab.active { background: rgba(37,99,235,.9); }
+  .topnav-label { display: none; }
+  .topnav-short { display: block; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  body { padding-bottom: 72px; }
+  .layout { min-height: 0; }
+  .nav-group-title { display: none; }
+}
+
+/* Dokumente: optional field left empty - a hint, not an error */
+.doc-hint { color: #b45309; font-size: .82rem; margin-top: 2px; }

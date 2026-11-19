@@ -33,7 +33,7 @@ from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
 from shareomat.security.context import Principal
 from shareomat.security.permissions import has_permission, required_permission
-from shareomat.web.navigation import NAV_SECTIONS, ROUTE_PATHS
+from shareomat.web.navigation import NAV_GROUPS, ROUTE_PATHS, nav_group_for
 from shareomat.web.pages import live_energy
 from shareomat.web.rendering import FormError, RequestContext, check_csrf
 from shareomat.web.server import _PAGE_MODULES
@@ -112,23 +112,31 @@ def _deliver(service, *samples):
     service.process_pending()
 
 
-NAV_BEFORE_LIVE_ENERGY = [
-    ("", [("dashboard", "Übersicht")]),
-    ("VERWALTUNG", [("checklist", "Checkliste"), ("community", "Gemeinschaft"), ("participants", "Teilnehmer"), ("meters", "Messpunkte"),
-                    ("tariffs", "Tarife"), ("contract", "Vertrag"),
-                    ("email_templates", "E-Mail-Vorlagen")]),
-    ("BETRIEB", [("meter_data", "Messdaten"), ("analysis", "Analyse"), ("billing", "Abrechnungen"),
-                 ("invoices", "Rechnungen"), ("automation", "Automatisierung"), ("reports", "Berichte")]),
-    ("INTEGRATIONEN", [("apps", "Apps & Integrationen")]),
-    ("SYSTEM", [("settings", "Einstellungen"), ("external_data", "Externe Daten")]),
+EXPECTED_MENU = [
+    ("start", "Start", [("", [("dashboard", "Übersicht")])]),
+    ("leg", "LEG-Verwaltung", [("", [("checklist", "Checkliste"), ("community", "Gemeinschaft"),
+                                     ("participants", "Teilnehmer"), ("meters", "Messpunkte"),
+                                     ("contract", "Vertrag"), ("tariffs", "Tarife")])]),
+    ("energy", "Energie & Analyse", [
+        ("", [("meter_data", "Messdaten"), ("analysis", "Analyse"), ("reports", "Berichte")]),
+        ("LIVE-ENERGIE", [("live_energy", "Übersicht"), ("live_energy_sources", "Messquellen"),
+                          ("live_energy_diagnostics", "Diagnose")]),
+    ]),
+    ("billing", "Abrechnung", [("", [("billing", "Abrechnungen"), ("invoices", "Rechnungen")])]),
+    ("documents", "Dokumente", [("", [("documents", "EBL-Meldungen"), ("email_templates", "E-Mail-Vorlagen")])]),
+    ("system", "System", [("", [("settings", "Einstellungen"), ("automation", "Automatisierung"),
+                                ("external_data", "Externe Daten"), ("apps", "Apps & Integrationen")])]),
 ]
 
 
-def test_existing_navigation_is_untouched_and_live_energy_comes_last():
-    assert NAV_SECTIONS[:-1] == NAV_BEFORE_LIVE_ENERGY
-    assert NAV_SECTIONS[-1] == ("LIVE-ENERGIE", [
-        ("live_energy", "Übersicht"), ("live_energy_sources", "Messquellen"), ("live_energy_diagnostics", "Diagnose"),
-    ])
+def test_menu_groups_and_live_energy_kept_apart_from_official_data():
+    actual = [(g.key, g.label, [(title, list(items)) for title, items in g.sections]) for g in NAV_GROUPS]
+    assert actual == EXPECTED_MENU
+    # Every page of the menu has a route, and no page is in two groups.
+    routes = [r for g in NAV_GROUPS for r in g.routes]
+    assert len(routes) == len(set(routes)) and set(routes) <= set(ROUTE_PATHS)
+    assert nav_group_for("live_energy_sources").key == "energy"
+    assert nav_group_for("account").key == "system" and nav_group_for("unknown").key == "start"
 
 
 def test_page_needs_admin_rights_and_post_is_not_just_view():
@@ -381,7 +389,7 @@ def _statuses(service):
 def test_each_view_marks_its_own_menu_entry(service):
     for segments, label in (((), "Übersicht"), (["sources"], "Messquellen"), (["diagnostics"], "Diagnose")):
         html = live_energy.handle_get(_get(segments))
-        assert re.search(r'class="nav-link active">\s*<span>' + label, html), label
+        assert re.search(r'class="nav-link active"[^>]*>\s*<span>' + label, html), label
         assert html.count("nav-link active") == 1
 
 

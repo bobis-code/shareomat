@@ -34,6 +34,7 @@ def _row_to_participant(row: sqlite3.Row) -> Participant:
         postal_code=row["postal_code"],
         city=row["city"],
         active=bool(row["active"]),
+        phone=row["phone"] or "",
     )
 
 
@@ -77,14 +78,14 @@ def create_participant(db_path: Path, participant: Participant) -> Participant:
                 """
                 INSERT INTO participants
                     (community_id, participant_id, label, participant_type, email,
-                     address_line, postal_code, city, active, created_at, updated_at)
-                VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)
+                     address_line, postal_code, city, active, created_at, updated_at, phone)
+                VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     community_row_id, participant.participant_id, participant.label,
                     participant.email, participant.address_line,
                     participant.postal_code, participant.city,
-                    int(participant.active), now, now,
+                    int(participant.active), now, now, participant.phone,
                 ),
             )
     result = get_participant(db_path, participant.participant_id)
@@ -106,13 +107,13 @@ def update_participant(db_path: Path, participant_id: str, participant: Particip
                 """
                 UPDATE participants
                 SET participant_id=?, label=?, email=?, address_line=?,
-                    postal_code=?, city=?, active=?, updated_at=?
+                    postal_code=?, city=?, active=?, updated_at=?, phone=?
                 WHERE id=?
                 """,
                 (
                     participant.participant_id, participant.label,
                     participant.email, participant.address_line, participant.postal_code,
-                    participant.city, int(participant.active), now,
+                    participant.city, int(participant.active), now, participant.phone,
                     existing["id"],
                 ),
             )

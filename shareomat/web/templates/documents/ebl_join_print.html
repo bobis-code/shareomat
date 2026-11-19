@@ -1,0 +1,76 @@
+{# Standalone printable page (no navigation): notice to the grid operator that a new
+   participant joins the LEG. Layout follows EBL's participation form (labels left in grey,
+   light-blue fields right, bold consent, light-blue signature box) so it can be used in
+   its place - but without EBL's logo, letterhead or address: it is the LEG's notice. #}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    @page { size: A4; margin: 20mm 20mm 18mm 22mm; }
+    body { font-family: Verdana, Tahoma, Arial, sans-serif; font-size: 10pt; max-width: 46rem; margin: 2rem auto;
+           line-height: 1.45; color: #555; padding: 0 1rem; }
+    .head { text-align: right; font-size: 8.5pt; color: #777; min-height: 3.2rem; }
+    .title { color: #333; text-decoration: underline; margin: 2.2rem 0 .2rem; font-size: 10.5pt; }
+    .intro { margin: 0 0 2.4rem; }
+    .form { width: 100%; border-collapse: separate; border-spacing: 0 .35rem; }
+    .form th { width: 40%; text-align: left; font-weight: normal; color: #555; padding: 0 .6rem 0 0;
+               vertical-align: middle; white-space: nowrap; }
+    .form th small { font-size: 7.5pt; }
+    .form td { background: #dcebfa; padding: .15rem .5rem; height: 1.15rem; color: #111;
+               -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .id { font-family: "Courier New", monospace; }
+    .consent { font-weight: bold; color: #555; margin: .6rem 0 1.4rem; }
+    .sign { width: 100%; border-collapse: collapse; }
+    .sign th { width: 40%; text-align: left; font-weight: normal; color: #555; vertical-align: bottom;
+               padding-bottom: .3rem; }
+    .sign td { background: #dcebfa; height: 3rem; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .meta { margin-top: 3rem; font-size: 7.5pt; color: #888; }
+    .noprint { margin-bottom: 1rem; font-family: Arial, sans-serif; }
+    .warn { border: 2px solid #b91c1c; color: #b91c1c; padding: .5rem .6rem; margin-top: .6rem; }
+    .hint { border: 2px solid #d97706; color: #92400e; padding: .5rem .6rem; margin-top: .6rem; }
+    @media print { .noprint { display: none; } body { margin: 0; padding: 0; max-width: none; } }
+  </style>
+</head>
+<body>
+  <div class="noprint">
+    <button onclick="window.print()">Drucken / als PDF speichern</button>
+    {% if notice.missing %}
+    <div class="warn"><strong>Fehlt noch:</strong> {{ notice.missing | join(', ') }}. Diese Felder bleiben auf dem
+      Ausdruck leer und können von Hand ergänzt werden.</div>
+    {% endif %}
+    {% if notice.hints %}
+    <div class="hint">{{ notice.hints | join(', ') }}. Das Feld bleibt leer.</div>
+    {% endif %}
+  </div>
+
+  <div class="head">{{ notice.community_name }}{% if notice.representative %}<br>{{ notice.representative }}{% endif %}</div>
+
+  <p class="title">Bestätigung Eintritt in LEG durch neuen Teilnehmenden:</p>
+  <p class="intro">Meldeformular für den Eintritt eines neuen Teilnehmenden in eine bereits bestehende LEG.</p>
+
+  <table class="form">
+    <tr><th>Name LEG</th><td>{{ notice.community_name }}</td></tr>
+    <tr><th>LEG-Vertreter</th><td>{{ notice.representative }}</td></tr>
+    <tr><th>Name Teilnehmende <small>(Name, Vorname)</small></th><td>{{ notice.participant_name }}</td></tr>
+    <tr><th>Objektadresse <small>(Strasse, Nr., PLZ, Ort)</small></th><td>{{ notice.object_address }}</td></tr>
+    <tr><th>Messpunktnummer</th><td class="id">{{ notice.meter_ids | join(', ') }}</td></tr>
+    <tr><th>Leistung Erzeugungsanlage</th><td>{{ notice.generation_output }}</td></tr>
+    <tr><th>Anschlussleistung</th><td>{{ notice.connection_power }}</td></tr>
+    <tr><th>E-Mail</th><td>{{ notice.email }}</td></tr>
+    <tr><th>Telefon</th><td>{{ notice.phone }}</td></tr>
+    <tr><th>Startzeitpunkt der LEG-Teilnahme</th><td>{{ notice.start.strftime('%d.%m.%Y') if notice.start else '' }}</td></tr>
+  </table>
+
+  <p class="consent">Ich wurde über das LEG-Pflichtenheft und die Datenschutzrichtlinien in Kenntnis gesetzt
+    und bin damit einverstanden.</p>
+
+  <table class="sign">
+    <tr><th>Unterschrift Teilnehmende</th><td></td></tr>
+  </table>
+
+  <div class="meta">Angaben gemäss Teilnahmeformular des Netzbetreibers EBL für neue LEG-Teilnehmende.
+    Erstellt mit Shareomat am {{ printed_on.strftime('%d.%m.%Y') }}.</div>
+</body>
+</html>

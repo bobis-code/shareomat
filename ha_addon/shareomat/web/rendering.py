@@ -28,7 +28,7 @@ import jinja2
 from shareomat.config import RuntimeConfig
 from shareomat.core.price_validation import PriceValidationError, finite_decimal
 from shareomat.security.context import current_principal
-from shareomat.web.navigation import NAV_SECTIONS, PLACEHOLDER_ROUTES
+from shareomat.web.navigation import NAV_GROUPS, PLACEHOLDER_ROUTES, nav_group_for
 from shareomat.web.navigation import url_for as _url_for
 from shareomat.web.state import get_state
 
@@ -171,7 +171,8 @@ def render_page(template_name: str, ctx: RequestContext, active_route: str, **ex
     template = _env.get_template(template_name)
     context = dict(
         url_for=_url_for_bound,
-        nav_sections=NAV_SECTIONS,
+        nav_groups=NAV_GROUPS,
+        nav_group=nav_group_for(active_route),
         placeholder_routes=PLACEHOLDER_ROUTES,
         active_route=active_route,
         community_name=community_name,

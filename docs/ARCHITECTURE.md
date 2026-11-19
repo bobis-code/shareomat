@@ -235,6 +235,7 @@ database/                   SQLite, Quelle der Wahrheit für Stammdaten
   participant_checklist.py     Checkliste pro Teilnehmer, nur lesend (Abrechnung über billing_eligibility)
   backup.py                    «Sicherung erstellen» (Einstellungen): geprüfte ZIP-Kopie
   email_templates.py           E-Mail-Vorlagen (Willkommen, Rechnung, Gutschrift) in der settings-Tabelle
+  participant_documents.py     Dokumente pro Teilnehmer, nur lesend (EBL-Meldung Eintritt in die LEG)
   config_builder.py            RuntimeConfig + SQLite → LegConfig
   billing.py                   Interaktiver Abrechnungs-Workflow (Ausnahme: enthält Kernlogik, siehe Docstring dort)
   yaml_import.py               Einmaliger Import aus einer vorbestehenden leg_config.yaml
@@ -261,13 +262,16 @@ layout".
 
 ### Seiten der Web-Oberfläche
 
+Hauptmenü nach Aufgaben gruppiert (seit 0.6.19, `web/navigation.py` `NAV_GROUPS`): Gruppen oben als
+Tabs (auf dem Handy als Leiste unten), die Seiten der offenen Gruppe in der Seitenleiste.
+
 ```text
-Übersicht     — Dashboard
-VERWALTUNG    — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Tarife, Vertrag, E-Mail-Vorlagen
-BETRIEB       — Messdaten, Analyse, Abrechnungen, Rechnungen, Automatisierung, Berichte
-INTEGRATIONEN — Apps & Integrationen
-SYSTEM        — Einstellungen, Externe Daten
-LIVE-ENERGIE  — Übersicht, Messquellen, Diagnose (eigenständiger Bereich, ADR-0007)
+Start              — Übersicht
+LEG-Verwaltung     — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, Tarife
+Energie & Analyse  — Messdaten, Analyse, Berichte · Live-Energie: Übersicht, Messquellen, Diagnose (ADR-0007)
+Abrechnung         — Abrechnungen, Rechnungen
+Dokumente          — EBL-Meldungen, E-Mail-Vorlagen
+System             — Einstellungen, Automatisierung, Externe Daten, Apps & Integrationen
 ```
 
 "Apps & Integrationen" (`web/pages/apps.py`) zeigt Emsomat an: installiert

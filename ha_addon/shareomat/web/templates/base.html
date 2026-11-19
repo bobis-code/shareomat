@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', suffix='/app.css') }}">
 </head>
 <body>
+  {% include "components/topbar.html" %}
   <div class="layout">
     {% include "components/sidebar.html" %}
     <main class="content">

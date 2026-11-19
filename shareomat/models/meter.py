@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 
 @dataclass
@@ -40,3 +41,8 @@ class Meter:
     valid_from: date | None = None
     valid_until: date | None = None
     active: bool = True
+    # For the grid operator's participation form (EBL): output of the generation
+    # plant in kWp (None = not entered / no plant) and the connection capacity as
+    # the grid operator states it (free text, e.g. "3 x 25 A" or "17 kVA").
+    generation_kwp: Decimal | None = None
+    connection_power: str = ""

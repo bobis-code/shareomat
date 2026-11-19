@@ -12,6 +12,8 @@ Part of:
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+
 from shareomat.database.meters import (
     create_meter,
     get_meter,
@@ -37,6 +39,33 @@ from shareomat.web.rendering import (
     render_page,
 )
 from shareomat.web.state import get_state
+
+_MAX_KWP = Decimal("100000")
+_MAX_CONNECTION_POWER_LEN = 40
+
+
+def _kwp_from_form(ctx: RequestContext) -> Decimal | None:
+    """Output of the generation plant in kWp, optional; comma or point as decimal mark."""
+    raw = (ctx.form.get("generation_kwp") or "").strip().replace("'", "").replace(",", ".")
+    if not raw:
+        return None
+    try:
+        value = Decimal(raw)
+    except InvalidOperation:
+        raise FormError("Leistung Erzeugungsanlage: bitte eine Zahl in kWp eingeben, z. B. 9.8.") from None
+    if not value.is_finite() or value <= 0 or value > _MAX_KWP:
+        raise FormError("Leistung Erzeugungsanlage: grösser als 0 und höchstens 100'000 kWp.")
+    if value.as_tuple().exponent < -3:
+        raise FormError("Leistung Erzeugungsanlage: höchstens 3 Nachkommastellen.")
+    return value
+
+
+def _connection_power_from_form(ctx: RequestContext) -> str:
+    """Connection capacity as the grid operator states it (e.g. "3 x 25 A", "17 kVA"), one line of text."""
+    value = " ".join((ctx.form.get("connection_power") or "").split())
+    if len(value) > _MAX_CONNECTION_POWER_LEN or any(not ch.isprintable() for ch in value):
+        raise FormError(f"Anschlussleistung: höchstens {_MAX_CONNECTION_POWER_LEN} Zeichen, eine Zeile.")
+    return value
 
 METER_ROLES = [
     (METER_ROLE_PRODUCER, "Erzeuger"),
@@ -66,6 +95,8 @@ def _meter_from_form(ctx: RequestContext, *, meter_id: str) -> Meter:
         valid_from=form_date(ctx, "valid_from"),
         valid_until=form_date(ctx, "valid_until"),
         active=form_bool(ctx, "active"),
+        generation_kwp=_kwp_from_form(ctx),
+        connection_power=_connection_power_from_form(ctx),
     )
 
 

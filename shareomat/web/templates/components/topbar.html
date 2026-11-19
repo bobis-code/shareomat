@@ -1,0 +1,27 @@
+{# Top bar: logo, the menu groups as tabs, the account. On phones (app.css, max-width 720px)
+   the group tabs move to a bar fixed at the bottom of the screen - pure CSS, no JavaScript. #}
+{% from "components/nav_icons.html" import nav_icon %}
+<header class="topbar">
+  <a class="topbar-brand" href="{{ url_for('dashboard') }}">
+    <img class="topbar-logo" src="{{ url_for('banner') }}" alt="Shareomat">
+  </a>
+  <nav class="topnav" aria-label="Hauptmenü">
+    {% for group in nav_groups %}
+    <a href="{{ url_for(group.first_route) }}"
+       class="topnav-tab{% if group.key == nav_group.key %} active{% endif %}"
+       {% if group.key == nav_group.key %}aria-current="page"{% endif %}>
+      {{ nav_icon(group.icon) }}<span class="topnav-label">{{ group.label }}</span><span class="topnav-short">{{ group.short_label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+  {% if current_user %}
+  <div class="topbar-account">
+    <a href="{{ url_for('account') }}" class="topbar-user{% if active_route == 'account' %} active{% endif %}"
+       title="Mein Konto">{{ nav_icon('account') }}<span>{{ current_user.label }}</span></a>
+    <form method="post" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="topbar-logout">Abmelden</button>
+    </form>
+  </div>
+  {% endif %}
+</header>

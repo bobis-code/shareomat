@@ -63,6 +63,9 @@ IBAN = "CH93 0076 2011 6238 5295 7"   # valid example IBAN
 ISSUED = date(2027, 8, 5)
 LATER = date(2027, 12, 31)            # "today" for bookings in the tests
 
+# The QR code itself (core.payments.swiss_qr.qr_svg); the menu icons are SVG too.
+QR_SVG = '<svg xmlns="http://www.w3.org/2000/svg"'
+
 
 def _addr(pid: str, label: str, email: str = "", street: str = "Weg 1") -> Participant:
     return Participant(pid, label, email=email, address_line=street, postal_code="4000", city="Basel")
@@ -466,11 +469,11 @@ def test_invoices_page_workflow(db_path, runtime):
     preview = invoices_page.handle_get(RequestContext(method="GET", ingress_path="",
                                                       segments=["runs", str(run_id), "preview"]))
     assert "Bankdaten fehlen – nicht versandbereit" in preview and "disabled" in preview
-    assert "<svg" not in preview                                   # no QR code at all without bank data
+    assert QR_SVG not in preview                                   # no QR code at all without bank data
     assert "keine Gewähr" in preview and "für ihre Richtigkeit verantwortlich" in preview   # user checks every document
 
     settings = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": "settings"}))
-    assert "nicht eingerichtet" in settings and "Bankdaten fehlen" in settings and "<svg" not in settings
+    assert "nicht eingerichtet" in settings and "Bankdaten fehlen" in settings and QR_SVG not in settings
     form = {"csrf_token": csrf, "payee": "LEG Test Konto", "street": "Dorfstrasse", "building": "1",
             "postal_code": "4000", "city": "Basel", "country": "CH", "contact_email": "leg@example.ch"}
     with pytest.raises(FormError, match="IBAN ungültig"):
@@ -480,7 +483,7 @@ def test_invoices_page_workflow(db_path, runtime):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings"],
                                                  form={**form, "iban": IBAN}))
     settings = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", query={"tab": "settings"}))
-    assert "prüfen" in settings and "Musterzahlteil" in settings and "<svg" in settings
+    assert "prüfen" in settings and "Musterzahlteil" in settings and QR_SVG in settings
     version = get_payment_profile(db_path).version
     with pytest.raises(FormError, match="beide Punkte"):
         invoices_page.handle_post(RequestContext(method="POST", ingress_path="", segments=["settings", "confirm"],

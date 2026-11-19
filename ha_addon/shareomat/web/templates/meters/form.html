@@ -37,6 +37,18 @@
         beides. Bei „Speicher“: {{ storage_hint }}</div>
     </div>
     <div class="field">
+      <label for="generation_kwp">Leistung Erzeugungsanlage (kWp)</label>
+      <input type="text" id="generation_kwp" name="generation_kwp" inputmode="decimal" autocomplete="off"
+             value="{{ meter.generation_kwp if meter and meter.generation_kwp is not none else '' }}">
+      <div class="field-hint">Nur bei einer Erzeugungsanlage (z. B. PV), sonst leer lassen.</div>
+    </div>
+    <div class="field">
+      <label for="connection_power">Anschlussleistung</label>
+      <input type="text" id="connection_power" name="connection_power" maxlength="40" autocomplete="off"
+             value="{{ meter.connection_power if meter else '' }}">
+      <div class="field-hint">Wie vom Netzbetreiber angegeben, z. B. «3 x 25 A» oder «17 kVA».</div>
+    </div>
+    <div class="field">
       <label for="valid_from">Gültig ab</label>
       <input type="date" id="valid_from" name="valid_from" value="{{ meter.valid_from if meter else '' }}">
     </div>

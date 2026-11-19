@@ -27,7 +27,7 @@ from shareomat.models.community import Community
 from shareomat.models.invoicing import DOC_TYPE_CREDIT, DOC_TYPE_INVOICE, BillingDocument
 from shareomat.security.context import Principal, set_principal
 from shareomat.security.permissions import required_permission
-from shareomat.web.navigation import NAV_SECTIONS
+from shareomat.web.navigation import nav_group_for
 from shareomat.web.pages import email_templates as page
 from shareomat.web.rendering import FormError, RequestContext
 from shareomat.web.state import get_state
@@ -192,8 +192,7 @@ def test_unknown_kind_is_refused(db_path):
 
 
 def test_menu_entry_and_permission():
-    verwaltung = dict(NAV_SECTIONS)["VERWALTUNG"]
-    assert ("email_templates", "E-Mail-Vorlagen") in verwaltung
+    assert nav_group_for("email_templates").label == "Dokumente"
     assert required_permission("POST", "email_templates", ["welcome"]) == "masterdata.edit"
     assert required_permission("GET", "email_templates", ["welcome"]) == "view"
 

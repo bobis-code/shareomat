@@ -23,6 +23,12 @@
       <input type="email" id="email" name="email" value="{{ participant.email if participant else '' }}">
     </div>
     <div class="field">
+      <label for="phone">Telefon</label>
+      <input type="text" id="phone" name="phone" maxlength="30" autocomplete="off" inputmode="tel"
+             value="{{ participant.phone if participant else '' }}">
+      <div class="field-hint">Für die Meldung an den Netzbetreiber (EBL-Teilnahmeformular).</div>
+    </div>
+    <div class="field">
       <label for="address_line">Adresse</label>
       <input type="text" id="address_line" name="address_line" value="{{ participant.address_line if participant else '' }}">
     </div>

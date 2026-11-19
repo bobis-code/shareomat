@@ -207,7 +207,7 @@ def test_lists_filter_by_month_and_status_with_kpis(db_path, runtime, issued):
 
 def test_mobile_menu_collapses_and_tables_become_cards(db_path, runtime, issued):
     html = _get(invoices_page)
-    assert 'id="nav-toggle"' in html and "☰ Menü · <strong>Rechnungen</strong>" in html
+    assert 'id="nav-toggle"' in html and "☰ Abrechnung · <strong>Rechnungen</strong>" in html
     from pathlib import Path
     css = (Path(__file__).resolve().parents[1] / "shareomat/web/static/app.css").read_text(encoding="utf-8")
     assert "table.cards td::before" in css and ".nav-toggle-input:checked ~ .nav-body" in css

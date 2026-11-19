@@ -21,6 +21,8 @@ Notes:
 
 from __future__ import annotations
 
+import re
+
 from shareomat.core.participant_roles import participant_roles, roles_by_participant
 from shareomat.database.meters import list_meters
 from shareomat.database.participants import (
@@ -41,6 +43,16 @@ from shareomat.web.rendering import (
 )
 from shareomat.web.state import get_state
 
+# Swiss and international numbers as people write them: digits, spaces, + ( ) / . -
+_PHONE_RE = re.compile(r"^[0-9+()/. -]{0,30}$")
+
+
+def _phone_from_form(ctx: RequestContext) -> str:
+    phone = " ".join((ctx.form.get("phone") or "").split())
+    if not _PHONE_RE.match(phone):
+        raise FormError("Telefon: höchstens 30 Zeichen, nur Ziffern, Leerzeichen und + ( ) / . -")
+    return phone
+
 def _participant_from_form(ctx: RequestContext, *, participant_id: str) -> Participant:
     return Participant(
         participant_id=participant_id,
@@ -50,6 +62,7 @@ def _participant_from_form(ctx: RequestContext, *, participant_id: str) -> Parti
         postal_code=(ctx.form.get("postal_code") or "").strip(),
         city=(ctx.form.get("city") or "").strip(),
         active=form_bool(ctx, "active"),
+        phone=_phone_from_form(ctx),
     )
 
 
