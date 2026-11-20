@@ -282,7 +282,7 @@ Der Ablauf ist wie gewünscht:
 * Ist zwischen ihrem Ende und dem neuen Beginn eine Lücke, warnt Shareomat **vor** dem
   Veröffentlichen, etwa «Vom 01.03. bis 31.03.2027 gilt kein Vertrag – keine
   Abrechnung».
-* Für LEG-TEST heisst das: Die Anschlussversion ab 01.03.2027 entweder mit Zustimmung
+* Für unsere LEG heisst das: Die Anschlussversion ab 01.03.2027 entweder mit Zustimmung
   aller (ohne Frist) veröffentlichen, oder die Lücke bewusst in Kauf nehmen.
 
 ---

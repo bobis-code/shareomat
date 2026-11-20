@@ -210,8 +210,8 @@ def _settings_from_form(ctx: RequestContext) -> ContractSettings:
 def _compute_rates(*, local_rate: Decimal, admin_fee: Decimal) -> Decimal:
     """Derive the Produzentenvergütung from the LEG-Bezugspreis and the Verwaltungsgebühr.
 
-    The LEG sets its own price (LEG-Mustervertrag §3; LEG_TEST_Mehrparteien
-    §12 Variante 3): consumers pay local_rate per LEG-kWh, the administration
+    The LEG sets its own price (LEG-Mustervertrag §3; Mehrparteien-
+    Spezifikation §12 Variante 3): consumers pay local_rate per LEG-kWh, the administration
     keeps admin_fee of it, producers receive the rest. The grid operator's
     reference price plays no part here. A fee larger than the price would
     mean a negative producer rate — rejected rather than silently clamped.

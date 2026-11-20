@@ -248,9 +248,11 @@ deploy_local_addon.bat
 # staged here temporarily, meant to be copied out and deleted (not shareomat content)
 /_templates/
 
-# Private LEG-TEST project notes and third-party source files (kept locally only)
-docs/Energieversorgungsunternehmen/**/*.json
-docs/Energieversorgungsunternehmen/**/*LEG_TEST*.md
+# Private LEG project notes and third-party source files (kept locally only).
+# Everything in this folder stays local except the explicitly listed public files.
+docs/Energieversorgungsunternehmen/**/*
+!docs/Energieversorgungsunternehmen/**/
+!docs/Energieversorgungsunternehmen/EBL/EBL_Tarife_2027.md
 
 # Temporary working notes/demos (not versioned)
 docs/temp/

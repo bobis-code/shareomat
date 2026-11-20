@@ -1207,7 +1207,7 @@ Messdaten und gehören nie ins Repository.
 | O2 | ✓ für E66: 7 Dateien empfangen, archiviert und importiert, Duplikaterkennung bestätigt. E31 kam noch keine |
 | O3 | Gilt **nicht exakt**: EBL rundet Total, LEG- und Restenergie je auf 0.001 kWh. In 5 von 2112 Viertelstunden weicht Total um −0.001 kWh ab, im Energie-Clearing in 2 Viertelstunden um +0.001 kWh. Darum ab 0.6.18 Toleranz von einer Stelle (siehe unten) |
 | O4 | offen, bisher nur Status 9 (Original) |
-| O5 | EBL setzt `isIntelligibleCheckRequired` in jeder Datei. Format und Weg der Quittung bei EBL/Swisseldex klären; Shareomat sendet weiterhin keine |
+| O5 | EBL setzt `isIntelligibleCheckRequired` in jeder Datei. Format und Weg der Quittung bei EBL/Swisseldex klären; Shareomat sendet weiterhin keine. Prüfung vom 20.11.2026 siehe unten; Rückfrage an Swisseldex gesendet, Antwort ausstehend |
 | O6 | Tageslieferungen tragen **kein** Qualitätskennzeichen (weder 21 noch 56), obwohl sie nach VSE nicht plausibilisiert sind. Shareomat kann sie darum nicht von der Monatslieferung unterscheiden: erst nach der Monatslieferung abrechnen |
 | O7 | ✓ Add-on wird in Home Assistant gebaut (0.6.17 installiert) |
 
@@ -1259,6 +1259,106 @@ Monatstabelle auf «Messdaten»):
 
 Beide verwenden dieselben Werte wie die Abrechnung (`load_official_values()`: neueste Lieferung
 je Viertelstunde, Stornos, kein Ersatz eines plausibilisierten Werts durch einen vorläufigen).
+
+### Stand 20.11.2026: weitere Lieferungen, Quittung, Löschen
+
+Ausgewertet nur lesend mit einer Kopie der Shareomat-Sicherung vom 20.11.2026; die Kopie wurde
+danach gelöscht.
+
+**Lieferungen:**
+
+* 9 Tageslieferungen E66, erstellt vom 12. bis 20.11.2026, eine pro Tag, alle importiert.
+* Daten vom 07. bis 19.11.2026, jeder Tag mit 96 Viertelstunden je Messpunkt. Für den 01. bis
+  06.11. kam weiterhin nichts.
+* 12'672 Werte wurden mehrfach geliefert, keiner davon geändert.
+* LEG-Aufteilung erneut gegen Art. 19g Abs. 4 StromVV geprüft: 2'496 Werte, höchste Abweichung
+  0.0005 kWh (Rundung).
+
+**Quittung (O5):**
+
+* Alle 9 Lieferungen verlangen eine Quittung (`isIntelligibleCheckRequired="true"`; in den 7
+  Dateien vom 18.11. direkt im XML geprüft, für alle 9 im Import).
+* Die offiziellen VSE-Beispieldateien zu SDAT-CH 2025
+  (`20251204-be-standardisierter-datenaustausch-ch-beispieldateien.zip`) setzen das Merkmal
+  ebenfalls, auch 1_12_3 «Lastgänge/Einspeisegänge an LEG-Vertreter». Es ist also die übliche
+  Einstellung, keine Sonderforderung von EBL.
+* SDAT-CH 2025 Anhang 1 «Acknowledgement und Error Handling» (Stand 04.12.2025, ganz gelesen):
+  * §2.1 (S. 5): drei Ebenen. Couvertebene: nicht interpretierbare Datei → «Syntax Error
+    Report», keine positive Nachricht. Strukturebene: «Acknowledgement of Acceptance», «wenn die
+    Informationen interpretiert werden können und der Sender eine solche in der Nachricht
+    verlangt»; «Model Error Report» im Fehlerfall immer. Inhaltebene: beim jeweiligen Prozess.
+  * §2.5, Tabelle 2 (S. 7): Acknowledgement of Acceptance = Typ **312**, Model Error Report =
+    Typ **313**, Syntax Error Report ohne Nachrichtentyp (Mitteilung per E-Mail/Fax an den
+    Sender); jeweils «unverzüglich, spätestens jedoch 1 AT nach Eingang der Nachricht».
+  * §3 (S. 10): Kann der Empfänger innert 24 Stunden weder ein Acknowledgement of Acceptance
+    noch einen Model Error Report zustellen, hat er dies dem Sender mitzuteilen. Der Sender
+    meldet sich, wenn er nach 24 Stunden nichts erhalten hat.
+  * Abb. 3 (S. 9), Klassendiagramm Acknowledgement of Acceptance: Die Liste der Rollen
+    (BusinessRoleCode) enthält **kein CEM** (LEG-Vertreter). Ob das XSD einen 312 mit Sender CEM
+    zulässt: nicht geprüft.
+* Swisseldex-Benutzerhandbuch v3.5.0 vom 28.09.2026:
+  * Automatisch quittiert der Datahub nur im **SDAT Webclient** (Kap. 3.6, S. 28): «Der Datahub
+    beantwortet neue Nachrichten im SDAT Webclient automatisch mit einem "Acknowledgement of
+    Acceptance" gemäss SDAT Standard Anhang 1». Nachrichten im Webclient werden nicht über
+    FTPES geroutet.
+  * Zum **Server beim Datahub** (Kap. 3.4.2, S. 22) steht nichts zur Quittung: weder dass der
+    Datahub quittiert, noch wie der Empfänger selbst quittiert.
+  * **Benachrichtigungen** (Kap. 3.5, S. 24–25): «SDAT definiert nicht überall genügend
+    detaillierte Fehlermeldungen bei der Nachrichtenübertragung (nur Syntax / Model Error
+    Reports). Der Datahub erstellt ergänzend bei jedem Fehler eine möglichst aussagekräftige
+    Fehlermeldung. Diese werden als "Benachrichtigungen" für den Marktpartner angezeigt.» Bei
+    der ersten neuen Benachrichtigung geht eine E-Mail an die **Kontakt-E-Mail-Adresse des
+    Marktpartners** (nicht an die persönliche Adresse); die nächste erst, wenn die Liste
+    angesehen wurde oder nach 7 Tagen.
+  * Die **Screenshots** dazu zeigen Benachrichtigungen mit dem Betreff «Ausstehende
+    Empfangsbestätigung» (S. 25) und in der Detailansicht (S. 27): «Für diese Nachricht wurde
+    keine Empfangsbestätigung innerhalb von 24 Stunden empfangen.» Eine fehlende Quittung ist
+    also eine solche Fehlermeldung. Die Bilder sind ein Beispiel aus einem **VNB-Konto**
+    (Nachrichten an diesen VNB, 2022/2024); dass dasselbe für einen CEM mit «Server beim
+    Datahub» gilt, zeigen sie nicht.
+  * «Mit dem Zustellen einer Benachrichtigung gilt für den Datahub eine SDAT-Nachricht als
+    zugestellt», insbesondere wenn der FTPES-Server des Empfängers nicht erreichbar ist (betrifft
+    vor allem die Zustellung auf einen eigenen Server des Empfängers).
+  * Korrektur: Eine erste Fassung dieses Abschnitts sagte, ausstehende Quittungen seien im
+    Handbuch nicht beschrieben. Die Textsuche hatte die Screenshots nicht erfasst (Hinweis aus
+    der Gegenprüfung vom 20.11.2026, an den Bildern nachgeprüft).
+* Open question: Die Nachrichten verlangen eine Quittung. **Wer** sie bei unserer Konfiguration
+  «Server beim Datahub» technisch erzeugt (Datahub stellvertretend oder der LEG-Vertreter
+  selbst), ist nicht dokumentiert. Weil keine Fehlermeldung vorliegt (siehe unten), genügt
+  eine kurze Rückfrage zur Bestätigung. **Rückfrage an den Swisseldex-Support am 20.11.2026
+  gesendet** (drei Fragen: eigene Quittung nötig? Datahub quittiert stellvertretend? falls
+  selbst: Typ 312, Empfänger, Verzeichnis, Dateiname; mit Hinweis, dass CEM in Anhang 1,
+  Abb. 3 fehlt). Antwort ausstehend. Bis zur schriftlichen Antwort sendet Shareomat keine
+  Quittungen.
+
+**Löschen auf dem Datahub:**
+
+* Handbuch Kap. 3.4.2: «laden Sie Ihre SDAT-Nachrichten herunter und löschen Sie
+  heruntergeladene SDAT-Nachrichten (empfohlen)» und «Nicht abgeholte SDAT-Nachrichten auf dem
+  Server beim Datahub werden nach 30 Tagen automatisch gelöscht.» Ob abgeholte Nachrichten
+  ebenfalls nach 30 Tagen gelöscht werden, steht nicht im Handbuch.
+* Shareomat löscht, verschiebt und lädt nichts auf dem Datahub
+  (`shareomat/core/collector/swisseldex_ftpes.py`, `swisseldex_receiver.py`). Abgeholte
+  Dateien werden lokal archiviert: `.part`-Datei, Grössenprüfung, fsync, Umbenennen in
+  `<SHA-256-Präfix>_<Name>`, dann Eintrag im Zustand (`<state>/swisseldex/received/`, im
+  Add-on `/config/shareomat/state/swisseldex/received/`). Die Werte stehen nach dem Import
+  zusätzlich in `shareomat.db`.
+* Löschen bleibt aus, bis das Verhalten geklärt ist. Ein Löschen auf dem Datahub braucht
+  einen eigenen Entscheid (ADR).
+
+**Hinweise auf Zustellprobleme:** In den Daten keine (tägliche Lieferung ohne Lücke, alle
+Dateien importiert, keine abgewiesen). Im WebGUI «Benachrichtigungen» war am 20.11.2026 nichts,
+obwohl 8 der 9 Nachrichten älter als 24 Stunden waren. Nach Kap. 3.5 heisst das: Der Datahub
+hat für unsere Nachrichten keinen Fehler registriert, auch keine ausstehende Quittung. Offen
+bleibt nur, ob er eine fehlende Quittung bei «Server beim Datahub» überhaupt als Fehler wertet
+(das Handbuch schränkt «bei jedem Fehler» nicht ein). Die Kontakt-E-Mail-Adresse des
+Marktpartners bei Swisseldex muss eine gelesene Adresse sein: Über sie kommt die Meldung.
+
+**Datenvollständigkeit November (offen):** Für den 01. bis 06.11.2026 fehlen alle Werte. Die
+Tageslieferungen zeigen, dass die Übertragung funktioniert, nicht dass der Monat vollständig
+ist. Vor der ersten Monatsabrechnung zu klären: kommt der Zeitraum mit der Monatslieferung, oder
+gilt der 07.11. als tatsächlicher LEG-Start (dann unter «Gemeinschaft» als bestätigten Start
+eintragen)?
 
 ---
 

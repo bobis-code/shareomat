@@ -114,14 +114,14 @@ def test_draft_create_creates_a_draft_version(db_path) -> None:
 def test_draft_create_text_ends_with_identification_footer(db_path) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test LEG"))
     contract.handle_post(_post(["draft", "create"], dict(
-        _PRICE_FORM, representative_name="bobis-code", valid_from="2027-01-01",
+        _PRICE_FORM, representative_name="Max Muster", valid_from="2027-01-01",
     )))
 
     draft = list_contract_versions(db_path)[0]
     text = draft.contract_text_snapshot
     assert f"Version: {draft.version}" in text  # real assigned number, not the placeholder 0
     assert "Gültig ab: 01.01.2027" in text
-    assert "LEG-Vertreter: bobis-code" in text
+    assert "LEG-Vertreter: Max Muster" in text
 
 
 def test_draft_update_text_keeps_original_version_number(db_path) -> None:

@@ -528,7 +528,7 @@
         <mxCell id="data_22" value="STATUS / AUDIT" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="2102" y="1305" width="350" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="data_23" value="SHAREOMAT  |  LEG-TEST  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
+        <mxCell id="data_23" value="SHAREOMAT  |  LEG  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="68" y="1380" width="2210" height="32" as="geometry" />
         </mxCell>
         <mxCell id="data_24" value="SEITE 02 / 07" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
@@ -827,7 +827,7 @@
         <mxCell id="matching_22" value="STATUS / AUDIT" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="2102" y="1305" width="350" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="matching_23" value="SHAREOMAT  |  LEG-TEST  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
+        <mxCell id="matching_23" value="SHAREOMAT  |  LEG  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="68" y="1380" width="2210" height="32" as="geometry" />
         </mxCell>
         <mxCell id="matching_24" value="SEITE 03 / 07" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
@@ -1111,7 +1111,7 @@
         <mxCell id="financial_22" value="STATUS / AUDIT" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="2102" y="1305" width="350" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="financial_23" value="SHAREOMAT  |  LEG-TEST  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
+        <mxCell id="financial_23" value="SHAREOMAT  |  LEG  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="68" y="1380" width="2210" height="32" as="geometry" />
         </mxCell>
         <mxCell id="financial_24" value="SEITE 04 / 07" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
@@ -1419,7 +1419,7 @@
         <mxCell id="operation_22" value="STATUS / AUDIT" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="2102" y="1305" width="350" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="operation_23" value="SHAREOMAT  |  LEG-TEST  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
+        <mxCell id="operation_23" value="SHAREOMAT  |  LEG  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="68" y="1380" width="2210" height="32" as="geometry" />
         </mxCell>
         <mxCell id="operation_24" value="SEITE 05 / 07" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
@@ -1703,7 +1703,7 @@
         <mxCell id="matrix_22" value="STATUS / AUDIT" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="2102" y="1305" width="350" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="matrix_23" value="SHAREOMAT  |  LEG-TEST  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
+        <mxCell id="matrix_23" value="SHAREOMAT  |  LEG  |  Stand: 28.10.2026  |  Datenfluss &amp; Facharchitektur · implementierte und geplante Funktionen getrennt" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="68" y="1380" width="2210" height="32" as="geometry" />
         </mxCell>
         <mxCell id="matrix_24" value="SEITE 06 / 07" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
@@ -2074,7 +2074,7 @@
         <mxCell id="emsomat_sparkplug_22" value="STATUS / AUDIT" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=17;fontColor=#5C7389;fontStyle=1;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="2102" y="1305" width="350" height="34" as="geometry" />
         </mxCell>
-        <mxCell id="emsomat_sparkplug_23" value="SHAREOMAT  |  LEG-TEST  |  Stand: 28.10.2026  |  Kernsystem, Sparkplug B und Finanzprozesse · Stand je Integration separat" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
+        <mxCell id="emsomat_sparkplug_23" value="SHAREOMAT  |  LEG  |  Stand: 28.10.2026  |  Kernsystem, Sparkplug B und Finanzprozesse · Stand je Integration separat" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=15;fontColor=#536B7D;fontStyle=0;align=left;verticalAlign=middle;spacing=0;" vertex="1" parent="1">
           <mxGeometry x="68" y="1380" width="2210" height="32" as="geometry" />
         </mxCell>
         <mxCell id="emsomat_sparkplug_24" value="SEITE 07 / 07" style="text;html=0;whiteSpace=wrap;overflow=hidden;fillColor=none;strokeColor=none;fontFamily=Helvetica;fontSize=16;fontColor=#536B7D;fontStyle=1;align=right;verticalAlign=middle;spacing=0;" vertex="1" parent="1">

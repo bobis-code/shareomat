@@ -34,7 +34,7 @@ _DUMMY_HASH = _hasher.hash("shareomat-dummy-password-for-timing")
 _WEAK = {
     "passwortpasswort", "passwordpassword", "123456789012", "1234567890123", "qwertzuiopü", "qwertyuiopasdf",
     "shareomatshareomat", "adminadminadmin", "willkommen123", "sommer2026sommer", "winter2026winter",
-    "passwort1234", "password1234", "hallohallohallo", "123456123456", "abcdefghijkl", "leg-test-leg-test",
+    "passwort1234", "password1234", "hallohallohallo", "123456123456", "abcdefghijkl", "legleglegleg",
 }
 
 

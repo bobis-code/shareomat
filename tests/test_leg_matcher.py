@@ -173,7 +173,7 @@ class TestMatchSlot:
         assert result.meter_grid_export_kwh["M1"] == pytest.approx(0.0)
 
     def test_spec_example_a_two_producers_three_consumers(self):
-        """LEG_TEST_Mehrparteien §5: P=12, C=8 → P1 sells 6, P2 sells 2, every consumer fully covered."""
+        """Mehrparteien-Spezifikation §5: P=12, C=8 → P1 sells 6, P2 sells 2, every consumer fully covered."""
         slot = EnergySlot(
             slot_start=TS,
             producer_export={"P1": 9.0, "P2": 3.0},
@@ -192,7 +192,7 @@ class TestMatchSlot:
         assert result.flows["P2"] == pytest.approx({"C1": 1.0, "C2": 0.75, "C3": 0.25})
 
     def test_spec_example_b_shortfall(self):
-        """LEG_TEST_Mehrparteien §6: P=5, C=10 → every consumer 50 %, clearing P1→C1 1.8 etc."""
+        """Mehrparteien-Spezifikation §6: P=5, C=10 → every consumer 50 %, clearing P1→C1 1.8 etc."""
         slot = EnergySlot(
             slot_start=TS,
             producer_export={"P1": 3.0, "P2": 2.0},

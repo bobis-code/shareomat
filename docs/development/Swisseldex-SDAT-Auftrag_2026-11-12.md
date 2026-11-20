@@ -12,7 +12,7 @@ Wir wollen die bestehende Shareomat-Installation um einen vollständigen, zuverl
 
 Bereits vorhanden beziehungsweise eingerichtet sind unter anderem:
 
-- Die LEG-Gemeinschaft LEG-TEST
+- Unsere LEG-Gemeinschaft
 - Teilnehmer mit ihren Stammdaten
 - Zugeordnete Messpunkte
 - Erfasste und teilweise bereits zugeordnete Verträge
