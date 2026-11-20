@@ -148,6 +148,11 @@ class BillingPreview:
     grid_rate_chf_kwh: Decimal
     feed_in_rate_chf_kwh: Decimal
     line_items: list[BillingLineItem]
+    # True: computed from the grid operator's official SDAT allocation; False: from e-mail/CSV meter data.
+    official_source: bool = False
+    # With e-mail/CSV: official SDAT values exist for the period but are not used. Shown on the
+    # preview only - never part of the issues, so imported SDAT data changes nothing in a CSV billing.
+    official_data_unused: bool = False
 
     @property
     def total_local_kwh(self) -> Decimal:

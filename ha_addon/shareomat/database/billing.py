@@ -638,6 +638,9 @@ def compute_billing_preview(
         grid_rate_chf_kwh=reference_tariff.grid_rate_chf_kwh,
         feed_in_rate_chf_kwh=reference_tariff.feed_in_rate_chf_kwh,
         line_items=line_items,
+        official_source=official,
+        # The preview showed "no data" while the grid operator's values were imported (20.11.2026).
+        official_data_unused=not official and _official_data_exists(db_path, period_start, period_end),
     )
 
 
@@ -697,6 +700,14 @@ def _official_clearing(billable, splits) -> tuple[list[str], list[str]]:
             f"(zusammen {rounded_kwh:+.3f} kWh). Abgerechnet werden die Werte des Netzbetreibers."
         )
     return hard, notes
+
+
+def _official_data_exists(db_path: Path, period_start: date, period_end: date) -> bool:
+    """Whether imported official SDAT values of this community fall into the period."""
+    from shareomat.database.sdat_store import load_official_values
+
+    start_dt, end_dt = _period_bounds(period_start, period_end)
+    return bool(load_official_values(db_path, start_dt, end_dt).values)
 
 
 def _month_parts(period_start: date, period_end: date) -> list[tuple[date, date]]:
