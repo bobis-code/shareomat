@@ -264,3 +264,10 @@ docs/Temp/
 
 # Forms of the grid operator (EBL): their documents with their logo, never in this public repo.
 docs/examples/EBL_Teilnahmeformular/*.pdf
+
+# Local diagram drafts and exports (may show the real community name): never versioned
+docs/Architektur/Diagramm/Export/
+docs/Architektur/Diagramm/*_V3.png
+docs/Architektur/Diagramm/Shareomat_Architecture_Whitepaper_light_v3*.drawio
+docs/Architektur/Diagramm/Shareomat_Architecture_Whitepaper_light_v4*.drawio
+docs/Architektur/Ziel/
