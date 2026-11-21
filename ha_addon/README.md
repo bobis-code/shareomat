@@ -146,6 +146,19 @@ the whole add-on, use a Home Assistant backup (it contains `/data`). The
 Shareomat backup is the copy to file away, inspect and keep outside Home
 Assistant.
 
+### Raw backup of the Swisseldex originals (network storage)
+
+Settings → **Rohdatensicherung**. Shareomat copies every file fetched from the Swisseldex
+Datahub, unchanged and write-once, to a network storage, before it archives or imports it. It
+then reads the copy back and checks its SHA-256 (ADR-0010). Add the storage in Home Assistant
+(Settings → System → Storage) with usage **Share**: it appears as `/share/<name>`, and the
+add-on already maps `share:rw`. Next to each file there is a `<name>.sha256` proof file.
+Shareomat never overwrites, renames or deletes anything there. With the mode "Pflicht"
+(required), a file without a verified backup is neither archived nor imported. An interrupted
+copy is completed automatically on the next sync. **Speicher testen** writes one small test
+file to `verbindungstest/`, reads it back and proves that the storage refuses overwriting.
+Switching to "Pflicht" runs the test first.
+
 ### Home Assistant backups
 
 The add-on is backed up **cold** (`backup: cold` in `config.yaml`): Home

@@ -35,6 +35,15 @@ Notes:
     Leftover `.part` files are removed at start; an unrecorded file is
     simply downloaded again by the next sync.
 
+    Raw backup (ADR-0010): downloads are only staged during the session.
+    After it is closed (the Datahub drops idle sessions after 10 s), every
+    staged file is first copied write-once to the network storage and
+    verified (shareomat.core.collector.raw_backup), and only then archived
+    (the .gz check reads it) and offered to the import. With the mode
+    "required" a file without a verified backup is neither archived nor
+    recorded as seen, so the next sync downloads it again; received files
+    without a verified backup are never handed to the import.
+
     The Datahub refuses a second login within 60 s (manual 4.4). Every
     session - test, manual or automatic sync - passes one gate; the last
     login time is persisted, so a restart does not bypass it either. A
@@ -58,6 +67,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from shareomat.config import SwisseldexConfig
+from shareomat.core.collector.raw_backup import RawBackupError
 from shareomat.core.collector.swisseldex_ftpes import (
     MAX_FILE_BYTES,
     DownloadAborted,
@@ -75,6 +85,10 @@ TRIGGER_AUTO = "auto"
 
 FILE_RECEIVED = "received"
 FILE_NEEDS_REVIEW = "needs_review"
+
+BACKUP_OK = "ok"
+BACKUP_BYPASS = "bypass"
+BACKUP_ERROR = "error"
 
 RESULT_OK = "ok"
 RESULT_WARNING = "warning"
@@ -95,6 +109,12 @@ _MAX_STATE_BYTES = 20 * 1024 * 1024
 _MAX_RUNS = 200
 _MAX_SEEN = 50_000
 _IDLE_WAIT_SECONDS = 30.0
+_MAX_BACKUP_FAILURES = 500
+
+_BACKUP_WARNING = (
+    "Rohdatensicherung: {count} Swisseldex-Datei(en) konnten nicht auf dem Netzwerkspeicher gesichert werden "
+    "und werden nicht verarbeitet. Details unter «Externe Daten»."
+)
 
 _OVERDUE_WARNING = (
     "Swisseldex: seit {days} Tagen keine erfolgreiche Synchronisation. Nicht abgeholte "
@@ -150,6 +170,7 @@ def _empty_state() -> dict[str, Any]:
         "files": {},
         "seen": {},
         "skipped": {},
+        "backup_failures": {},
         "runs": [],
     }
 
@@ -168,7 +189,7 @@ def _read_state(path: Path) -> dict[str, Any]:
         raise SwisseldexStateError(f"state file has an unknown format: {path}")
     merged = _empty_state()
     merged.update(state)
-    for field_name in ("files", "seen", "skipped"):
+    for field_name in ("files", "seen", "skipped", "backup_failures"):
         if not isinstance(merged[field_name], dict):
             raise SwisseldexStateError(f"state field {field_name} is invalid: {path}")
     if not isinstance(merged["runs"], list) or not isinstance(merged["next_run_id"], int):
@@ -252,6 +273,14 @@ def _run_message(record: dict[str, Any]) -> str:
         parts.append(f"{record['not_imported']} nicht importiert")
     if record.get("import") == "error":
         parts.append("Import fehlgeschlagen")
+    if record.get("backed_up"):
+        parts.append(f"{record['backed_up']} auf dem Netzwerkspeicher gesichert")
+    if record.get("backfilled"):
+        parts.append(f"{record['backfilled']} nachträglich gesichert")
+    if record.get("backup_failed"):
+        parts.append(f"{record['backup_failed']} NICHT gesichert – nicht verarbeitet")
+    if record.get("backup_bypass"):
+        parts.append("Rohdatensicherung ausgeschaltet (nur lokal)")
     return ", ".join(parts) + "."
 
 
@@ -265,6 +294,8 @@ class SwisseldexReceiver:
     SwisseldexFtpesSession from the config and uses wall-clock time (the
     login gate survives a restart, so it must be wall clock).
     `warn`/`unwarn` show and remove the overdue warning in the web UI.
+    `raw_backup` (shareomat.core.collector.raw_backup.RawBackupGuard) backs
+    up every new file before it is archived; None keeps the old behaviour.
     """
 
     def __init__(
@@ -277,9 +308,12 @@ class SwisseldexReceiver:
         warn: Callable[[str], None] | None = None,
         unwarn: Callable[[str], None] | None = None,
         importer: Callable[[list[tuple[Path, str, str]], bool], list | None] | None = None,
+        raw_backup: Any = None,
     ) -> None:
         self._config = config
         self._importer = importer
+        self._raw_backup = raw_backup
+        self._shown_backup_warning = ""
         self._base_dir = base_dir
         self._received_dir = base_dir / "received"
         self._state_path = base_dir / "state.json"
@@ -382,6 +416,10 @@ class SwisseldexReceiver:
             )
             skipped = [{"name": name, **info} for name, info in state["skipped"].items()]
             needs_review = sum(1 for f in state["files"].values() if f.get("status") == FILE_NEEDS_REVIEW)
+            backup_failures = sorted(state["backup_failures"].values(),
+                                     key=lambda f: f.get("attempted_at") or "", reverse=True)
+            not_backed_up = sum(1 for f in state["files"].values()
+                                if (f.get("raw_backup") or {}).get("status") != BACKUP_OK)
             return {
                 "configured": bool(self._config.username and self._config.password),
                 "state_error": self._state_error,
@@ -403,12 +441,21 @@ class SwisseldexReceiver:
                 "received_total": len(state["files"]),
                 "needs_review_total": needs_review + len(state["skipped"]),
                 "overdue_days": self._overdue_days(),
+                "raw_backup": self._raw_backup.describe() if self._raw_backup is not None else None,
+                "backup_failures": [dict(f) for f in backup_failures[:file_limit]],
+                "not_backed_up_total": not_backed_up,
             }
 
     def received_files(self) -> list[tuple[Path, str, str]]:
-        """(archived path, sha256, remote name) of every received file that is not marked for review."""
+        """(archived path, sha256, remote name) of every received file that is not marked for review.
+
+        With a required raw backup only files whose backup was verified: nothing else reaches the import.
+        """
+        required = self._backup_required()
         with self._lock:
-            entries = [dict(f) for f in self._state["files"].values() if f.get("status") == FILE_RECEIVED]
+            entries = [dict(f) for f in self._state["files"].values()
+                       if f.get("status") == FILE_RECEIVED
+                       and (not required or (f.get("raw_backup") or {}).get("status") == BACKUP_OK)]
         entries.sort(key=lambda f: (f.get("received_at") or "", f.get("run_id") or 0))
         return [(self._received_dir / f["stored_as"], f["sha256"], f["name"]) for f in entries]
 
@@ -416,6 +463,8 @@ class SwisseldexReceiver:
         """Check and import received files that are not imported yet (button on the page)."""
         if self._importer is None:
             return []
+        self._backfill_backups({"backfilled": 0, "backup_failed": 0}, [])
+        self._update_backup_warning()
         return self._importer(self.received_files(), False) or []
 
     def run_now(self, kind: str, trigger: str = TRIGGER_MANUAL) -> dict[str, Any]:
@@ -488,6 +537,26 @@ class SwisseldexReceiver:
             return None
         days = (datetime.fromtimestamp(self._clock(), timezone.utc) - last).days
         return days if days >= OVERDUE_AFTER_DAYS else None
+
+    def _backup_required(self) -> bool:
+        return self._raw_backup is not None and self._raw_backup.required()
+
+    def _update_backup_warning(self) -> None:
+        """Visible on every page as long as a received file is not backed up while the backup is required."""
+        with self._lock:
+            count = len(self._state["backup_failures"])
+            if self._backup_required():
+                count += sum(1 for f in self._state["files"].values()
+                             if (f.get("raw_backup") or {}).get("status") == BACKUP_ERROR)
+        message = _BACKUP_WARNING.format(count=count) if count else ""
+        if message == self._shown_backup_warning:
+            return
+        if self._shown_backup_warning:
+            self._unwarn(self._shown_backup_warning)
+        if message:
+            self._warn(message)
+            logger.warning("Swisseldex: %d file(s) without a verified raw backup", count)
+        self._shown_backup_warning = message
 
     def _update_warning(self) -> None:
         days = self._overdue_days()
@@ -566,9 +635,11 @@ class SwisseldexReceiver:
             "result": RESULT_ERROR, "connection": "error", "download": "-" if kind == KIND_TEST else "error",
             "listed": 0, "downloaded": 0, "known": 0, "duplicates": 0, "review": 0, "failed": 0,
             "import": "-", "imported": 0, "not_imported": 0,
+            "backed_up": 0, "backfilled": 0, "backup_failed": 0, "backup_bypass": 0,
             "message": "", "detail": "", "retryable": False,
         }
         notes: list[str] = []
+        staged: list[tuple[Path, RemoteFile, str | None, Any]] = []
         with self._lock:
             self._state["last_login_epoch"] = self._clock()
             if kind == KIND_SYNC:
@@ -586,11 +657,13 @@ class SwisseldexReceiver:
                     for remote in remote_files:
                         if self._stop.is_set():
                             raise DownloadAborted()
-                        self._receive(session, remote, record, notes)
+                        item = self._receive(session, remote, record, notes)
+                        if item is not None:
+                            staged.append(item)
                     record["download"] = "ok"
             if session.close_note:
                 notes.append(session.close_note)
-            record["result"] = RESULT_WARNING if record["review"] else RESULT_OK
+            record["result"] = RESULT_OK
         except SwisseldexFtpError as exc:
             record["message"] = exc.user_message
             record["retryable"] = exc.retryable and not isinstance(exc, DownloadAborted)
@@ -602,6 +675,12 @@ class SwisseldexReceiver:
             record["message"] = "Unerwarteter Fehler – Details im Add-on-Protokoll"
             record["retryable"] = True
             notes.append(type(exc).__name__)
+        # The session is closed: back up first, then archive (files downloaded before an error count too).
+        self._complete_staged(staged, record, notes)
+        if kind == KIND_SYNC:
+            self._backfill_backups(record, notes)
+        if record["result"] != RESULT_ERROR and (record["review"] or record["backup_failed"]):
+            record["result"] = RESULT_WARNING
         if kind == KIND_SYNC and record["result"] != RESULT_ERROR and self._importer is not None:
             self._run_import(record, notes)
         record["finished_at"] = _iso(_utc_now())
@@ -616,6 +695,7 @@ class SwisseldexReceiver:
             self._save()
             self._changed.notify_all()
         self._update_warning()
+        self._update_backup_warning()
         logger.info(
             "Swisseldex %s (%s) #%d: %s; listed=%d new=%d known=%d duplicates=%d review=%d",
             kind, trigger, run_id, record["result"], record["listed"], record["downloaded"],
@@ -641,8 +721,12 @@ class SwisseldexReceiver:
             if not outcome.imported:
                 notes.append(f"{outcome.file_name}: {outcome.reason_code}")
 
-    def _receive(self, session: SwisseldexFtpesSession, remote: RemoteFile, record: dict, notes: list[str]) -> None:
-        """Download one listed file into the archive, unless it is already known or not acceptable."""
+    def _receive(self, session: SwisseldexFtpesSession, remote: RemoteFile, record: dict,
+                 notes: list[str]) -> tuple[Path, RemoteFile, str | None, Any] | None:
+        """Download one listed file into a local staging file; None if known, not acceptable or failed.
+
+        Nothing is archived here: _complete_staged() backs it up and archives it after the session.
+        """
         key = _remote_key(remote)
         with self._lock:
             if key is not None and key in self._state["seen"]:
@@ -658,6 +742,7 @@ class SwisseldexReceiver:
             return
 
         temp = self._received_dir / f".incoming-{secrets.token_hex(8)}.part"
+        staged = False
         try:
             with temp.open("xb") as target:
                 try:
@@ -668,19 +753,102 @@ class SwisseldexReceiver:
                     record["failed"] += 1
                     target.close()
                     self._skip(remote, exc.user_message, record)
-                    return
+                    return None
                 target.flush()
                 os.fsync(target.fileno())
             if result.note:
                 notes.append(f"{remote.name}: {result.note}")
-            self._store(temp, remote, key, result.sha256, result.bytes_received, record)
+            staged = True
+            return temp, remote, key, result
         finally:
-            temp.unlink(missing_ok=True)
+            if not staged:
+                temp.unlink(missing_ok=True)
 
-    def _store(self, temp: Path, remote: RemoteFile, key: str | None, sha256: str, size: int, record: dict) -> None:
+    def _complete_staged(self, staged: list, record: dict, notes: list[str]) -> None:
+        """Back up, then archive every staged download. A file whose backup fails is not archived."""
+        for temp, remote, key, result in staged:
+            try:
+                if self._stop.is_set():
+                    continue   # not recorded: downloaded again by the next sync
+                backup = self._backup_new(temp, remote.name, result.sha256, result.bytes_received, record, notes)
+                if backup is None:
+                    continue
+                self._store(temp, remote, key, result.sha256, result.bytes_received, record, backup)
+            finally:
+                temp.unlink(missing_ok=True)
+
+    def _backup_new(self, temp: Path, name: str, sha256: str, size: int, record: dict,
+                    notes: list[str]) -> dict | None:
+        """The backup record for the file entry, or None if it must not be processed (required, failed)."""
+        guard = self._raw_backup
+        if guard is None:
+            return {}
+        if not guard.required():
+            record["backup_bypass"] += 1
+            return {"status": BACKUP_BYPASS}
+        attempted_at = _utc_now()
+        try:
+            result = guard.backup(temp, name, sha256, size, attempted_at)
+        except RawBackupError as exc:
+            record["backup_failed"] += 1
+            notes.append(str(exc)[:300])
+            logger.warning("Swisseldex: raw backup of %s failed: %s", name, exc)
+            with self._lock:
+                failures = self._state["backup_failures"]
+                failures[name] = {"name": name, "sha256": sha256, "size": size, "run_id": record["id"],
+                                  "attempted_at": _iso(attempted_at), "message": str(exc)[:500]}
+                if len(failures) > _MAX_BACKUP_FAILURES:
+                    oldest = sorted(failures, key=lambda n: failures[n].get("attempted_at") or "")
+                    for stale in oldest[:len(failures) - _MAX_BACKUP_FAILURES]:
+                        failures.pop(stale, None)
+                self._save()
+            return None
+        record["backed_up"] += 1
+        with self._lock:
+            self._state["backup_failures"].pop(name, None)
+        return {"status": BACKUP_OK, "path": result.relative, "mount": guard.describe().get("mount", ""),
+                "backed_up_at": result.backed_up_at, "verified": True, "reused": result.reused}
+
+    def _backfill_backups(self, record: dict, notes: list[str]) -> None:
+        """Required backup: back up received files that have none yet (e.g. received before it was switched on)."""
+        guard = self._raw_backup
+        if guard is None or not guard.required():
+            return
+        with self._lock:
+            pending = [(sha, dict(f)) for sha, f in self._state["files"].items()
+                       if (f.get("raw_backup") or {}).get("status") != BACKUP_OK]
+        for sha, entry in pending:
+            if self._stop.is_set():
+                return
+            received_at = _from_iso(entry.get("received_at")) or _utc_now()
+            source = self._received_dir / str(entry.get("stored_as", ""))
+            try:
+                result = guard.backup(source, entry["name"], sha, int(entry.get("size") or 0), received_at)
+            except RawBackupError as exc:
+                info = {"status": BACKUP_ERROR, "message": str(exc)[:500], "attempted_at": _iso(_utc_now())}
+                record["backup_failed"] = record.get("backup_failed", 0) + 1
+                notes.append(str(exc)[:300])
+            else:
+                info = {"status": BACKUP_OK, "path": result.relative, "mount": guard.describe().get("mount", ""),
+                        "backed_up_at": result.backed_up_at, "verified": True, "reused": result.reused,
+                        "backfilled": True}
+                record["backfilled"] = record.get("backfilled", 0) + 1
+            with self._lock:
+                if sha in self._state["files"]:
+                    self._state["files"][sha]["raw_backup"] = info
+        if pending:
+            with self._lock:
+                self._save()
+
+    def _store(self, temp: Path, remote: RemoteFile, key: str | None, sha256: str, size: int, record: dict,
+               backup: dict | None = None) -> None:
         with self._lock:
             existing = self._state["files"].get(sha256)
         if existing is not None:
+            if backup and backup.get("status") == BACKUP_OK and existing.get("name") == remote.name \
+                    and (existing.get("raw_backup") or {}).get("status") != BACKUP_OK:
+                with self._lock:
+                    existing["raw_backup"] = backup
             if existing.get("name") == remote.name:
                 record["known"] += 1
             else:
@@ -703,6 +871,8 @@ class SwisseldexReceiver:
                 "received_at": _iso(_utc_now()), "run_id": record["id"],
                 "status": FILE_NEEDS_REVIEW if problem else FILE_RECEIVED, "note": note,
             }
+            if backup:
+                entry["raw_backup"] = backup
             with self._lock:
                 self._state["files"][sha256] = entry
             record["downloaded"] += 1

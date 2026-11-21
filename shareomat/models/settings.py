@@ -57,3 +57,8 @@ class OperationSettings:
     peak_end_hour: int = 22                # Hochtarif end hour (0-23, exclusive), local time
     peak_weekdays_only: bool = True        # True: Sat/Sun always Niedertarif
     meter_data_source: str = "email_csv"   # METER_DATA_SOURCE_* from shareomat.leg_const
+    # Write-once backup of the Swisseldex originals (ADR-0010): RAW_BACKUP_MODE_* from leg_const,
+    # the network storage below /share (e.g. "omv") and the subfolder on it.
+    raw_backup_mode: str = "off"
+    raw_backup_mount: str = ""
+    raw_backup_subdir: str = "swisseldex-rohdaten"

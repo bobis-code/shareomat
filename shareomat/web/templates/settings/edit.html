@@ -39,6 +39,83 @@
 </div>
 
 <div class="card">
+  <h2>Rohdatensicherung (Swisseldex-Originale)</h2>
+  <p class="field-hint" style="margin-bottom:10px">
+    Jede vom Swisseldex-Datahub abgeholte Datei wird unverändert und einmalig auf einen
+    Netzwerkspeicher kopiert, zurückgelesen und per SHA-256 geprüft, bevor Shareomat sie archiviert
+    oder einliest. Neben jeder Datei liegt eine Prüfdatei <span style="font-family:monospace">.sha256</span>.
+    Shareomat überschreibt und löscht dort nichts. Zur Auswahl stehen nur Speicher, die in Home
+    Assistant als Netzwerkspeicher mit Verwendung «Freigabe» eingebunden sind.
+  </p>
+  {% if raw_backup.mode != 'required' %}
+  <div class="notice-warn">Rohdatensicherung ist ausgeschaltet: Die Swisseldex-Originale liegen nur im lokalen Archiv.</div>
+  {% endif %}
+  {% if raw_backup.target %}
+  <p class="ts">Ziel: <span style="font-family:monospace">{{ raw_backup.target }}/JJJJ-MM/</span>
+    ({{ raw_backup.fstype }}, {{ raw_backup.source }})</p>
+  {% elif raw_backup.status %}
+  <div class="notice-err">{{ raw_backup.status }}</div>
+  {% endif %}
+  <form class="form-card" method="post" action="{{ url_for('settings', suffix='/raw_backup') }}" style="margin-top:10px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="raw_backup_mode">Rohdatensicherung</label>
+      <select id="raw_backup_mode" name="raw_backup_mode">
+        {% for value, label in raw_backup_modes %}
+        <option value="{{ value }}" {{ 'selected' if raw_backup.mode == value }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="raw_backup_mount">Netzwerkspeicher</label>
+      <select id="raw_backup_mount" name="raw_backup_mount">
+        <option value="" {{ 'selected' if not raw_backup.mount }}>– keiner –</option>
+        {% for m in raw_backup.mounts %}
+        <option value="{{ m.name }}" {{ 'selected' if raw_backup.mount == m.name }}>{{ m.name }}
+          ({{ m.fstype if m.mounted else 'noch nicht eingebunden' }})</option>
+        {% endfor %}
+      </select>
+      {% if not raw_backup.mounts %}<div class="field-hint">Kein Netzwerkspeicher gefunden. In Home Assistant unter
+        Einstellungen → System → Speicher einen Netzwerkspeicher mit Verwendung «Freigabe» hinzufügen.</div>{% endif %}
+    </div>
+    <div class="field">
+      <label for="raw_backup_subdir">Unterordner auf dem Speicher</label>
+      <input type="text" id="raw_backup_subdir" name="raw_backup_subdir" value="{{ raw_backup.subdir }}" maxlength="200">
+      <div class="field-hint">Darunter legt Shareomat Monatsordner an (z. B. 2026-11). 1 bis 3 Ordnernamen, getrennt durch «/».</div>
+    </div>
+    {% if backup_password_needed %}
+    <div class="field">
+      <label for="raw_backup_confirm_password">Ihr Shareomat-Passwort (zur Bestätigung)</label>
+      <input type="password" id="raw_backup_confirm_password" name="confirm_password" autocomplete="current-password" required>
+    </div>
+    {% endif %}
+    <div class="actions-row">
+      <button type="submit">Rohdatensicherung speichern</button>
+      <button type="submit" class="btn-secondary" formaction="{{ url_for('settings', suffix='/raw_backup/test') }}">Speicher testen</button>
+    </div>
+    <div class="field-hint">«Speicher testen» schreibt eine kleine Testdatei in den Ordner
+      <span style="font-family:monospace">verbindungstest/</span>, liest sie zurück und prüft, dass der Speicher
+      Überschreiben verhindert. Shareomat löscht auf dem Speicher nie etwas: Testdateien bitte bei Bedarf von Hand
+      löschen. Beim Umschalten auf «Pflicht» läuft der Test automatisch.</div>
+  </form>
+  {% if raw_backup_check %}
+  <h3 style="margin-top:14px">Letzter Speichertest
+    <span class="status-pill {{ 'status-pill-active' if raw_backup_check.ok else 'status-pill-inactive' }}">{{ 'bestanden' if raw_backup_check.ok else 'fehlgeschlagen' }}</span></h3>
+  <p class="ts">Speicher {{ raw_backup_check.mount }}, Unterordner {{ raw_backup_check.subdir }}{% if raw_backup_check.test_file %} · Testdatei
+    <span style="font-family:monospace">{{ raw_backup_check.test_file }}</span>{% endif %}</p>
+  <div class="table-wrap">
+    <table>
+      <tbody>
+        {% for s in raw_backup_check.steps %}
+        <tr><td>{{ '✔' if s.ok else '✘' }}</td><td>{{ s.label }}</td><td class="ts">{{ s.detail }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Sicherung</h2>
   <p class="field-hint" style="margin-bottom:10px">
     Erstellt eine geprüfte Kopie der Datenbank (Teilnehmer, Messpunkte, Verträge, Abrechnungen,

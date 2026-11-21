@@ -33,6 +33,7 @@ PERMISSIONS = {
     "contract.manage": "Vertrag bearbeiten und veröffentlichen",
     "system.configure": "System und Automatisierung einstellen",
     "backup.manage": "Sicherungen erstellen und herunterladen",
+    "raw_backup.configure": "Rohdatensicherung (Netzwerkspeicher) einstellen",
     "account.self": "Eigenes Konto (Passwort, Geräte)",
 }
 
@@ -66,6 +67,8 @@ def required_permission(method: str, route: str, segments: list[str]) -> str:
         return "backup.manage"   # a backup holds all business data: never just "view"
     if method != "POST":
         return "account.self" if route == "account" else "view"
+    if route == "settings" and segments[:1] == ["raw_backup"]:
+        return "raw_backup.configure"   # where the untouched originals go: password again, audit log
     if route == "invoices":
         if segments[:1] == ["settings"]:
             return "payment_profile.change"

@@ -58,6 +58,10 @@ UNKNOWN_METER_POLICY_SKIP: str = "skip"
 METER_DATA_SOURCE_EMAIL_CSV: str = "email_csv"
 METER_DATA_SOURCE_SDAT_LEG: str = "sdat_leg"
 
+# Write-once backup of the Swisseldex originals on a network storage (ADR-0010).
+RAW_BACKUP_MODE_OFF: str = "off"            # transition: originals only in the local archive
+RAW_BACKUP_MODE_REQUIRED: str = "required"  # nothing is processed without a verified backup
+
 # ── Billing run lifecycle ─────────────────────────────────────────────────────
 # A released billing run is an immutable snapshot; only draft -> released and
 # draft|released -> cancelled transitions are allowed (see shareomat.database.billing).

@@ -499,6 +499,18 @@ def _swisseldex_importer(db_path: Path, runtime: RuntimeConfig) -> Callable[[lis
     return run_import
 
 
+def _raw_backup_guard(db_path: Path) -> object:
+    """Write-once backup of the Swisseldex originals (ADR-0010); settings read anew for every file."""
+    from shareomat.core.collector.raw_backup import RawBackupGuard
+    from shareomat.database.settings import get_operation_settings
+
+    def current() -> tuple[str, str, str]:
+        settings = get_operation_settings(db_path)
+        return settings.raw_backup_mode, settings.raw_backup_mount, settings.raw_backup_subdir
+
+    return RawBackupGuard(current)
+
+
 def _setup_swisseldex(runtime: RuntimeConfig, db_path: Path) -> object | None:
     """Start the Swisseldex mailbox receiver if it is enabled in the add-on options.
 
@@ -515,6 +527,7 @@ def _setup_swisseldex(runtime: RuntimeConfig, db_path: Path) -> object | None:
             runtime.swisseldex, runtime.paths.state / "swisseldex",
             warn=web_state.add_warning, unwarn=web_state.discard_warning,
             importer=_swisseldex_importer(db_path, runtime),
+            raw_backup=_raw_backup_guard(db_path),
         )
         receiver.start()
     except Exception:

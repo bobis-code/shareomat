@@ -480,6 +480,7 @@ class _Handler(BaseHTTPRequestHandler):
     _RECENT_AUTH_MESSAGES = {
         "payment_profile.change": "Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben, um das Bankkonto zu ändern.",
         "backup.manage": "Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben (Sicherungen enthalten alle Daten).",
+        "raw_backup.configure": "Zur Sicherheit bitte Ihr Shareomat-Passwort eingeben, um die Rohdatensicherung zu ändern.",
     }
 
     def _check_recent_auth(self, route: str, segments: list[str], form: dict) -> None:

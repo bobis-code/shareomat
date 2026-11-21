@@ -206,7 +206,8 @@ core/
     leg_share_importer.py     Share-Ordner → Inbox
     leg_email_importer.py     IMAP-Postfach → Inbox
     swisseldex_ftpes.py       FTPES-Client für das Swisseldex-Postfach (nur lesen)
-    swisseldex_receiver.py    Swisseldex-Empfang → Empfangsarchiv (nicht Inbox)
+    swisseldex_receiver.py    Swisseldex-Empfang → Rohdatensicherung → Empfangsarchiv (nicht Inbox)
+    raw_backup.py             Rohdatensicherung: Originale einmalig, geprüft auf Netzwerkspeicher (ADR-0010)
     sdat_import.py            Import empfangener SDAT-Dateien (SX-2)
     leg_storage.py            Verarbeitet-Status (SHA-256-Dedup)
   pipeline/                  Abrechnungsverarbeitung
@@ -453,6 +454,7 @@ Konsequenzen. Aktuell:
 * ADR-0007 — Live-Energie-Ebene und Teilnehmerportal.
 * ADR-0008 — Offizielle SDAT-Zuteilung als zweiter Abrechnungsweg (vorgeschlagen).
 * ADR-0009 — Mitgliedschaft getrennt von der Vertragsversion (Schema 18).
+* ADR-0010 — Rohdatensicherung der Swisseldex-Originale auf einem Netzwerkspeicher (vorgeschlagen).
 
 Angenommene ADRs sind dauerhafte Leitplanken für künftige Änderungen, nicht
 nur historische Notizen — siehe `docs/decisions/README.md`, "Verbindlichkeit".

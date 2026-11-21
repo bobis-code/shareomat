@@ -1360,6 +1360,52 @@ ist. Vor der ersten Monatsabrechnung zu klären: kommt der Zeitraum mit der Mona
 gilt der 07.11. als tatsächlicher LEG-Start (dann unter «Gemeinschaft» als bestätigten Start
 eintragen)?
 
+### Rohdatensicherung auf einem Netzwerkspeicher (ab 0.6.26, ADR-0010)
+
+Jede abgeholte Datei wird **vor** jeder Verarbeitung unverändert auf einen Netzwerkspeicher
+kopiert, zum Beispiel OpenMediaVault. Einstellbar unter **System → Einstellungen →
+Rohdatensicherung**:
+
+* **Modus:**
+  * «Aus (Übergang)»: Shareomat arbeitet wie bisher, die Originale liegen nur im lokalen Archiv.
+  * «Pflicht»: Ohne geprüfte Sicherung wird nichts archiviert oder importiert.
+* **Netzwerkspeicher:** In Home Assistant unter Einstellungen → System → Speicher als
+  Netzwerkspeicher mit Verwendung **«Freigabe»** hinzufügen; er erscheint als `/share/<Name>`.
+  Shareomat bietet nur echte Netzwerk-Mounts an (cifs, smb3, nfs, nfs4), nie lokale Ordner.
+* **Unterordner:** vorbelegt `swisseldex-rohdaten`. Darunter legt Shareomat Monatsordner nach dem
+  Datum im Dateinamen an (`2026-11/`).
+
+Ablauf pro Datei:
+
+1. Herunterladen in eine lokale Zwischendatei.
+2. Nach dem Schliessen der Swisseldex-Sitzung exklusiv auf den Speicher kopieren.
+3. Zurücklesen und per SHA-256 und Grösse vergleichen.
+4. Erst dann die Prüfdatei `<Name>.sha256` exklusiv anlegen.
+5. Erst dann archivieren und importieren.
+
+Grundsätze:
+
+* Shareomat überschreibt, benennt um und löscht auf dem Speicher nie etwas.
+* Eine abgebrochene Kopie, also eine Datei ohne Prüfdatei, die genau der Anfang des Originals
+  ist, wird beim nächsten Lauf automatisch fertiggestellt: Die fehlenden Bytes werden angehängt.
+* Jede andere Datei unter dem Namen wird nicht angefasst. Die Meldung sagt Schritt für Schritt,
+  was zu tun ist.
+* **Speicher testen** (Knopf auf der Karte): Testdatei anlegen, zurücklesen, prüfen, dass
+  Überschreiben verhindert wird, freien Platz anzeigen. Beim Umschalten auf «Pflicht» läuft der
+  Test automatisch, bei einem Fehler wird nicht umgeschaltet. Testdateien liegen in
+  `verbindungstest/` und bleiben dort.
+* Schon empfangene Dateien werden beim Umschalten auf «Pflicht» aus dem Empfangsarchiv
+  nachgesichert, nur bei unveränderter Prüfsumme.
+* Fehlgeschlagene Sicherungen stehen auf der Swisseldex-Karte und als Warnung auf jeder Seite;
+  die nächste Synchronisation versucht es erneut.
+
+Grenzen (siehe ADR-0010):
+
+* Nur Schutz im Code. Der Speicher-Benutzer könnte technisch ändern oder löschen, solange auf
+  dem Speicher kein Schutz eingerichtet ist (Samba `vfs_worm`, Snapshots).
+* Am echten Speicher klärt der Speichertest das exklusive Anlegen. Nicht beweisbar ist das
+  Zurücklesen am Cache vorbei.
+
 ---
 
 # 33. Quellen / technische Referenzen

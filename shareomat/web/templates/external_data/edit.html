@@ -162,6 +162,14 @@
           {% else %}aus (in den Add-on-Optionen einschaltbar){% endif %}</td></tr>
         <tr><th>Dateien auf Swisseldex</th><td>{{ sx.remote_count if sx.remote_count is not none else '–' }}
           <span class="ts">(Shareomat löscht dort keine Dateien)</span></td></tr>
+        <tr><th>Rohdatensicherung</th><td>
+          {% if sx.raw_backup is none %}–
+          {% elif sx.raw_backup.mode == 'required' %}<span class="status-pill status-pill-active">Pflicht</span>
+            Ziel: <span style="font-family:monospace">{{ sx.raw_backup.target or '– kein Speicher gewählt –' }}</span>
+            {% if sx.not_backed_up_total %} · <span class="status-pill status-pill-inactive">{{ sx.not_backed_up_total }} Datei(en) ohne geprüfte Sicherung (nicht importiert)</span>{% endif %}
+          {% else %}<span class="status-pill status-pill-inactive">aus (Übergang)</span> Originale nur im lokalen Archiv
+          {% endif %}
+          <span class="ts">(Einstellungen → Rohdatensicherung)</span></td></tr>
         <tr><th>Empfangen (lokal archiviert)</th><td>{{ sx.received_total }}{% if sx.needs_review_total %} ·
           <span class="status-pill status-pill-inactive">{{ sx.needs_review_total }} benötigt Prüfung</span>{% endif %}</td></tr>
         <tr><th>Import (offizielle Zeitreihen)</th><td>
@@ -229,21 +237,46 @@
   <p class="ts">Noch keine Einträge.</p>
   {% endif %}
 
+  {% if sx.backup_failures %}
+  <h3 style="margin-top:18px">Nicht gesichert (nicht verarbeitet)</h3>
+  <div class="notice-err">Diese Dateien wurden heruntergeladen, aber nicht auf dem Netzwerkspeicher gesichert und
+    darum weder archiviert noch importiert. Die nächste Synchronisation versucht es erneut.</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Datei</th><th>Grösse (Bytes)</th><th>Versuch</th><th>Fehler</th><th>Prüfsumme</th></tr></thead>
+      <tbody>
+        {% for f in sx.backup_failures %}
+        <tr><td>{{ f.name }}</td><td>{{ f.size }}</td><td>{{ sx_time(f.attempted_at) }}</td>
+          <td class="ts">{{ f.message }}</td><td style="font-family:monospace;font-size:.75rem">{{ f.sha256[:16] }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   {% if sx.files or sx.skipped %}
   <h3 style="margin-top:18px">Empfangene Dateien</h3>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Datei</th><th>Grösse (Bytes)</th><th>Empfangen</th><th>Status</th><th>Import</th><th>Prüfsumme</th></tr></thead>
+      <thead><tr><th>Datei</th><th>Grösse (Bytes)</th><th>Empfangen</th><th>Status</th><th>Rohdatensicherung</th><th>Import</th><th>Prüfsumme</th></tr></thead>
       <tbody>
         {% for f in sx.skipped %}
         <tr><td>{{ f.name }}</td><td>{{ f.size if f.size is not none else '–' }}</td><td>{{ sx_time(f.noticed_at) }}</td>
-          <td><span class="status-pill status-pill-inactive">nicht heruntergeladen: {{ f.reason }}</span></td><td>–</td><td>–</td></tr>
+          <td><span class="status-pill status-pill-inactive">nicht heruntergeladen: {{ f.reason }}</span></td><td>–</td><td>–</td><td>–</td></tr>
         {% endfor %}
         {% for f in sx.files %}
         <tr><td>{{ f.name }}{% if f.aliases %} <span class="ts">(auch als {{ f.aliases | join(', ') }})</span>{% endif %}</td>
           <td>{{ f.size }}</td><td>{{ sx_time(f.received_at) }}</td>
           <td><span class="status-pill {{ 'status-pill-active' if f.status == 'received' else 'status-pill-inactive' }}">{{ 'empfangen' if f.status == 'received' else 'benötigt Prüfung' }}</span>
             {% if f.note %}<span class="ts">{{ f.note }}</span>{% endif %}</td>
+          <td>{% set rb = f.raw_backup or {} %}
+            {% if rb.status == 'ok' %}<span class="status-pill status-pill-active">gesichert{{ ' (nachgetragen)' if rb.backfilled }}</span>
+              <div class="ts" style="font-family:monospace">{{ rb.mount }}/{{ rb.path }}</div>
+              <div class="ts">{{ sx_time(rb.backed_up_at) }} · SHA-256 geprüft</div>
+            {% elif rb.status == 'error' %}<span class="status-pill status-pill-inactive">Sicherung fehlgeschlagen</span>
+              <div class="ts">{{ rb.message }}</div>
+            {% elif rb.status == 'bypass' %}<span class="ts">aus (Übergang)</span>
+            {% else %}<span class="ts">noch nicht gesichert</span>{% endif %}</td>
           <td>{% if f.import_outcome == 'imported' %}<span class="status-pill status-pill-active">importiert ({{ f.import_type }})</span>
             {% elif f.import_outcome == 'rejected' %}<span class="status-pill status-pill-inactive">nicht importiert</span>
             {% else %}–{% endif %}

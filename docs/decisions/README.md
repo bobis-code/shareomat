@@ -82,6 +82,8 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
   Offizielle SDAT-Zuteilung als zweiter Abrechnungsweg (vorgeschlagen)
 * [ADR-0009](ADR-0009-mitgliedschaft-getrennt-von-der-vertragsversion.md) —
   Mitgliedschaft getrennt von der Vertragsversion (Schema 18)
+* [ADR-0010](ADR-0010-rohdatensicherung-swisseldex-auf-netzwerkspeicher.md) —
+  Rohdatensicherung der Swisseldex-Originale auf einem Netzwerkspeicher (vorgeschlagen)
 
 ## Verbindlichkeit
 
