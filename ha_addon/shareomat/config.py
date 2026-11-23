@@ -3,8 +3,8 @@
 File: shareomat/config.py
 
 Purpose:
-    Technical runtime configuration (paths, MQTT, e-mail import, web
-    server port) and the fully assembled LegConfig the settlement core
+    Technical runtime configuration (paths, MQTT, e-mail import and
+    sending, web server port) and the fully assembled LegConfig the settlement core
     consumes. Replaces the old shareomat/core/leg_config.py.
 
 Part of:
@@ -224,6 +224,58 @@ class SwisseldexConfig:
 
 SWISSELDEX_SYNC_INTERVALS_HOURS: tuple[int, ...] = (1, 3, 6, 12, 24)
 
+SMTP_SECURITY_SSL = "ssl"            # implicit TLS from the first byte (port 465)
+SMTP_SECURITY_STARTTLS = "starttls"  # plain connect, then STARTTLS before anything else (port 587)
+SMTP_SECURITY_MODES: tuple[str, ...] = (SMTP_SECURITY_SSL, SMTP_SECURITY_STARTTLS)
+
+
+@dataclass
+class SmtpConfig:
+    """Outgoing mailbox for sending documents (Rechnung, Gutschrift, ...) by e-mail.
+
+    Like the IMAP and Swisseldex credentials, this lives in the technical
+    runtime configuration (add-on options), never in SQLite. There is no
+    unencrypted mode: only implicit TLS or STARTTLS, always with certificate
+    verification. A wrong or incomplete section never stops the start; it
+    only keeps sending disabled (see smtp_problems()).
+    """
+
+    enabled: bool = False
+    host: str = "smtp.gmail.com"
+    port: int = 465
+    security: str = SMTP_SECURITY_SSL
+    username: str = ""
+    password: str = ""             # Gmail: an App Password, never the account password
+    from_address: str = ""
+    from_name: str = ""
+    timeout_seconds: int = 30
+
+    def __repr__(self) -> str:
+        # The password must never reach a log line through an accidental repr().
+        return (
+            f"SmtpConfig(enabled={self.enabled}, host={self.host!r}, port={self.port}, "
+            f"security={self.security!r}, username={'set' if self.username else 'empty'}, "
+            f"password={'set' if self.password else 'empty'}, from_address={'set' if self.from_address else 'empty'})"
+        )
+
+
+def smtp_problems(smtp: SmtpConfig) -> list[str]:
+    """Why sending is not possible with this configuration (German, for the operator); empty = ready."""
+    if not smtp.enabled:
+        return ["Der E-Mail-Versand ist ausgeschaltet (Add-on-Konfiguration → smtp → enabled)."]
+    problems = []
+    if not smtp.host:
+        problems.append("Kein Mailserver (smtp → host) eingetragen.")
+    if not (1 <= smtp.port <= 65535):
+        problems.append(f"Ungültiger Port {smtp.port} (smtp → port).")
+    if smtp.security not in SMTP_SECURITY_MODES:
+        problems.append("Verschlüsselung muss «ssl» oder «starttls» sein (smtp → security).")
+    if not smtp.username or not smtp.password:
+        problems.append("Benutzername oder Passwort fehlt (smtp → username / password).")
+    if not smtp.from_address:
+        problems.append("Keine Absenderadresse eingetragen (smtp → from_address).")
+    return problems
+
 
 @dataclass
 class RuntimeConfig:
@@ -236,6 +288,7 @@ class RuntimeConfig:
     sparkplug: SparkplugConfig = field(default_factory=SparkplugConfig)
     wan: WanConfig = field(default_factory=WanConfig)
     swisseldex: SwisseldexConfig = field(default_factory=SwisseldexConfig)
+    smtp: SmtpConfig = field(default_factory=SmtpConfig)
     # Paperless-ngx base URL for evidence links (shareomat.core.paperless). Only
     # a link target for the operator's browser — Shareomat never calls it.
     paperless_url: str = ""
@@ -390,6 +443,31 @@ def _parse_swisseldex(raw: dict[str, Any]) -> SwisseldexConfig:
     )
 
 
+def _parse_smtp(raw: dict[str, Any]) -> SmtpConfig:
+    """Parse the optional outgoing mailbox. Missing or malformed section = off, never a failed start."""
+    s = raw.get("smtp") or {}
+    if not isinstance(s, dict):
+        logger.error("smtp section ignored: not a mapping")
+        return SmtpConfig()
+    try:
+        port = int(s.get("port", 465))
+        timeout = max(5, min(120, int(s.get("timeout_seconds", 30))))
+    except (TypeError, ValueError):
+        logger.error("smtp.port/timeout_seconds is not a number: e-mail sending stays off")
+        return SmtpConfig()
+    return SmtpConfig(
+        enabled=bool(s.get("enabled", False)),
+        host=str(s.get("host", "smtp.gmail.com") or "").strip(),
+        port=port,
+        security=str(s.get("security", SMTP_SECURITY_SSL) or "").strip().lower(),
+        username=str(s.get("username", "") or "").strip(),
+        password=str(s.get("password", "") or ""),
+        from_address=str(s.get("from_address", "") or "").strip(),
+        from_name=str(s.get("from_name", "") or "").strip(),
+        timeout_seconds=timeout,
+    )
+
+
 def _parse_paperless(raw: dict[str, Any]) -> str:
     """The validated Paperless base URL; an invalid one disables the links (logged), never the add-on."""
     from shareomat.core.paperless import PaperlessValueError, normalize_base_url
@@ -417,6 +495,7 @@ def load_runtime_config(config_path: Path) -> RuntimeConfig:
         sparkplug=_parse_sparkplug(raw),
         wan=_parse_wan(raw),
         swisseldex=_parse_swisseldex(raw),
+        smtp=_parse_smtp(raw),
         paperless_url=_parse_paperless(raw),
     )
 

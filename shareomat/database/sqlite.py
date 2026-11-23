@@ -796,6 +796,7 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
     },
     "document_deliveries": {
         "item": "TEXT NOT NULL DEFAULT 'document'",   # document | reminder | cancellation
+        "sent_by": "TEXT NOT NULL DEFAULT 'manual'",  # manual | shareomat (own e-mail sending)
     },
     "document_reminders": {
         "new_due_date": "TEXT",

@@ -47,3 +47,33 @@ configuration:
       sync_interval_hours:
         name: Intervall (Stunden)
         description: Wie oft automatisch synchronisiert wird. Standard 6.
+  smtp:
+    name: E-Mail-Versand (Belege)
+    description: >-
+      Postfach, über das Shareomat Rechnungen, Gutschriften, Stornobelege, Mahnungen und
+      Willkommensmails mit PDF sendet. Nur verschlüsselt. Gesendet wird nur auf Knopfdruck.
+    fields:
+      enabled:
+        name: Aktiviert
+        description: Einschalten, sobald alles eingetragen ist. Danach Add-on neu starten und unter E-Mail-Vorlagen eine Test-E-Mail senden.
+      host:
+        name: Mailserver
+        description: "Gmail: smtp.gmail.com"
+      port:
+        name: Port
+        description: "465 bei ssl, 587 bei starttls"
+      security:
+        name: Verschlüsselung
+        description: "ssl (Port 465) oder starttls (Port 587). Unverschlüsselt ist nicht möglich."
+      username:
+        name: Benutzername
+        description: Meist die vollständige E-Mail-Adresse des Postfachs
+      password:
+        name: Passwort
+        description: Gmail und andere mit Zwei-Faktor-Anmeldung brauchen ein App-Passwort. Wird nicht in der Datenbank gespeichert.
+      from_address:
+        name: Absenderadresse
+        description: Die Adresse, die Empfänger als Absender sehen. Bei Gmail dieselbe wie der Benutzername.
+      from_name:
+        name: Absendername (optional)
+        description: Zum Beispiel der Name der Gemeinschaft

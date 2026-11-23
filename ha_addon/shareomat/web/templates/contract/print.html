@@ -39,7 +39,7 @@
   </style>
 </head>
 <body>
-  <div class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></div>
+  {% if not for_pdf %}<div class="noprint"><button onclick="window.print()">Drucken / als PDF speichern</button></div>{% endif %}
   {% if issues %}
   <div style="border:2px solid #b91c1c;color:#b91c1c;padding:.6rem;margin-bottom:1rem">
     <strong>Nicht unterschriftsreif:</strong>

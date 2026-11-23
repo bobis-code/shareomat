@@ -4,9 +4,8 @@
 {% block content %}
 <div class="card">
   <h2>Vorlagen</h2>
-  <p class="ts">Texte der E-Mails an die Teilnehmer. Der Versand aus Shareomat (von Hand und
-    automatisch) folgt in einem späteren Schritt und verwendet genau diese Vorlagen. Bis dahin
-    kann der Text aus der Vorschau kopiert werden.</p>
+  <p class="ts">Texte der E-Mails an die Teilnehmer. Shareomat sendet sie auf Knopfdruck, mit dem Beleg als PDF im
+    Anhang: bei den Belegen («Vorschau und senden») und beim Sammelversand. Automatisch wird nichts gesendet.</p>
   <div class="table-wrap" style="margin-top:12px">
     <table>
       <thead>
@@ -30,5 +29,40 @@
       </tbody>
     </table>
   </div>
+</div>
+
+<div class="card">
+  <h2>Versand-Postfach</h2>
+  {% if mailbox.problems %}
+  <div class="info-box"><strong>Noch nicht eingerichtet:</strong>
+    <ul style="margin:.3rem 0 0 1.2rem">{% for p in mailbox.problems %}<li>{{ p }}</li>{% endfor %}</ul></div>
+  <p class="ts">So geht's (Gmail): 1. Im Google-Konto die Bestätigung in zwei Schritten einschalten und ein
+    App-Passwort erstellen. 2. Home Assistant → Add-on Shareomat → Konfiguration → smtp: Aktiviert, Benutzername und
+    Absenderadresse = die Gmail-Adresse, Passwort = das App-Passwort (16 Zeichen), Server smtp.gmail.com, Port 465,
+    Verschlüsselung ssl. 3. Speichern, Add-on neu starten, hier eine Test-E-Mail senden.</p>
+  {% else %}
+  <p><span class="status-pill status-pill-active">eingerichtet</span> Absender {{ mailbox.sender }} über
+    {{ mailbox.server }}.</p>
+  {% if mailbox.pdf_problem %}
+  <div class="error-box"><strong>PDF nicht verfügbar:</strong> {{ mailbox.pdf_problem }} Ohne PDF sendet Shareomat keine
+    Belege.</div>
+  {% endif %}
+  <h3 style="margin-bottom:4px">Test senden</h3>
+  <form method="post" action="{{ url_for('email_templates', suffix='/test') }}" class="actions-row" style="flex-wrap:wrap;margin-top:0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label style="margin:0">An <input type="email" name="to_address" required list="test-addresses" maxlength="254"
+      placeholder="test@example.ch" value="{{ mailbox.suggestions[0] if mailbox.suggestions }}" style="min-width:260px"></label>
+    <datalist id="test-addresses">{% for a in mailbox.suggestions %}<option value="{{ a }}">{% endfor %}</datalist>
+    <select name="what">{% for key, label in mailbox.test_kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select>
+    <button type="submit">Test-E-Mail senden</button>
+  </form>
+  <p class="ts">Die Muster-Rechnung und die Muster-Gutschrift laufen genau wie echte Belege: Ihre Vorlage, Ihr Briefkopf,
+    Ihr Bankkonto mit QR-Zahlteil, PDF als Anhang. Empfänger ist die fiktive Person Max Muster, Musterweg 24, 9999
+    Musterdorf. Der Betreff beginnt mit [TEST], und das PDF trägt den Stempel «MUSTER – nicht bezahlen». Nichts davon
+    wird als Beleg gespeichert. Höchstens {{ mailbox.limit }} Test-E-Mails pro Stunde, jede steht im Audit-Log.</p>
+  <p class="ts">Vorher ansehen:
+    <a href="{{ url_for('invoices', suffix='/sample/pdf') }}?kind=invoice" target="_blank">Muster-Rechnung (PDF)</a> ·
+    <a href="{{ url_for('invoices', suffix='/sample/pdf') }}?kind=credit" target="_blank">Muster-Gutschrift (PDF)</a></p>
+  {% endif %}
 </div>
 {% endblock %}

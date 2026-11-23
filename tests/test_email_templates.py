@@ -11,10 +11,12 @@ import pytest
 from shareomat.core.email_templates import (
     TEMPLATE_SPECS,
     TemplateError,
+    cancellation_values,
     common_values,
     document_values,
     fill_template,
     placeholders_in,
+    reminder_values,
     validate_template,
     welcome_values,
 )
@@ -24,7 +26,7 @@ from shareomat.database.email_templates import get_email_template, list_email_te
     save_email_template
 from shareomat.database.sqlite import init_db
 from shareomat.models.community import Community
-from shareomat.models.invoicing import DOC_TYPE_CREDIT, DOC_TYPE_INVOICE, BillingDocument
+from shareomat.models.invoicing import DOC_TYPE_CREDIT, DOC_TYPE_INVOICE, BillingDocument, DocumentReminder
 from shareomat.security.context import Principal, set_principal
 from shareomat.security.permissions import required_permission
 from shareomat.web.navigation import nav_group_for
@@ -72,6 +74,13 @@ def _doc(doc_type: str, **kw) -> BillingDocument:
 _COMMON = common_values("LEG Musterdorf", "Max Vertreter", "leg@example.ch", "Erika Muster")
 
 
+def _reminder(**kw) -> DocumentReminder:
+    values = dict(document_id=1, level=2, issue_date=date(2027, 1, 20), open_amount_chf=Decimal("12.3"),
+                  new_due_date=date(2027, 1, 30))
+    values.update(kw)
+    return DocumentReminder(**values)
+
+
 # ── Core ────────────────────────────────────────────────────────────────────
 
 
@@ -82,6 +91,10 @@ def test_default_texts_are_valid_and_fully_filled(kind):
     if kind == "welcome":
         values = welcome_values(_COMMON, contract_version=5, contract_valid_from=date(2027, 1, 1),
                                 joined_at=date(2027, 1, 1))
+    elif kind == "cancellation":
+        values = cancellation_values(_COMMON, _doc(DOC_TYPE_INVOICE, cancel_number="S-1"))
+    elif kind == "reminder":
+        values = reminder_values(_COMMON, _doc(DOC_TYPE_INVOICE), _reminder())
     else:
         values = document_values(_COMMON, _doc(DOC_TYPE_INVOICE if kind == "invoice" else DOC_TYPE_CREDIT))
     # Every placeholder a kind offers has a value, so nothing stays as "{...}".
@@ -151,6 +164,14 @@ def test_document_values_for_invoice_and_credit():
     assert credit["belegnummer"] == "G-1"
 
 
+def test_cancellation_and_reminder_values():
+    cancellation = cancellation_values(_COMMON, _doc(DOC_TYPE_CREDIT, number="G-7", cancel_number="S-2"))
+    assert (cancellation["stornonummer"], cancellation["belegart"], cancellation["belegnummer"]) == ("S-2", "Gutschrift", "G-7")
+    reminder = reminder_values(_COMMON, _doc(DOC_TYPE_INVOICE), _reminder())
+    assert reminder["mahnstufe"] == "1. Mahnung" and reminder["offener_betrag"] == "CHF 12.30"
+    assert reminder["neue_frist"] == "30.01.2027" and reminder["belegnummer"] == "R-1"
+
+
 def test_welcome_values_without_dates():
     values = welcome_values(_COMMON, contract_version=None, contract_valid_from=None, joined_at=None)
     assert (values["vertrag_version"], values["vertrag_gueltig_ab"], values["beitritt_per"]) == ("–", "–", "–")
@@ -161,7 +182,7 @@ def test_welcome_values_without_dates():
 
 def test_defaults_without_stored_text(db_path):
     templates = list_email_templates(db_path)
-    assert [t.kind for t in templates] == ["welcome", "invoice", "credit"]
+    assert [t.kind for t in templates] == ["welcome", "invoice", "credit", "cancellation", "reminder"]
     assert all(t.is_default for t in templates)
 
 

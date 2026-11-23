@@ -1,0 +1,13 @@
+{# Body of the test PDF (Muster) — no document, no claim. Checks in the real add-on that
+   fonts, page size and the QR payment part come out right in a PDF. #}
+<h2>Muster – PDF-Test, keine Rechnung</h2>
+<p>Erstellt am {{ today.strftime('%d.%m.%Y') }} von Shareomat, um die PDF-Erzeugung zu prüfen.</p>
+<ul>
+  <li>Seitengrösse A4, Zahlteil unten 210 × 105 mm, gestrichelte Trennlinie oben.</li>
+  <li>Schrift: Liberation Sans (für den QR-Zahlteil zulässig wie Arial, Frutiger und Helvetica).</li>
+  <li>QR-Code 46 × 46 mm mit Schweizerkreuz; mit der Banking-App scannen: CHF 1.00, Mitteilung «Scan-Test».
+    Nicht bezahlen.</li>
+</ul>
+<p class="ts">Umlaute und Zeichen: äöü ÄÖÜ é è à ç – «» ’ CHF 1'234.50</p>
+{% if sample %}{% set qr = sample %}{% include "invoices/qr_payment_part.html" %}
+{% else %}<p><strong>Ohne gespeicherte Bankverbindung kein QR-Zahlteil</strong> (Rechnungen → Einstellungen).</p>{% endif %}

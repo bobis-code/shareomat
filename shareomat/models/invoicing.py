@@ -40,6 +40,15 @@ PAYMENT_KIND_REFUND = "refund"    # over-payment returned to the payer (on an in
 
 DELIVERY_METHODS = {"paper": "Papier / PDF", "email": "E-Mail"}
 DELIVERY_ITEMS = ("document", "reminder", "cancellation")
+# Who produced a delivery log entry: the operator after the fact, or Shareomat's own e-mail sending.
+SENT_BY_MANUAL = "manual"
+SENT_BY_SHAREOMAT = "shareomat"
+SENT_BY_LABELS = {SENT_BY_MANUAL: "manuell erfasst", SENT_BY_SHAREOMAT: "von Shareomat gesendet"}
+# "attempt" is logged by Shareomat right before handing an e-mail to the server. An attempt
+# without a later "sent"/"failed" for the same item means the outcome is unknown (crash).
+DELIVERY_STATUS_SENT = "sent"
+DELIVERY_STATUS_FAILED = "failed"
+DELIVERY_STATUS_ATTEMPT = "attempt"
 
 # Reminder levels: days after the due date from which a level is proposed.
 REMINDER_OFFSETS_DAYS = (5, 20, 35)
@@ -98,11 +107,12 @@ class DocumentDelivery:
 
     document_id: int
     method: str
-    status: str          # "sent" | "failed"
+    status: str          # "sent" | "failed" | "attempt" (Shareomat e-mail only)
     detail: str = ""
     item: str = "document"   # document | reminder | cancellation
     reminder_id: int | None = None
     recorded_at: datetime | None = None
+    sent_by: str = SENT_BY_MANUAL
     id: int | None = None
 
 
@@ -199,6 +209,17 @@ class BillingDocument:
     @property
     def active_reminders(self) -> list[DocumentReminder]:
         return [r for r in self.reminders if r.discarded_at is None]
+
+    def unknown_email_outcome(self, item: str = "document", reminder_id: int | None = None) -> DocumentDelivery | None:
+        """Shareomat's last send attempt for an item when no result was logged after it (crash, power loss).
+
+        Then nobody knows whether the e-mail went out; the operator looks in
+        the mailbox's "Gesendet" folder and records the outcome by hand.
+        """
+        entries = [d for d in self.deliveries if d.item == item and d.reminder_id == reminder_id]
+        if entries and entries[-1].status == DELIVERY_STATUS_ATTEMPT:
+            return entries[-1]
+        return None
 
     @property
     def integrity_ok(self) -> bool:

@@ -47,3 +47,33 @@ configuration:
       sync_interval_hours:
         name: Interval (hours)
         description: How often to sync automatically. Default 6.
+  smtp:
+    name: E-mail sending (documents)
+    description: >-
+      Mailbox Shareomat uses to send invoices, credit notes, cancellation notices, reminders and
+      welcome mails with a PDF. Encrypted only. Mails are sent only when you press the button.
+    fields:
+      enabled:
+        name: Enabled
+        description: Switch on once everything is entered, restart the add-on, then send a test e-mail under E-Mail-Vorlagen.
+      host:
+        name: Mail server
+        description: "Gmail: smtp.gmail.com"
+      port:
+        name: Port
+        description: "465 with ssl, 587 with starttls"
+      security:
+        name: Encryption
+        description: "ssl (port 465) or starttls (port 587). Unencrypted is not possible."
+      username:
+        name: Username
+        description: Usually the full e-mail address of the mailbox
+      password:
+        name: Password
+        description: Gmail and others with two-factor sign-in need an app password. Not stored in the database.
+      from_address:
+        name: Sender address
+        description: The address recipients see as sender. For Gmail the same as the username.
+      from_name:
+        name: Sender name (optional)
+        description: For example the community's name

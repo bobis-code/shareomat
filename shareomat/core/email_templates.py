@@ -3,10 +3,11 @@
 File: shareomat/core/email_templates.py
 
 Purpose:
-    The e-mail templates Shareomat knows (Willkommen, Rechnung, Gutschrift),
-    their default texts and placeholders, and the one function that fills
-    a template. The admin page "E-Mail-Vorlagen" edits them; the later
-    e-mail delivery (manual and automatic) uses exactly the same
+    The e-mail templates Shareomat knows (Willkommen, Rechnung, Gutschrift,
+    Stornobeleg, Zahlungserinnerung/Mahnung), their default texts and
+    placeholders, and the one function that fills a template. The admin
+    page "E-Mail-Vorlagen" edits them; sending
+    (shareomat.core.delivery.document_mail) uses exactly the same
     fill_template(), so what the preview shows is what is sent.
 
 Part of:
@@ -28,7 +29,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 
-from shareomat.models.invoicing import BillingDocument
+from shareomat.models.invoicing import BillingDocument, DocumentReminder
 
 MAX_SUBJECT_CHARS = 200
 MAX_BODY_CHARS = 10_000
@@ -105,6 +106,25 @@ Die Auszahlung erfolgt, sobald die Zahlungen der LEG-Bezüger für diesen Zeitra
 
 """ + _SIGNATURE
 
+_CANCELLATION_BODY = """Guten Tag {name}
+
+Der Beleg {belegart} {belegnummer} vom {belegdatum} für den Zeitraum {zeitraum} wurde storniert und ist damit ungültig. Im Anhang finden Sie den Stornobeleg {stornonummer}.
+
+Ein allfälliger Ersatzbeleg folgt separat. Bei Fragen erreichen Sie uns unter {vertreter_email}.
+
+""" + _SIGNATURE
+
+_REMINDER_BODY = """Guten Tag {name}
+
+Im Anhang finden Sie eine {mahnstufe} zur Rechnung {belegnummer} vom {belegdatum} für den Zeitraum {zeitraum}.
+
+Offener Betrag: {offener_betrag}
+Bitte bezahlen bis: {neue_frist}
+
+Die Zahlungsangaben stehen im Anhang. Falls Sie den Betrag in den letzten Tagen bereits bezahlt haben, betrachten Sie dieses Schreiben bitte als gegenstandslos. Bei Fragen erreichen Sie uns unter {vertreter_email}.
+
+""" + _SIGNATURE
+
 TEMPLATE_SPECS: dict[str, TemplateSpec] = {
     spec.kind: spec for spec in (
         TemplateSpec(
@@ -137,6 +157,37 @@ TEMPLATE_SPECS: dict[str, TemplateSpec] = {
             placeholders=_COMMON + _DOCUMENT,
             default_subject="{gemeinschaft}: Gutschrift {belegnummer} für {zeitraum}",
             default_body=_CREDIT_BODY,
+        ),
+        TemplateSpec(
+            kind="cancellation",
+            label="Abrechnung: Stornobeleg",
+            purpose="Wenn ein bereits zugestellter Beleg storniert wurde.",
+            attachment="Stornobeleg (PDF)",
+            placeholders=_COMMON + (
+                ("stornonummer", "Nummer des Stornobelegs"),
+                ("belegart", "Rechnung oder Gutschrift"),
+                ("belegnummer", "Nummer des stornierten Belegs"),
+                ("belegdatum", "Datum des stornierten Belegs"),
+                ("zeitraum", "Abrechnungszeitraum"),
+            ),
+            default_subject="{gemeinschaft}: Stornobeleg {stornonummer} zu {belegnummer}",
+            default_body=_CANCELLATION_BODY,
+        ),
+        TemplateSpec(
+            kind="reminder",
+            label="Abrechnung: Zahlungserinnerung / Mahnung",
+            purpose="Für eine überfällige Rechnung, je nach Stufe Zahlungserinnerung, 1. oder 2. Mahnung.",
+            attachment="Zahlungserinnerung bzw. Mahnung mit QR-Zahlteil (PDF)",
+            placeholders=_COMMON + (
+                ("mahnstufe", "Zahlungserinnerung, 1. Mahnung oder 2. Mahnung"),
+                ("belegnummer", "Nummer der Rechnung"),
+                ("belegdatum", "Datum der Rechnung"),
+                ("zeitraum", "Abrechnungszeitraum"),
+                ("offener_betrag", "Offener Betrag, z. B. CHF 12.30"),
+                ("neue_frist", "Neue Zahlungsfrist"),
+            ),
+            default_subject="{gemeinschaft}: {mahnstufe} zur Rechnung {belegnummer}",
+            default_body=_REMINDER_BODY,
         ),
     )
 }
@@ -244,20 +295,47 @@ def welcome_values(common: dict[str, str], *, contract_version: int | None, cont
     }
 
 
+def _period(doc: BillingDocument) -> str:
+    if doc.period_start and doc.period_end:
+        return f"{_date(doc.period_start)} – {_date(doc.period_end)}"
+    return "–"
+
+
 def document_values(common: dict[str, str], doc: BillingDocument) -> dict[str, str]:
     """Values of the "invoice"/"credit" template for one issued document."""
-    if doc.period_start and doc.period_end:
-        period = f"{_date(doc.period_start)} – {_date(doc.period_end)}"
-    else:
-        period = "–"
     values = {
         **common,
         "belegnummer": doc.number,
         "belegdatum": _date(doc.issue_date),
-        "zeitraum": period,
+        "zeitraum": _period(doc),
         "betrag": _format_chf(doc.amount_chf),
         "energie_kwh": _format_kwh(doc.local_kwh),
     }
     if doc.is_invoice:
         values["faellig_am"] = _date(doc.due_date)
     return values
+
+
+def cancellation_values(common: dict[str, str], doc: BillingDocument) -> dict[str, str]:
+    """Values of the "cancellation" template for the Stornobeleg of a cancelled document."""
+    return {
+        **common,
+        "stornonummer": doc.cancel_number or "–",
+        "belegart": "Rechnung" if doc.is_invoice else "Gutschrift",
+        "belegnummer": doc.number,
+        "belegdatum": _date(doc.issue_date),
+        "zeitraum": _period(doc),
+    }
+
+
+def reminder_values(common: dict[str, str], doc: BillingDocument, reminder: DocumentReminder) -> dict[str, str]:
+    """Values of the "reminder" template for one reminder of an invoice."""
+    return {
+        **common,
+        "mahnstufe": reminder.label,
+        "belegnummer": doc.number,
+        "belegdatum": _date(doc.issue_date),
+        "zeitraum": _period(doc),
+        "offener_betrag": _format_chf(reminder.open_amount_chf),
+        "neue_frist": _date(reminder.new_due_date),
+    }

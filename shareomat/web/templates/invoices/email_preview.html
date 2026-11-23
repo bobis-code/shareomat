@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}E-Mail senden – {{ doc.number }}{% endblock %}
+{% block heading %}E-Mail senden{% endblock %}
+{% block content %}
+<div class="card">
+  {% if refused %}
+  <div class="error-box"><strong>Kann nicht gesendet werden:</strong> {{ refused }}</div>
+  {% elif preview %}
+  <h2>{{ preview.title }}</h2>
+  {% if preview.unknown_outcome %}
+  <div class="error-box"><strong>Ergebnis unklar:</strong> Der Versand vom
+    {{ preview.unknown_outcome.recorded_at.strftime('%d.%m.%Y %H:%M') }} wurde begonnen, aber nicht abgeschlossen
+    (z. B. Neustart während des Sendens). Bitte zuerst im Postfach unter «Gesendet» nachsehen.
+    Ist die E-Mail dort, beim Beleg die Zustellung von Hand erfassen (Zustellweg E-Mail). Sonst unten «Erneut senden»
+    ankreuzen.</div>
+  {% elif preview.sent_at %}
+  <div class="info-box">Bereits zugestellt am {{ preview.sent_at.strftime('%d.%m.%Y') }}. Ein erneuter Versand erzeugt nur
+    einen weiteren Protokolleintrag, nie eine neue Forderung.</div>
+  {% endif %}
+  <div class="table-wrap"><table>
+    <tbody>
+      <tr><th style="width:9rem">An</th><td>{{ preview.to }} <span class="ts">(beim Erstellen des Belegs gespeichert)</span></td></tr>
+      <tr><th>Betreff</th><td>{{ preview.subject }}</td></tr>
+      <tr><th>Anhang</th><td><a href="{{ pdf_url }}" target="_blank">{{ preview.attachment_name }}</a>
+        <span class="ts">— bitte öffnen und prüfen</span></td></tr>
+    </tbody>
+  </table></div>
+  <pre style="white-space:pre-wrap;font-family:inherit;background:#f6f6f6;padding:12px;border-radius:6px">{{ preview.body }}</pre>
+  {% endif %}
+</div>
+
+{% if preview and not refused %}
+<div class="card">
+  {% if problems %}
+  <div class="error-box"><strong>E-Mail-Versand nicht eingerichtet:</strong>
+    <ul style="margin:.3rem 0 0 1.2rem">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    Einrichten unter Home Assistant → Add-on Shareomat → Konfiguration → smtp, danach Add-on neu starten.
+    Den Text oben können Sie bis dahin kopieren und das PDF selbst senden.</div>
+  {% else %}
+  <form method="post" action="{{ url_for('invoices', suffix='/' + doc.id|string + '/email') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="target" value="{{ target }}">
+    <label style="display:block"><input type="checkbox" name="confirm" required> Empfänger, Text und PDF habe ich
+      geprüft.</label>
+    {% if preview.sent_at or preview.unknown_outcome %}
+    <label style="display:block"><input type="checkbox" name="resend"> Erneut senden</label>
+    {% endif %}
+    <div class="actions-row"><button type="submit">Jetzt per E-Mail senden</button>
+      <a class="btn btn-muted" href="{{ url_for('invoices', suffix='/' + doc.id|string) }}">Abbrechen</a></div>
+  </form>
+  <p class="ts">Gesendet wird nur jetzt, auf diesen Knopfdruck. Das Ergebnis steht danach im Verlauf des Belegs;
+    eine Kopie liegt im Postfach des Absenders unter «Gesendet».</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="actions-row"><a class="btn btn-muted" href="{{ url_for('invoices', suffix='/' + doc.id|string) }}">Zurück zum Beleg</a></div>
+{% endif %}
+{% endblock %}

@@ -266,6 +266,7 @@
         {% if current and not current.declaration_issued_at and not current.accepted_at %}
         <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/issue') }}" class="ck-inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+          <a class="btn btn-small" href="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/welcome') }}">Per E-Mail senden (mit Vertrag)</a>
           <a class="btn btn-small btn-muted" href="{{ url_for('contract', suffix='/participants/' ~ current.id ~ '/declaration/print') }}" target="_blank" rel="noopener">Erklärung drucken</a>
           <label class="ck-inline-field">ausgestellt am <input type="date" name="issued_at" value="{{ today.isoformat() }}"></label>
           <button type="submit" class="btn-small">Als ausgestellt erfassen</button>

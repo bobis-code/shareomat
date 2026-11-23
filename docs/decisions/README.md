@@ -84,6 +84,8 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
   Mitgliedschaft getrennt von der Vertragsversion (Schema 18)
 * [ADR-0010](ADR-0010-rohdatensicherung-swisseldex-auf-netzwerkspeicher.md) —
   Rohdatensicherung der Swisseldex-Originale auf einem Netzwerkspeicher (vorgeschlagen)
+* [ADR-0011](ADR-0011-e-mail-versand-der-belege-mit-pdf.md) —
+  E-Mail-Versand der Belege mit PDF aus der eingefrorenen Fassung (vorgeschlagen)
 
 ## Verbindlichkeit
 

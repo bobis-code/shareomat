@@ -48,8 +48,10 @@ Notes:
     Rendering is injected (`render(template_name, context) -> html`) so this
     module stays free of the web layer.
 
-    Not yet here (later phases): e-mail sending via SMTP, Swiss QR bill,
-    camt.054 bank import, pain.001 payout files, correction documents after
+    E-mail sending itself is shareomat.core.delivery.document_mail; this
+    module only checks that an item may be delivered and logs the result.
+
+    Not yet here (later phases): camt.054 bank import, pain.001 payout files, correction documents after
     payments or for corrected grid-operator data.
 """
 
@@ -66,6 +68,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from shareomat.core.payments.swiss_qr import (
@@ -91,6 +94,9 @@ from shareomat.leg_const import BILLING_STATUS_RELEASED, CONTRACT_STATUS_PUBLISH
 from shareomat.models.invoicing import (
     DELIVERY_ITEMS,
     DELIVERY_METHODS,
+    DELIVERY_STATUS_ATTEMPT,
+    DELIVERY_STATUS_FAILED,
+    DELIVERY_STATUS_SENT,
     DOC_STATUS_CANCELLED,
     DOC_STATUS_ISSUED,
     DOC_TYPE_CREDIT,
@@ -100,6 +106,9 @@ from shareomat.models.invoicing import (
     PAYMENT_KIND_REFUND,
     REMINDER_LABELS,
     REMINDER_OFFSETS_DAYS,
+    SENT_BY_LABELS,
+    SENT_BY_MANUAL,
+    SENT_BY_SHAREOMAT,
     PROFILE_CHECK,
     PROFILE_MISSING,
     PROFILE_READY,
@@ -260,6 +269,59 @@ def sample_payment_part(db_path: Path) -> PaymentPartView | None:
         reference_type=ref_type, reference=reference, message="Scan-Test Shareomat - bitte nicht bezahlen"))
 
 
+SAMPLE_RECIPIENT = {"label": "Max Muster", "address_line": "Musterweg 24", "postal_code": "9999",
+                    "city": "Musterdorf", "email": ""}
+SAMPLE_QR_MESSAGE = "MUSTER - nicht bezahlen - Test aus Shareomat"
+
+
+def sample_document(db_path: Path, doc_type: str, render: Renderer, *, today: date | None = None) -> BillingDocument:
+    """A document like a real one, for the fictitious participant Max Muster — for test e-mails only.
+
+    Same template, sender (contract), contact and bank account (QR payment
+    part) as a real document of today; period = last calendar month. Never
+    stored: no number from the sequence ("R-MUSTER" / "G-MUSTER"), and the
+    QR message says not to pay.
+    """
+    today = today or local_today()
+    period_end = today.replace(day=1) - timedelta(days=1)
+    period_start = period_end.replace(day=1)
+    is_invoice = doc_type == DOC_TYPE_INVOICE
+    number = "R-MUSTER" if is_invoice else "G-MUSTER"
+    kwh, amount = (Decimal("213.250"), Decimal("23.45")) if is_invoice else (Decimal("180.000"), Decimal("18.90"))
+    item = SimpleNamespace(local_received_kwh=kwh if is_invoice else Decimal(0), charge_chf=amount if is_invoice else 0,
+                           local_supplied_kwh=Decimal(0) if is_invoice else kwh, credit_chf=0 if is_invoice else amount)
+    community = get_community(db_path)
+    run = SimpleNamespace(period_start=period_start, period_end=period_end, tariff_name="Muster",
+                          community_name=community.name if community else "")
+    creditor = _creditor(db_path, today, period_start, period_end)
+    profile = get_payment_profile(db_path)
+    due = today + timedelta(days=int(creditor["payment_term_days"])) if is_invoice else None
+    qr = None
+    if is_invoice and payment_profile_status(db_path) != PROFILE_MISSING:
+        ref_type, reference = reference_for(profile.iban, number)
+        try:
+            qr = PaymentPartView(SwissQrPayload.build(
+                iban=profile.iban, creditor=_profile_creditor(profile), amount=amount,
+                debtor=_debtor(SAMPLE_RECIPIENT["label"], SAMPLE_RECIPIENT["address_line"],
+                               SAMPLE_RECIPIENT["postal_code"], SAMPLE_RECIPIENT["city"]),
+                reference_type=ref_type, reference=reference, message=SAMPLE_QR_MESSAGE))
+        except SwissQrError as exc:
+            raise InvoicingError(f"QR-Zahlteil des Musters: {exc}")
+    html = render("invoices/document.html", {
+        "doc_type": doc_type, "number": number, "issue_date": today, "due_date": due, "amount": amount,
+        "item": item, "run": run, "recipient": SAMPLE_RECIPIENT, "creditor": creditor,
+        "community_name": run.community_name, "contact_email": profile.contact_email or creditor["email"],
+        "qr": qr, "qr_missing": is_invoice and qr is None, "replaces": None,
+    })
+    return BillingDocument(
+        billing_run_id=0, participant_id="muster", doc_type=doc_type, number=number, amount_chf=amount,
+        issue_date=today, due_date=due, recipient_label=SAMPLE_RECIPIENT["label"],
+        recipient_address=f"{SAMPLE_RECIPIENT['address_line']}\n{SAMPLE_RECIPIENT['postal_code']} "
+                          f"{SAMPLE_RECIPIENT['city']}",
+        snapshot_html=html, snapshot_sha256=_sha(html), period_start=period_start, period_end=period_end,
+        local_kwh=kwh, qr_payload=qr.payload.text() if qr else "")
+
+
 def _debtor(label: str, address_line: str, postal_code: str, city: str) -> QrAddress:
     street, building = split_street(address_line)
     return QrAddress(name=label, street=street, building=building, postal_code=postal_code, city=city, country="CH")
@@ -306,7 +368,8 @@ def _load_logs(conn, doc: BillingDocument) -> None:
     doc.booked_chf = sum((p.amount_chf for p in doc.payments), Decimal(0))
     doc.deliveries = [
         DocumentDelivery(id=r["id"], document_id=r["document_id"], reminder_id=r["reminder_id"], method=r["method"],
-                         status=r["status"], detail=r["detail"], item=r["item"], recorded_at=_ts(r["recorded_at"]))
+                         status=r["status"], detail=r["detail"], item=r["item"], recorded_at=_ts(r["recorded_at"]),
+                         sent_by=r["sent_by"])
         for r in conn.execute("SELECT * FROM document_deliveries WHERE document_id = ? ORDER BY id", (doc.id,))
     ]
 
@@ -438,6 +501,12 @@ def _creditor(db_path: Path, issue_date: date, period_start: date | None, period
     return {"name": community.name if community else "", "address_line": community.address_line if community else "",
             "postal_code": community.postal_code if community else "", "city": community.city if community else "",
             "email": "", "contract_versions": versions, "payment_term_days": 30}
+
+
+def document_contact(db_path: Path, doc: BillingDocument) -> tuple[str, str]:
+    """(representative name, contact e-mail) as on the document's letterhead — for the e-mail text."""
+    creditor = _creditor(db_path, doc.issue_date, doc.period_start, doc.period_end)
+    return creditor["name"], get_payment_profile(db_path).contact_email or creditor["email"]
 
 
 def issue_problems(db_path: Path, run_id: int, *, today: date | None = None, include_payment: bool = True) -> list[str]:
@@ -701,49 +770,106 @@ def cancel_document(db_path: Path, document_id: int, reason: str, render: Render
     return get_document(db_path, document_id)
 
 
+def _check_item(item: str, reminder_id: int | None) -> None:
+    if item not in DELIVERY_ITEMS or (item == "reminder") != (reminder_id is not None):
+        raise InvoicingError("Unbekanntes Zustellobjekt.")
+
+
+_CHECK_FULL = "full"   # it may go out right now: integrity, reminder block, open amount unchanged, ...
+_CHECK_LOG = "log"     # a manual "failed" entry: the item exists and is still active
+_CHECK_NONE = "none"   # the result of an e-mail already handed to the server: the item exists
+
+
+def _delivery_subject(doc: BillingDocument, item: str, reminder_id: int | None, method: str,
+                      *, checks: str) -> tuple[str, DocumentReminder | None]:
+    """What is delivered ("R-2027-001", "S-2027-001", "1. Mahnung") and its reminder; raises when it may not.
+
+    The result of an e-mail already handed to the server is logged with
+    _CHECK_NONE: that entry must never be lost because, say, a payment was
+    booked while the e-mail was on its way.
+    """
+    if method == "email" and not doc.recipient_email:
+        raise InvoicingError("Für diesen Empfänger ist keine E-Mail-Adresse hinterlegt — Zustellung per Papier.")
+    if checks == _CHECK_FULL:
+        _require_integrity(doc)
+    if item == "cancellation":
+        if not doc.cancel_number:
+            raise InvoicingError("Zu diesem Beleg gibt es keinen Stornobeleg.")
+        return doc.cancel_number, None
+    if doc.status == DOC_STATUS_CANCELLED and checks != _CHECK_NONE:
+        raise InvoicingError("Stornierte Belege und ihre Mahnungen werden nicht mehr versendet.")
+    if item == "reminder":
+        reminder = next((r for r in doc.reminders if r.id == reminder_id), None)
+        if reminder is None or (reminder.discarded_at is not None and checks != _CHECK_NONE):
+            raise InvoicingError("Mahnung gehört nicht zu diesem Beleg oder wurde verworfen.")
+        if checks == _CHECK_FULL:
+            if doc.reminder_block_reason:
+                raise InvoicingError("Für diese Rechnung gilt eine Mahnsperre.")
+            if doc.open_chf == 0:
+                raise InvoicingError("Die Rechnung ist inzwischen bezahlt — Mahnung nicht versenden, sondern verwerfen.")
+            if doc.open_chf != reminder.open_amount_chf:
+                raise InvoicingError(
+                    f"Seit dem Erstellen der Mahnung hat sich der offene Betrag geändert (jetzt CHF {doc.open_chf}) "
+                    "— Mahnung verwerfen und neu erstellen.")
+        return reminder.label, reminder
+    return doc.number, None
+
+
+def _insert_delivery(conn, document_id: int, item: str, reminder_id: int | None, method: str, status: str,
+                     detail: str, sent_by: str, what: str) -> None:
+    conn.execute(
+        "INSERT INTO document_deliveries (document_id, reminder_id, item, method, status, detail, recorded_at, sent_by) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (document_id, reminder_id, item, method, status, detail.strip(), now_iso(), sent_by))
+    record_event(conn, "billing_document", document_id, f"delivery_{status}",
+                 f"{what} {DELIVERY_METHODS[method]} ({SENT_BY_LABELS[sent_by]}) {detail.strip()}".strip())
+
+
 def record_delivery(db_path: Path, document_id: int, method: str, *, status: str = "sent", detail: str = "",
                     item: str = "document", reminder_id: int | None = None) -> None:
     """Log one delivery attempt (manually recorded). Re-sending only adds a log entry — never a second claim."""
     if method not in DELIVERY_METHODS:
         raise InvoicingError("Unbekannter Zustellweg.")
-    if status not in ("sent", "failed"):
+    if status not in (DELIVERY_STATUS_SENT, DELIVERY_STATUS_FAILED):
         raise InvoicingError("Unbekannter Zustellstatus.")
-    if item not in DELIVERY_ITEMS or (item == "reminder") != (reminder_id is not None):
-        raise InvoicingError("Unbekanntes Zustellobjekt.")
+    _check_item(item, reminder_id)
     with _write_txn(db_path) as conn:
         doc = _load_document(conn, document_id)
-        if status == "sent":
-            _require_integrity(doc)
-        if method == "email" and not doc.recipient_email:
-            raise InvoicingError("Für diesen Empfänger ist keine E-Mail-Adresse hinterlegt — Zustellung per Papier.")
-        if item == "cancellation":
-            if not doc.cancel_number:
-                raise InvoicingError("Zu diesem Beleg gibt es keinen Stornobeleg.")
-            what = doc.cancel_number
-        elif doc.status == DOC_STATUS_CANCELLED:
-            raise InvoicingError("Stornierte Belege und ihre Mahnungen werden nicht mehr versendet.")
-        elif item == "reminder":
-            reminder = next((r for r in doc.reminders if r.id == reminder_id), None)
-            if reminder is None or reminder.discarded_at is not None:
-                raise InvoicingError("Mahnung gehört nicht zu diesem Beleg oder wurde verworfen.")
-            if status == "sent":
-                if doc.reminder_block_reason:
-                    raise InvoicingError("Für diese Rechnung gilt eine Mahnsperre.")
-                if doc.open_chf == 0:
-                    raise InvoicingError("Die Rechnung ist inzwischen bezahlt — Mahnung nicht versenden, sondern verwerfen.")
-                if doc.open_chf != reminder.open_amount_chf:
-                    raise InvoicingError(
-                        f"Seit dem Erstellen der Mahnung hat sich der offene Betrag geändert (jetzt CHF {doc.open_chf}) "
-                        "— Mahnung verwerfen und neu erstellen.")
-            what = reminder.label
-        else:
-            what = doc.number
-        conn.execute(
-            "INSERT INTO document_deliveries (document_id, reminder_id, item, method, status, detail, recorded_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (document_id, reminder_id, item, method, status, detail.strip(), now_iso()))
-        record_event(conn, "billing_document", document_id, f"delivery_{status}",
-                     f"{what} {DELIVERY_METHODS[method]} (manuell erfasst) {detail.strip()}".strip())
+        what, _ = _delivery_subject(doc, item, reminder_id, method,
+                                    checks=_CHECK_FULL if status == DELIVERY_STATUS_SENT else _CHECK_LOG)
+        _insert_delivery(conn, document_id, item, reminder_id, method, status, detail, SENT_BY_MANUAL, what)
+
+
+def email_subject(db_path: Path, document_id: int, item: str = "document",
+                  reminder_id: int | None = None) -> tuple[BillingDocument, DocumentReminder | None]:
+    """The document (and reminder) about to be e-mailed by Shareomat, after every delivery check."""
+    _check_item(item, reminder_id)
+    with connect(db_path) as conn:
+        doc = _load_document(conn, document_id)
+    _, reminder = _delivery_subject(doc, item, reminder_id, "email", checks=_CHECK_FULL)
+    return doc, reminder
+
+
+def record_email_attempt(db_path: Path, document_id: int, item: str = "document", reminder_id: int | None = None,
+                         *, detail: str = "") -> None:
+    """Log, right before handing an e-mail to the server, that Shareomat is sending it (checks run again here)."""
+    _check_item(item, reminder_id)
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        what, _ = _delivery_subject(doc, item, reminder_id, "email", checks=_CHECK_FULL)
+        _insert_delivery(conn, document_id, item, reminder_id, "email", DELIVERY_STATUS_ATTEMPT, detail,
+                         SENT_BY_SHAREOMAT, what)
+
+
+def record_email_result(db_path: Path, document_id: int, item: str = "document", reminder_id: int | None = None,
+                        *, sent: bool, detail: str = "") -> None:
+    """Log the outcome of Shareomat's own e-mail. Never refused for business reasons: it already happened."""
+    _check_item(item, reminder_id)
+    with _write_txn(db_path) as conn:
+        doc = _load_document(conn, document_id)
+        what, _ = _delivery_subject(doc, item, reminder_id, "email", checks=_CHECK_NONE)
+        _insert_delivery(conn, document_id, item, reminder_id, "email",
+                         DELIVERY_STATUS_SENT if sent else DELIVERY_STATUS_FAILED, detail, SENT_BY_SHAREOMAT, what)
 
 
 def set_reminder_block(db_path: Path, document_id: int, reason: str) -> None:

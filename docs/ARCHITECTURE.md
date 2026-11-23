@@ -221,6 +221,11 @@ core/
       sdat_ch.py                  SDAT-CH-2025 E31/E66 (VSE-XSDs, siehe docs/sdat_leg_import.md)
   report/
     leg_report.py             CSV-/JSON-Berichte
+  delivery/                  Zustellung an Teilnehmer (ADR-0011)
+    pdf.py                    PDF aus der eingefrorenen Druckseite (WeasyPrint, ohne externe Zugriffe)
+    mail.py                   SMTP-Versand, nur verschlüsselt, ein Empfänger
+    document_mail.py          Beleg, Stornobeleg, Mahnung senden und protokollieren
+    welcome_mail.py           Willkommens-E-Mail mit Vertragspaket; Erklärung danach «ausgestellt»
 
 database/                   SQLite, Quelle der Wahrheit für Stammdaten
   sqlite.py                    Verbindung, Schema, additive Migrationen
@@ -238,7 +243,7 @@ database/                   SQLite, Quelle der Wahrheit für Stammdaten
                                Korrekturen und Sammelaktionen mit denselben Regeln
   participant_checklist.py     Checkliste pro Teilnehmer, nur lesend (Abrechnung über billing_eligibility)
   backup.py                    «Sicherung erstellen» (Einstellungen): geprüfte ZIP-Kopie
-  email_templates.py           E-Mail-Vorlagen (Willkommen, Rechnung, Gutschrift) in der settings-Tabelle
+  email_templates.py           E-Mail-Vorlagen (Willkommen, Rechnung, Gutschrift, Stornobeleg, Mahnung) in der settings-Tabelle
   participant_documents.py     Dokumente pro Teilnehmer, nur lesend (EBL-Meldung Eintritt in die LEG)
   config_builder.py            RuntimeConfig + SQLite → LegConfig
   billing.py                   Interaktiver Abrechnungs-Workflow (Ausnahme: enthält Kernlogik, siehe Docstring dort)
@@ -455,6 +460,7 @@ Konsequenzen. Aktuell:
 * ADR-0008 — Offizielle SDAT-Zuteilung als zweiter Abrechnungsweg (vorgeschlagen).
 * ADR-0009 — Mitgliedschaft getrennt von der Vertragsversion (Schema 18).
 * ADR-0010 — Rohdatensicherung der Swisseldex-Originale auf einem Netzwerkspeicher (vorgeschlagen).
+* ADR-0011 — E-Mail-Versand der Belege mit PDF aus der eingefrorenen Fassung (vorgeschlagen).
 
 Angenommene ADRs sind dauerhafte Leitplanken für künftige Änderungen, nicht
 nur historische Notizen — siehe `docs/decisions/README.md`, "Verbindlichkeit".
@@ -537,6 +543,6 @@ architektur-relevanten Punkte, Stand 2026-08-13:
 | **E31 / E66** | SDAT-Nachrichtentypen: E31 = aggregierte LEG-Daten, E66 = Messdaten je Teilnehmer |
 | **Mitgliedschaft** | Zeitraum eines Teilnehmers in der LEG (Beitritt bis Austritt) mit EBL-Meldung und -Bestätigung; ein Wiedereintritt ist eine neue Mitgliedschaft (ADR-0009) |
 | **Mitteilung / Zustimmung** | Mitteilung = Teilnehmer wurde über eine Vertragsversion informiert; Zustimmung = ausdrückliches Einverständnis, nur nötig bei Versionen «mit Zustimmung aller». Eine Mitteilung ist nie eine Zustimmung |
-| **E-Mail-Vorlage** | VERWALTUNG → E-Mail-Vorlagen: Betreff und Text einer E-Mail an Teilnehmer, nur Text mit festen {platzhaltern} (kein Template-Code). Der spätere Versand, von Hand und automatisch, füllt sie mit `core.email_templates.fill_template` |
+| **E-Mail-Vorlage** | VERWALTUNG → E-Mail-Vorlagen: Betreff und Text einer E-Mail an Teilnehmer, nur Text mit festen {platzhaltern} (kein Template-Code). Der Versand auf Knopfdruck (`core.delivery`, ADR-0011) füllt sie mit `core.email_templates.fill_template` |
 | **Checkliste** | VERWALTUNG → Checkliste: zeigt pro Teilnehmer, was erledigt ist, was fehlt und worauf gewartet wird; speichert selbst nichts |
 | **Vertrag** | Der öffentliche LEG-Mustervertrag inkl. Preisen — Quelle der Wahrheit für Tarife, nicht die Tarife-Seite (die ist nur Fallback) |

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Willkommens-E-Mail – {{ package.participant.label }}{% endblock %}
+{% block heading %}Willkommens-E-Mail mit Vertrag{% endblock %}
+{% block content %}
+<div class="card">
+  <p class="ts" style="margin-top:0">{{ package.participant.label }} · Vertragsversion {{ package.version.version }}
+    · <a href="{{ url_for('contract', suffix=base + '/declaration') }}">zur Beitrittserklärung</a></p>
+  {% if refused %}
+  <div class="error-box"><strong>Kann nicht gesendet werden:</strong> {{ refused }}</div>
+  {% elif preview %}
+  {% if preview.unknown_since %}
+  <div class="error-box"><strong>Ergebnis unklar:</strong> Der Versand vom {{ preview.unknown_since.strftime('%d.%m.%Y %H:%M') }}
+    wurde begonnen, aber nicht abgeschlossen. Bitte im Postfach unter «Gesendet» nachsehen.
+    <form method="post" action="{{ url_for('contract', suffix=base + '/welcome') }}" style="margin-top:6px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="found_in_sent" value="on">
+      <button type="submit" class="btn-small">Im Postfach gefunden — als gesendet erfassen</button>
+    </form></div>
+  {% elif preview.sent_at %}
+  <div class="info-box">Bereits gesendet am {{ preview.sent_at.strftime('%d.%m.%Y') }}.</div>
+  {% endif %}
+  <div class="table-wrap"><table>
+    <tbody>
+      <tr><th style="width:9rem">An</th><td>{{ preview.to }}</td></tr>
+      <tr><th>Betreff</th><td>{{ preview.subject }}</td></tr>
+      <tr><th>Anhang</th><td><a href="{{ pdf_url }}" target="_blank">{{ preview.attachment_name }}</a>
+        <span class="ts">— Beitrittserklärung und vollständiger Gesellschaftsvertrag, bitte öffnen und prüfen</span></td></tr>
+    </tbody>
+  </table></div>
+  <pre style="white-space:pre-wrap;font-family:inherit;background:#f6f6f6;padding:12px;border-radius:6px">{{ preview.body }}</pre>
+  {% endif %}
+</div>
+
+{% if preview and not refused %}
+<div class="card">
+  {% if problems %}
+  <div class="error-box"><strong>E-Mail-Versand nicht eingerichtet:</strong>
+    <ul style="margin:.3rem 0 0 1.2rem">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    Einrichten unter Home Assistant → Add-on Shareomat → Konfiguration → smtp, danach Add-on neu starten.</div>
+  {% else %}
+  <form method="post" action="{{ url_for('contract', suffix=base + '/welcome') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label style="display:block"><input type="checkbox" name="confirm" required> Empfänger, Text und PDF habe ich
+      geprüft.</label>
+    {% if preview.sent_at or preview.unknown_since %}
+    <label style="display:block"><input type="checkbox" name="resend"> Erneut senden</label>
+    {% endif %}
+    <div class="actions-row"><button type="submit">Jetzt per E-Mail senden</button>
+      <a class="btn btn-muted" href="{{ url_for('contract', suffix=base + '/declaration') }}">Abbrechen</a></div>
+  </form>
+  <p class="ts">Nach dem Senden gilt die Beitrittserklärung als ausgestellt, in genau der gesendeten Fassung.
+    Die Unterschrift erfassen Sie wie bisher, sobald sie zurückkommt.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

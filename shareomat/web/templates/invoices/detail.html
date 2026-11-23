@@ -86,7 +86,7 @@
       {% endfor %}
       {% for d in doc.deliveries %}
       <tr><td>{{ d.recorded_at.strftime('%d.%m.%Y') }}</td>
-        <td>{{ 'Zustellung' if d.status == 'sent' else 'Zustellung fehlgeschlagen' }} ({{ delivery_methods[d.method] }}){{ {'reminder': ' — Mahnung', 'cancellation': ' — Stornobeleg'}.get(d.item, '') }} · manuell erfasst</td>
+        <td>{{ {'sent': 'Zustellung', 'failed': 'Zustellung fehlgeschlagen', 'attempt': 'E-Mail-Versand begonnen'}.get(d.status, d.status) }} ({{ delivery_methods[d.method] }}){{ {'reminder': ' — Mahnung', 'cancellation': ' — Stornobeleg'}.get(d.item, '') }} · {{ sent_by_labels.get(d.sent_by, d.sent_by) }}</td>
         <td></td><td>{{ d.detail }}</td></tr>
       {% endfor %}
       {% for r in doc.reminders %}
@@ -103,6 +103,29 @@
     </tbody>
   </table></div>
 </div>
+
+{% if mail_items %}
+<div class="card">
+  <h2>Per E-Mail senden</h2>
+  {% if not mail_ready %}
+  <p class="ts" style="margin-top:0">Der E-Mail-Versand aus Shareomat ist noch nicht eingerichtet (Add-on-Konfiguration →
+    smtp). Die Vorschau zeigt trotzdem Text und PDF.</p>
+  {% endif %}
+  <div class="table-wrap"><table>
+    <tbody>
+    {% for m in mail_items %}
+    <tr><td><strong>{{ m.label }}</strong></td>
+      <td>{% if m.unknown %}<span class="status-pill status-pill-inactive">Ergebnis unklar</span>
+          <span class="ts">Versand vom {{ m.unknown.recorded_at.strftime('%d.%m.%Y %H:%M') }} nicht abgeschlossen: im Postfach
+            unter «Gesendet» nachsehen, dann unten erfassen oder erneut senden.</span>
+        {% elif m.sent_at %}zugestellt am {{ m.sent_at.strftime('%d.%m.%Y') }}{% else %}noch nicht zugestellt{% endif %}</td>
+      <td><a class="btn btn-small {{ 'btn-muted' if m.sent_at }}" href="{{ url_for('invoices', suffix='/' + doc.id|string + '/email') }}?target={{ m.target }}">{{ 'Vorschau / erneut senden' if m.sent_at or m.unknown else 'Vorschau und senden' }}</a></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="ts">An {{ doc.recipient_email }} (beim Erstellen des Belegs gespeichert).</div>
+</div>
+{% endif %}
 
 {% if doc.status != 'cancelled' or (doc.cancel_number and not doc.cancellation_sent_at) %}
 <div class="card">

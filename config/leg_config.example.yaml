@@ -52,6 +52,18 @@ swisseldex:
   auto_sync: false
   sync_interval_hours: 6
 
+# Versand von Belegen per E-Mail. Nur verschlüsselt: ssl (Port 465) oder starttls (Port 587).
+# Gmail: App-Passwort verwenden. Gesendet wird nur auf Knopfdruck in der Weboberfläche.
+smtp:
+  enabled: false
+  host: "smtp.gmail.com"
+  port: 465
+  security: "ssl"
+  username: ""
+  password: ""
+  from_address: ""
+  from_name: ""
+
 web:
   enabled: true
   port: 8099

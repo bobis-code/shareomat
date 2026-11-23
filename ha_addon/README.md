@@ -159,6 +159,30 @@ copy is completed automatically on the next sync. **Speicher testen** writes one
 file to `verbindungstest/`, reads it back and proves that the storage refuses overwriting.
 Switching to "Pflicht" runs the test first.
 
+### Sending documents by e-mail
+
+Shareomat can send invoices, credit notes, cancellation notices, reminders and the welcome
+e-mail (with the contract package) itself, each with the document as a PDF (ADR-0011). It only
+sends when you press the button, after a preview of recipient, text and PDF.
+
+1. Configuration → section **smtp**: `enabled`, `host` (Gmail: `smtp.gmail.com`), `port`
+   465 with `security: ssl` or 587 with `starttls`, `username`, `password`, `from_address`,
+   optionally `from_name`. Gmail and other providers with 2-Step Verification need an
+   **App Password**. There is no unencrypted mode.
+2. Restart the add-on.
+3. **E-Mail-Vorlagen** → **Test senden**: enter any test address and choose a sample invoice,
+   a sample credit note or the plain connection test. The sample runs exactly like a real
+   document: your template, letterhead, bank account and QR payment part, PDF attached. It is
+   made for the fictitious person Max Muster, never stored, and marked: the subject starts with
+   `[TEST]`, the PDF says "MUSTER – nicht bezahlen", and so does the QR message. At most 20 test
+   e-mails per hour, each one in the audit log. Open the PDF and scan the QR payment part once
+   with a banking app.
+
+The PDF is made from the frozen document, exactly as it prints. Nothing is fetched while it is
+made. The only font in the image is Liberation Sans, which the QR-bill rules permit. Every
+attempt is logged. If the connection breaks after the hand-over, the document shows
+"Ergebnis unklar": check the mailbox's "Gesendet" folder before sending again.
+
 ### Home Assistant backups
 
 The add-on is backed up **cold** (`backup: cold` in `config.yaml`): Home

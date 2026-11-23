@@ -160,6 +160,8 @@
   <p style="color:#b91c1c;font-weight:bold;margin:0 0 6px">MUSTER – NICHT ZUR ZAHLUNG VERWENDEN. Nur scannen, Zahlung
     in der Banking-App abbrechen.</p>
   <div style="overflow-x:auto;background:#fff;padding:4mm 0">{% set qr = sample %}{% include "invoices/qr_payment_part.html" %}</div>
+  <p class="ts"><a href="{{ url_for('invoices', suffix='/sample/pdf') }}" target="_blank">Muster als PDF öffnen</a>
+    — so sieht der Zahlteil im PDF aus, das Shareomat per E-Mail sendet. Auch dieses PDF einmal scannen.</p>
   {% if profile_status != 'ready' %}
   <form method="post" action="{{ url_for('invoices', suffix='/settings/confirm') }}" style="margin-top:10px">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

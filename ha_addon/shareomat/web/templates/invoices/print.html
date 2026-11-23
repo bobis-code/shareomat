@@ -1,6 +1,7 @@
 {# Standalone printable page for an issued document or reminder — "Drucken ->
    als PDF speichern". The body is the stored snapshot, byte-identical to what
-   snapshot_sha256 was computed from. #}
+   snapshot_sha256 was computed from. The same page (for_pdf=True, without the
+   print button) becomes the PDF attached to an e-mail. #}
 <!DOCTYPE html>
 <html lang="de">
 <head>
@@ -33,8 +34,10 @@
   </style>
 </head>
 <body>
+  {% if not for_pdf %}
   <div class="noprint" style="text-align:center;padding:4mm"><button onclick="window.print()">Drucken / als PDF speichern</button>
     <span class="ts">Beim Drucken: Massstab 100 % / «Tatsächliche Grösse», keine Seitenränder.</span></div>
+  {% endif %}
   {% for pg in pages or [{'body': body, 'sha256': sha256, 'stamp': stamp}] %}
   <div class="page{{ ' with-qr' if 'class="qr-bill' in pg.body }}">
   {% if pg.stamp %}<div class="stamp">{{ pg.stamp }}</div>{% endif %}

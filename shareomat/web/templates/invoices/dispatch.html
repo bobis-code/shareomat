@@ -4,14 +4,12 @@
 {% block content %}
 <div class="card">
   {% if rows %}
-  <p><strong>So geht's:</strong> 1. Alle Belege als PDF öffnen (Sammeldruck) und drucken bzw. als PDF speichern.
-    2. Per Post/Briefkasten übergeben oder das PDF selbst per E-Mail senden.
-    3. Unten bestätigen, was tatsächlich versendet wurde.</p>
+  <p><strong>So geht's:</strong> Belege mit E-Mail-Adresse kann Shareomat selbst senden (erste Karte unten). Die übrigen
+    drucken (Sammeldruck), per Post bzw. persönlich übergeben und in der zweiten Karte bestätigen, was tatsächlich
+    versendet wurde.</p>
   <div class="actions-row" style="margin-top:0">
     <a class="btn" href="{{ url_for('invoices', suffix='/runs/' + run_id|string + '/print-all') }}" target="_blank">Alle {{ rows|length }} Belege drucken / als PDF</a>
   </div>
-  <p class="ts">Shareomat versendet selbst (noch) keine E-Mails. «Versendet» heisst hier: Sie haben den Beleg
-    übergeben oder selbst gesendet.</p>
   {% if without_email %}
   <div class="info-box">Ohne E-Mail-Adresse, also Papier: {{ without_email|join(', ') }}</div>
   {% endif %}
@@ -21,7 +19,48 @@
 </div>
 
 {% if rows %}
+<div class="card">
+  <h2>Per E-Mail senden (Shareomat)</h2>
+  {% if mail_problems %}
+  <div class="info-box"><strong>E-Mail-Versand aus Shareomat ist nicht eingerichtet:</strong>
+    <ul style="margin:.3rem 0 0 1.2rem">{% for p in mail_problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    Einrichten unter Home Assistant → Add-on Shareomat → Konfiguration → smtp, danach Add-on neu starten.
+    Bis dahin unten von Hand erfassen.</div>
+  {% elif mail_rows %}
+  <form method="post" action="{{ url_for('invoices', suffix='/dispatch/email') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="run_id" value="{{ run_id }}">
+    <div class="table-wrap"><table class="cards">
+      <thead><tr><th>Senden?</th><th>Beleg</th><th>An</th><th>Betreff</th><th></th></tr></thead>
+      <tbody>
+      {% for r in mail_rows %}
+      <tr>
+        <td data-label="Senden?">{% if r.refused %}<span class="ts">nicht möglich</span>
+          {% elif r.unknown %}<span class="ts">Ergebnis unklar — <a href="{{ r.preview_url }}">ansehen</a></span>
+          {% else %}<label style="margin:0;display:flex;gap:6px;align-items:center">
+          <input type="checkbox" name="mail_{{ r.key }}" aria-label="{{ r.title }} senden"> senden</label>{% endif %}</td>
+        <td data-label="Beleg"><strong>{{ r.title }}</strong></td>
+        <td data-label="An">{{ r.doc.recipient_email }}</td>
+        <td data-label="Betreff">{% if r.refused %}<span class="ts">{{ r.refused }}</span>{% else %}{{ r.subject }}{% endif %}</td>
+        <td data-label=""><a class="btn btn-muted btn-small" href="{{ r.preview_url }}">Vorschau</a>
+          <a class="btn btn-muted btn-small" href="{{ r.pdf_url }}" target="_blank">PDF</a></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <label style="display:block;margin-top:10px"><input type="checkbox" name="confirm" required> Empfänger, Texte
+      (Vorschau) und PDFs habe ich geprüft.</label>
+    <div class="actions-row"><button type="submit">Angekreuzte jetzt senden</button></div>
+    <p class="ts">Eine E-Mail nach der anderen. Bei einem Fehler hält Shareomat an; schon gesendete bleiben gesendet,
+      der Rest bleibt in dieser Liste. Die Kopien liegen im Postfach des Absenders unter «Gesendet».</p>
+  </form>
+  {% else %}
+  <p class="ts">Kein offener Beleg hat eine E-Mail-Adresse.</p>
+  {% endif %}
+</div>
+
 <form method="post" action="{{ url_for('invoices', suffix='/dispatch') }}" class="card">
+  <h2>Von Hand erfassen (Papier oder selbst gesendet)</h2>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <input type="hidden" name="run_id" value="{{ run_id }}">
   <div class="table-wrap"><table class="cards">

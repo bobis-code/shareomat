@@ -19,6 +19,8 @@ Notes:
         GET  /participants/<id>/declaration  one participant's Beitrittserklärung
         GET  /participants/<id>/declaration/print  same, standalone printable page
         GET  /participants/<id>/package/print      declaration + full contract text in one document
+        GET  /participants/<id>/welcome            the welcome e-mail with the package as PDF, with the send button
+        (GET /participants/<id>/welcome/pdf is served by the web server: the attachment as a file)
         GET  /versions/<id>/snapshot        the stored contract text exactly as hashed (text_sha256)
         GET  /versions/<id>/print           full contract text of one version, printable
         (GET /participants/<id>/document is served by the web server itself —
@@ -32,6 +34,8 @@ Notes:
         POST /end                            end an active contract (fields: version_id, end_date, confirm_name)
         POST /participants/add                assign a participant to the current contract version
         POST /participants/<id>/issue         record that the Beitrittserklärung was handed out
+        POST /participants/<id>/welcome       send the welcome e-mail (confirm, resend) or record it as found
+                                              in the mailbox's "Gesendet" folder (found_in_sent)
         POST /participants/<id>/confirm       record the signed Beitrittserklärung (+ evidence/document;
                                               multipart when a file is attached)
         POST /participants/<id>/notify        record that an existing participant was informed of this version
@@ -109,6 +113,17 @@ from shareomat.models.tariff import RATE_MODE_FLAT
 from shareomat.web.pages.meters import METER_ROLE_STORAGE_HINT
 from shareomat.database.memberships import list_memberships
 from shareomat.core.paperless import PaperlessValueError, document_link, parse_number
+from shareomat.config import SmtpConfig, smtp_problems
+from shareomat.core.delivery.pdf import pdf_unavailable_reason, render_pdf
+from shareomat.core.delivery.welcome_mail import (
+    WelcomeMailError,
+    WelcomePackage,
+    confirm_welcome_found,
+    preview_welcome,
+    send_welcome,
+    welcome_attachment_name,
+)
+from shareomat.web.navigation import url_for
 from shareomat.web.rendering import (
     FormError, RequestContext, form_bool, form_date, form_decimal, form_required, render_page,
 )
@@ -512,6 +527,94 @@ def _declaration_issues(participant: Participant, version: ContractVersion, role
     return issues
 
 
+def _print_page(assignment, participant, version, text: str, issues: list[str], *, package: bool,
+                for_pdf: bool = False) -> str:
+    """Standalone page of the declaration, or of the package (declaration + full contract text)."""
+    package_sha256 = ""
+    if package and assignment.declaration_sha256 and version.text_sha256:
+        package_sha256 = hashlib.sha256(
+            (assignment.declaration_sha256 + version.text_sha256).encode("ascii")).hexdigest()
+    return jinja_env.get_template("contract/print.html").render(
+        title=("Vertragspaket " if package else "Beitrittserklärung ") + participant.label,
+        body=text, appendix=version.contract_text_snapshot if package else "",
+        version=version, sha256=version.text_sha256, issues=issues,
+        declaration_sha256=assignment.declaration_sha256, package_sha256=package_sha256, for_pdf=for_pdf,
+    )
+
+
+def welcome_package(assignment_id: int) -> WelcomePackage | None:
+    """What the welcome e-mail of one assignment attaches: the package page as it prints right now."""
+    found = _declaration_context(RequestContext(method="GET", ingress_path="",
+                                                segments=["participants", str(assignment_id)]))
+    if found is None:
+        return None
+    assignment, participant, version, text, issues = found
+    return WelcomePackage(
+        assignment=assignment, participant=participant, version=version, declaration_text=text,
+        page_html=_print_page(assignment, participant, version, text, issues, package=True, for_pdf=True),
+        issues=tuple(issues))
+
+
+def welcome_pdf(db_path, assignment_id_raw: str) -> tuple[str, bytes]:
+    """(file name, PDF) for GET /contract/participants/<id>/welcome/pdf — exactly the attachment."""
+    package = welcome_package(int(assignment_id_raw)) if assignment_id_raw.isdigit() else None
+    if package is None:
+        raise WelcomeMailError("Zuordnung nicht gefunden.")
+    return welcome_attachment_name(package), render_pdf(package.page_html)
+
+
+def _welcome_preview_page(ctx: RequestContext) -> str:
+    package = welcome_package(int(ctx.segments[1])) if ctx.segments[1].isdigit() else None
+    if package is None:
+        return render_page("placeholders/coming_soon.html", ctx, "contract",
+                           title="Zuordnung nicht gefunden", description="")
+    preview, refused = None, ""
+    try:
+        preview = preview_welcome(ctx.db_path, package)
+    except WelcomeMailError as exc:
+        refused = str(exc)
+    base = f"/participants/{package.assignment.id}"
+    return render_page(
+        "contract/welcome_preview.html", ctx, "contract", package=package, preview=preview, refused=refused,
+        problems=_mail_problems(), base=base,
+        pdf_url=url_for(ctx.ingress_path, "contract", suffix=base + "/welcome/pdf"))
+
+
+def _send_welcome(ctx: RequestContext, assignment_id: int) -> str:
+    """POST /participants/<id>/welcome: send after the preview, or record that the mailbox shows it was sent."""
+    back = url_for(ctx.ingress_path, "contract", suffix=f"/participants/{assignment_id}/welcome")
+    package = welcome_package(assignment_id)
+    if package is None:
+        raise FormError("Zuordnung nicht gefunden.")
+    if form_bool(ctx, "found_in_sent"):
+        try:
+            confirm_welcome_found(ctx.db_path, package)
+        except WelcomeMailError as exc:
+            raise FormError(str(exc))
+        get_state().set_flash("Als gesendet erfasst (im Postfach unter «Gesendet» gefunden).", ok=True)
+        return back
+    problems = _mail_problems()
+    if problems:
+        raise FormError("E-Mail-Versand nicht möglich: " + problems[0])
+    if not form_bool(ctx, "confirm"):
+        raise FormError("Bitte bestätigen, dass Empfänger, Text und PDF geprüft sind.")
+    try:
+        sent = send_welcome(ctx.db_path, get_state().runtime.smtp, package, resend=form_bool(ctx, "resend"))
+    except WelcomeMailError as exc:
+        get_state().set_flash(("Ergebnis unklar — " if exc.uncertain else "Nicht gesendet — ") + str(exc), ok=False)
+        return back
+    get_state().set_flash(f"Willkommens-E-Mail mit Vertragspaket an {sent.to} gesendet. Die Beitrittserklärung gilt "
+                          "als ausgestellt (in der gesendeten Fassung).", ok=True)
+    return back
+
+
+def _mail_problems() -> list[str]:
+    runtime = get_state().runtime
+    problems = smtp_problems(runtime.smtp if runtime is not None else SmtpConfig())
+    reason = pdf_unavailable_reason()
+    return problems + ([reason] if reason else [])
+
+
 def handle_get(ctx: RequestContext) -> str:
     """Render the overview/Teilnehmer/create-edit-form, or one participant's declaration."""
     if len(ctx.segments) == 3 and ctx.segments[0] == "versions" and ctx.segments[2] == "print":
@@ -543,17 +646,10 @@ def handle_get(ctx: RequestContext) -> str:
             return render_page("placeholders/coming_soon.html", ctx, "contract",
                                 title="Beitrittserklärung nicht gefunden", description="")
         assignment, participant, version, text, issues = found
-        package = ctx.segments[2] == "package"
-        package_sha256 = ""
-        if package and assignment.declaration_sha256 and version.text_sha256:
-            package_sha256 = hashlib.sha256(
-                (assignment.declaration_sha256 + version.text_sha256).encode("ascii")).hexdigest()
-        return jinja_env.get_template("contract/print.html").render(
-            title=("Vertragspaket " if package else "Beitrittserklärung ") + participant.label,
-            body=text, appendix=version.contract_text_snapshot if package else "",
-            version=version, sha256=version.text_sha256, issues=issues,
-            declaration_sha256=assignment.declaration_sha256, package_sha256=package_sha256,
-        )
+        return _print_page(assignment, participant, version, text, issues, package=ctx.segments[2] == "package")
+
+    if len(ctx.segments) == 3 and ctx.segments[0] == "participants" and ctx.segments[2] == "welcome":
+        return _welcome_preview_page(ctx)
 
     if len(ctx.segments) == 3 and ctx.segments[0] == "participants" and ctx.segments[2] == "declaration":
         found = _declaration_context(ctx)
@@ -838,6 +934,9 @@ def handle_post(ctx: RequestContext) -> str | None:
             except ParticipantContractError as exc:
                 raise FormError(str(exc))
             get_state().set_flash(message, ok=True)
+
+        if action == "welcome":
+            return _send_welcome(ctx, assignment_id)
 
         if action == "issue":
             issued_at = form_date(ctx, "issued_at") or date.today()

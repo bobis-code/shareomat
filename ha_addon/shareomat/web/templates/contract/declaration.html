@@ -134,6 +134,9 @@
 <div class="card">
   <h2>Beitrittserklärung</h2>
   <div class="actions-row" style="margin-top:0;margin-bottom:12px">
+    {% if not assignment.accepted_at and not assignment.left_at %}
+    <a class="btn" href="{{ url_for('contract', suffix=base ~ '/welcome') }}">Willkommens-E-Mail mit Vertrag senden</a>
+    {% endif %}
     <a class="btn" target="_blank" rel="noopener" href="{{ url_for('contract', suffix=base ~ '/package/print') }}">Vertragspaket drucken (Erklärung + Vertrag)</a>
     <a class="btn btn-secondary" target="_blank" rel="noopener" href="{{ url_for('contract', suffix=base ~ '/declaration/print') }}">nur Erklärung</a>
     <a class="btn btn-muted" target="_blank" rel="noopener" href="{{ url_for('contract', suffix='/versions/' ~ version.id ~ '/print') }}">Druckansicht Vertrag v{{ version.version }}</a>

@@ -51,7 +51,7 @@ _SPARKPLUG_ID = re.compile(r"^[^/+#\s\x00-\x1f\x7f]{1,64}$")
 # Runtime (technical) keys this script owns; every other top-level key in an
 # existing CONFIG_OUTPUT file (legacy "leg"/"participants"/"meters"/"tariffs")
 # is preserved as-is until Shareomat's one-time database import consumes it.
-_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex", "paperless"}
+_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex", "smtp", "paperless"}
 
 _SWISSELDEX_HOST = "datahub.swisseldex.ch"
 _SWISSELDEX_INTERVALS = (1, 3, 6, 12, 24)
@@ -130,6 +130,31 @@ def _swisseldex_section(opts: dict) -> dict:
     }
 
 
+def _smtp_section(opts: dict) -> dict:
+    """The outgoing mailbox, from the add-on option section `smtp`.
+
+    Off unless switched on. A malformed section does not stop the start:
+    Shareomat validates it again and only keeps sending disabled.
+    """
+    section = opts.get("smtp")
+    if not isinstance(section, dict):
+        section = {}
+    try:
+        port = int(section.get("port", 465))
+    except (TypeError, ValueError):
+        port = 465
+    return {
+        "enabled":      bool(section.get("enabled", False)),
+        "host":         str(section.get("host") or "smtp.gmail.com").strip(),
+        "port":         port,
+        "security":     str(section.get("security") or "ssl").strip().lower(),
+        "username":     str(section.get("username") or "").strip(),
+        "password":     str(section.get("password") or ""),
+        "from_address": str(section.get("from_address") or "").strip(),
+        "from_name":    str(section.get("from_name") or "").strip(),
+    }
+
+
 def main() -> None:
     if not OPTIONS_PATH.exists():
         print(f"[ERROR] Options file not found: {OPTIONS_PATH}", file=sys.stderr)
@@ -198,6 +223,7 @@ def main() -> None:
     }
 
     config = {**legacy_sections, **runtime_config, "swisseldex": _swisseldex_section(opts),
+              "smtp": _smtp_section(opts),
               # Link target for evidence in Paperless-ngx; validated by shareomat.config.
               "paperless": {"url": str(opts.get("paperless_url", "") or "").strip()}}
     sparkplug = _sparkplug_section(opts, existing)

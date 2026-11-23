@@ -319,6 +319,13 @@ class _Handler(BaseHTTPRequestHandler):
         if len(segments) == 3 and segments[0] == "settings" and segments[1] == "backup":
             self._serve_backup(segments[2], ingress_path)
             return
+        if len(segments) == 3 and segments[0] == "invoices" and segments[2] == "pdf":
+            self._serve_invoice_pdf(segments[1:], _flatten_qs(parsed.query), ingress_path)
+            return
+        if len(segments) == 5 and segments[0] == "contract" and segments[1] == "participants" \
+                and segments[3] == "welcome" and segments[4] == "pdf":
+            self._serve_welcome_pdf(segments[2], ingress_path)
+            return
         # URLs use hyphens ("meter-data"), but route names (_PAGE_MODULES keys,
         # ROUTE_PATHS keys, url_for() arguments) use underscores throughout —
         # normalize once here so route always means the same thing everywhere.
@@ -521,6 +528,47 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         with info.path.open("rb") as handle:
             shutil.copyfileobj(handle, self.wfile, length=1024 * 1024)
+
+    # ── Document PDFs (the attachment of an e-mail, or the PDF test) ───
+
+    def _serve_invoice_pdf(self, segments: list[str], query: dict, ingress_path: str) -> None:
+        """One document item as the PDF Shareomat would attach; on any problem back to the page with the reason."""
+        from shareomat.core.delivery.document_mail import DocumentMailError
+        from shareomat.core.delivery.pdf import PdfError
+        from shareomat.web.pages import invoices as invoices_page
+
+        try:
+            name, data = invoices_page.pdf_download(get_state().db_path, segments, query)
+        except (DocumentMailError, PdfError, FormError) as exc:
+            get_state().set_flash(f"PDF nicht erzeugt: {exc}", ok=False)
+            if segments[0].isdigit():
+                self._redirect(url_for(ingress_path, "invoices", suffix=f"/{segments[0]}"))
+            else:
+                self._redirect(url_for(ingress_path, "invoices") + "?tab=settings")
+            return
+        self._send_pdf(name, data)
+
+    def _serve_welcome_pdf(self, assignment_id_raw: str, ingress_path: str) -> None:
+        """The contract package as the welcome e-mail attaches it; on a problem back to the preview."""
+        from shareomat.core.delivery.pdf import PdfError
+        from shareomat.core.delivery.welcome_mail import WelcomeMailError
+        from shareomat.web.pages import contract as contract_page
+
+        try:
+            name, data = contract_page.welcome_pdf(get_state().db_path, assignment_id_raw)
+        except (WelcomeMailError, PdfError) as exc:
+            get_state().set_flash(f"PDF nicht erzeugt: {exc}", ok=False)
+            self._redirect(url_for(ingress_path, "contract"))
+            return
+        self._send_pdf(name, data)
+
+    def _send_pdf(self, name: str, data: bytes) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Disposition", f'inline; filename="{name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     # ── Signed join declarations (stored next to the database) ─────────
 
