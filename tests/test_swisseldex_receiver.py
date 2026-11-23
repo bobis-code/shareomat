@@ -386,7 +386,7 @@ def test_overdue_warning_appears_and_goes_away(tmp_path):
     assert shown == []
     clock.now += timedelta(days=8).total_seconds()
     receiver._update_warning()
-    assert len(shown) == 1 and "30 Tagen" in shown[0]
+    assert len(shown) == 1 and "höchstens 30 Tage" in shown[0]
     receiver._state["last_sync_success_at"] = datetime.fromtimestamp(clock.now, timezone.utc).isoformat()
     receiver._update_warning()
     assert shown == []

@@ -94,9 +94,11 @@ Entscheidung vollständig. Auftrag: `docs/development/rohdatensicherung-extern.m
   anlegen, aber nicht lesen. Am selben Abend auf OMV korrigiert; laut Betreiber geht `cat` jetzt.
 * **Fortsetzen:** Das Fortsetzen setzt voraus, dass nur ein Shareomat in diesen Ordner schreibt.
   In einem Prozess sind Sicherungen über eine Sperre nacheinander.
-* **30 Tage:** Swisseldex löscht nicht abgeholte Dateien nach 30 Tagen. Ob ein Download ohne
-  Übernahme als abgeholt gilt, ist nicht geklärt. Darum erscheint die Warnung sofort, nicht
-  erst nach 7 Tagen.
+* **30 Tage:** Laut Swisseldex-Support (Antwort, dem Betreiber am 23.11.2026 vorgelegt) stehen
+  die Nachrichten auf dem FTPES-Server «während maximal 30 Tagen zur Verfügung», ohne
+  Unterscheidung zwischen abgeholt und nicht abgeholt. Eine Datei, deren Sicherung scheitert,
+  kann also höchstens 30 Tage lang erneut geholt werden. Darum erscheint die Warnung sofort,
+  nicht erst nach 7 Tagen.
 
 ## Konsequenzen
 

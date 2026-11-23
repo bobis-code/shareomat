@@ -143,7 +143,10 @@ def import_sdat_file(db_path: Path, path: Path, sha256: str, *, file_name: str, 
         logger.info("SDAT file %s not imported: %s", file_name, exc.code)
         return ImportOutcome(sha256, file_name, imported=False, skipped=False, reason_code=exc.code,
                              message=str(exc), document_type=header.document_type if header else "")
-    note = "Quittung vom Absender verlangt (noch nicht geklärt, nicht gesendet)." if header.acknowledgement_requested else ""
+    # O5, docs/sdat_leg_import.md: per Swisseldex support the receiving server generates the
+    # acknowledgement automatically; Shareomat sends none.
+    note = ("Quittung vom Absender verlangt; laut Swisseldex-Support erzeugt sie der empfangende Server automatisch "
+            "(Shareomat sendet keine).") if header.acknowledgement_requested else ""
     series = store_document(db_path, sha256=sha256, file_name=file_name, origin=origin, document=document,
                             community_id=community_id, message=note)
     logger.info("SDAT %s %s imported: %d series of community %s", header.document_type, file_name, series, community_id)

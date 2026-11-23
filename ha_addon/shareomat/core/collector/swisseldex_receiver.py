@@ -96,7 +96,8 @@ RESULT_ERROR = "error"
 
 # Manual 4.4: repeated logins within 60 s are refused. One second of margin.
 MIN_LOGIN_INTERVAL_SECONDS = 61.0
-# The Datahub deletes messages that were not fetched after 30 days; warn well before.
+# Messages stay on the Datahub's FTPES server for at most 30 days (Swisseldex support, answer to
+# the O5 question, see docs/sdat_leg_import.md); warn well before.
 OVERDUE_AFTER_DAYS = 7
 # Automatic sync only: retries after a transient failure, then wait for the next interval.
 AUTO_RETRY_DELAYS_SECONDS = (300.0, 900.0)
@@ -113,12 +114,13 @@ _MAX_BACKUP_FAILURES = 500
 
 _BACKUP_WARNING = (
     "Rohdatensicherung: {count} Swisseldex-Datei(en) konnten nicht auf dem Netzwerkspeicher gesichert werden "
-    "und werden nicht verarbeitet. Details unter «Externe Daten»."
+    "und werden nicht verarbeitet. Swisseldex hält Nachrichten höchstens 30 Tage bereit. "
+    "Details unter «Externe Daten»."
 )
 
 _OVERDUE_WARNING = (
-    "Swisseldex: seit {days} Tagen keine erfolgreiche Synchronisation. Nicht abgeholte "
-    "Dateien löscht Swisseldex nach 30 Tagen. Bitte unter «Externe Daten» synchronisieren."
+    "Swisseldex: seit {days} Tagen keine erfolgreiche Synchronisation. Swisseldex hält Nachrichten "
+    "höchstens 30 Tage bereit. Bitte unter «Externe Daten» synchronisieren."
 )
 
 

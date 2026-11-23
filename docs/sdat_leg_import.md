@@ -1207,7 +1207,7 @@ Messdaten und gehören nie ins Repository.
 | O2 | ✓ für E66: 7 Dateien empfangen, archiviert und importiert, Duplikaterkennung bestätigt. E31 kam noch keine |
 | O3 | Gilt **nicht exakt**: EBL rundet Total, LEG- und Restenergie je auf 0.001 kWh. In 5 von 2112 Viertelstunden weicht Total um −0.001 kWh ab, im Energie-Clearing in 2 Viertelstunden um +0.001 kWh. Darum ab 0.6.18 Toleranz von einer Stelle (siehe unten) |
 | O4 | offen, bisher nur Status 9 (Original) |
-| O5 | EBL setzt `isIntelligibleCheckRequired` in jeder Datei. Format und Weg der Quittung bei EBL/Swisseldex klären; Shareomat sendet weiterhin keine. Prüfung vom 20.11.2026 siehe unten; Rückfrage an Swisseldex gesendet, Antwort ausstehend |
+| O5 | EBL setzt `isIntelligibleCheckRequired` in jeder Datei. **Geklärt:** Laut Swisseldex-Support erzeugt der empfangende Server die Empfangsbestätigung automatisch; Shareomat sendet keine. Antwort siehe «Stand 23.11.2026» |
 | O6 | Tageslieferungen tragen **kein** Qualitätskennzeichen (weder 21 noch 56), obwohl sie nach VSE nicht plausibilisiert sind. Shareomat kann sie darum nicht von der Monatslieferung unterscheiden: erst nach der Monatslieferung abrechnen |
 | O7 | ✓ Add-on wird in Home Assistant gebaut (0.6.17 installiert) |
 
@@ -1328,8 +1328,7 @@ danach gelöscht.
   eine kurze Rückfrage zur Bestätigung. **Rückfrage an den Swisseldex-Support am 20.11.2026
   gesendet** (drei Fragen: eigene Quittung nötig? Datahub quittiert stellvertretend? falls
   selbst: Typ 312, Empfänger, Verzeichnis, Dateiname; mit Hinweis, dass CEM in Anhang 1,
-  Abb. 3 fehlt). Antwort ausstehend. Bis zur schriftlichen Antwort sendet Shareomat keine
-  Quittungen.
+  Abb. 3 fehlt). Antwort erhalten, siehe «Stand 23.11.2026: Antwort des Swisseldex-Supports».
 
 **Löschen auf dem Datahub:**
 
@@ -1346,13 +1345,53 @@ danach gelöscht.
 * Löschen bleibt aus, bis das Verhalten geklärt ist. Ein Löschen auf dem Datahub braucht
   einen eigenen Entscheid (ADR).
 
-**Hinweise auf Zustellprobleme:** In den Daten keine (tägliche Lieferung ohne Lücke, alle
+**Hinweise auf Zustellprobleme (20.11.2026):** In den Daten keine (tägliche Lieferung ohne Lücke, alle
 Dateien importiert, keine abgewiesen). Im WebGUI «Benachrichtigungen» war am 20.11.2026 nichts,
 obwohl 8 der 9 Nachrichten älter als 24 Stunden waren. Nach Kap. 3.5 heisst das: Der Datahub
 hat für unsere Nachrichten keinen Fehler registriert, auch keine ausstehende Quittung. Offen
 bleibt nur, ob er eine fehlende Quittung bei «Server beim Datahub» überhaupt als Fehler wertet
 (das Handbuch schränkt «bei jedem Fehler» nicht ein). Die Kontakt-E-Mail-Adresse des
 Marktpartners bei Swisseldex muss eine gelesene Adresse sein: Über sie kommt die Meldung.
+
+### Stand 23.11.2026: Antwort des Swisseldex-Supports (O5)
+
+Dem Betreiber am 23.11.2026 vorgelegt, Wortlaut ohne Anrede und Gruss:
+
+> Der Swisseldex Datahub ist für das Routing und die Weiterleitung der SDAT-Nachrichten
+> zwischen den Marktpartnern zuständig. Die Empfangsbestätigungen werden automatisch durch den
+> empfangenden Server generiert. Die weitere Verarbeitung der empfangenen Nachrichten liegt in
+> der Verantwortung des jeweiligen Marktpartners.
+>
+> Überprüfung des Routings: Wir haben das Routing anhand des TransferLogReports überprüft und
+> konnten bestätigen, dass die Nachrichten ordnungsgemäss zugestellt wurden.
+>
+> Hinweis zur Aufbewahrungsdauer: Die Nachrichten stehen Ihnen auf dem FTPES-Server des
+> Datahubs während maximal 30 Tagen zur Verfügung.
+
+**Was die Antwort sagt:**
+
+* Empfangsbestätigungen erzeugt der empfangende Server automatisch.
+* Die Nachrichten an uns wurden ordnungsgemäss zugestellt (geprüft im TransferLogReport).
+* Nachrichten bleiben **höchstens 30 Tage** auf dem FTPES-Server. Die Antwort unterscheidet
+  nicht zwischen abgeholten und nicht abgeholten Nachrichten.
+
+**Auslegung (nicht wörtlich bestätigt):** Bei der Zustellart «Server beim Datahub» ist der
+empfangende Server der FTPES-Server beim Datahub. Die Quittung entsteht also dort, und der
+LEG-Vertreter muss keine eigene senden. Welchen Server die Antwort meint, nennt sie nicht
+ausdrücklich.
+
+**Folgen für Shareomat:**
+
+* O5 ist geklärt. Shareomat sendet weiterhin keine Quittung. Der Import-Hinweis lautet seit
+  0.6.27: «Quittung vom Absender verlangt; laut Swisseldex-Support erzeugt sie der empfangende
+  Server automatisch (Shareomat sendet keine).» Frühere Importe behalten ihren alten Hinweis.
+* Nach 30 Tagen sind die Originale auf Swisseldex weg, auch wenn Shareomat sie nie löscht.
+  Danach gibt es sie nur noch im Empfangsarchiv, in `shareomat.db` und auf dem
+  Netzwerkspeicher (Rohdatensicherung, ADR-0010). Darum regelmässig synchronisieren und die
+  Rohdatensicherung auf «Pflicht» lassen. Die Warnungen auf «Externe Daten» nennen seit 0.6.27
+  die 30 Tage für alle Nachrichten.
+* Löschen auf dem Datahub bleibt aus. Es ist nicht nötig, weil Swisseldex die Nachrichten
+  ohnehin nach höchstens 30 Tagen entfernt.
 
 **Datenvollständigkeit November (offen):** Für den 01. bis 06.11.2026 fehlen alle Werte. Die
 Tageslieferungen zeigen, dass die Übertragung funktioniert, nicht dass der Monat vollständig

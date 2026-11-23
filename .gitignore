@@ -271,3 +271,6 @@ docs/Architektur/Diagramm/*_V3.png
 docs/Architektur/Diagramm/Shareomat_Architecture_Whitepaper_light_v3*.drawio
 docs/Architektur/Diagramm/Shareomat_Architecture_Whitepaper_light_v4*.drawio
 docs/Architektur/Ziel/
+
+# Local brief for the external raw-data backup: names the real storage share — never versioned
+docs/development/rohdatensicherung-extern.md
