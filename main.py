@@ -49,7 +49,15 @@ from pathlib import Path
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from shareomat.config import LegConfig, RuntimeConfig, SparkplugConfig, WanConfig, load_runtime_config, validate_leg_config
+from shareomat.config import (
+    LegConfig,
+    RuntimeConfig,
+    SparkplugConfig,
+    SwisseldexConfig,
+    WanConfig,
+    load_runtime_config,
+    validate_leg_config,
+)
 from shareomat.core.leg_runner import run
 from shareomat.core.pipeline.consumption_forecast import LOOKBACK_WEEKS, compute_leg_demand_forecast
 from shareomat.core.pipeline.export_price_forecast import fetch_and_persist_day_ahead_prices
@@ -511,6 +519,18 @@ def _raw_backup_guard(db_path: Path) -> object:
     return RawBackupGuard(current)
 
 
+def _swisseldex_config(runtime: RuntimeConfig, db_path: Path) -> SwisseldexConfig:
+    """The add-on's Swisseldex config with the automatic-sync schedule saved on "Externe Daten".
+
+    Until it is saved there, the add-on options stay in effect unchanged.
+    """
+    from shareomat.database.settings import get_swisseldex_schedule
+
+    addon = runtime.swisseldex
+    schedule = get_swisseldex_schedule(db_path, addon.auto_sync, addon.sync_interval_hours)
+    return dataclasses.replace(addon, auto_sync=schedule.auto_sync, sync_interval_hours=schedule.interval_hours)
+
+
 def _setup_swisseldex(runtime: RuntimeConfig, db_path: Path) -> object | None:
     """Start the Swisseldex mailbox receiver if it is enabled in the add-on options.
 
@@ -524,7 +544,7 @@ def _setup_swisseldex(runtime: RuntimeConfig, db_path: Path) -> object | None:
         from shareomat.core.collector.swisseldex_receiver import SwisseldexReceiver
         web_state = get_web_state()
         receiver = SwisseldexReceiver(
-            runtime.swisseldex, runtime.paths.state / "swisseldex",
+            _swisseldex_config(runtime, db_path), runtime.paths.state / "swisseldex",
             warn=web_state.add_warning, unwarn=web_state.discard_warning,
             importer=_swisseldex_importer(db_path, runtime),
             raw_backup=_raw_backup_guard(db_path),

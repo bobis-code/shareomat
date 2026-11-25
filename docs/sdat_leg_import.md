@@ -500,9 +500,15 @@ Module: `shareomat/core/collector/swisseldex_ftpes.py` (FTPES-Client) und
   Standalone-Betrieb der Abschnitt `swisseldex` in `config.yaml`). Das Passwort
   steht nie in `shareomat.db`. Alles ist standardmässig aus, auch die
   automatische Synchronisation (Intervall 1/3/6/12/24 h, Standard 6 h).
+  Seit 0.6.28 schaltet man die automatische Synchronisation und ihr Intervall
+  auf «Externe Daten» um. Das gilt sofort, ohne Neustart, und steht in
+  `shareomat.db` (Schlüssel `swisseldex_auto_sync` und
+  `swisseldex_sync_interval_hours`, Änderungen im Audit-Protokoll). Bis dort
+  einmal gespeichert wurde, gelten die Add-on-Optionen `auto_sync` und
+  `sync_interval_hours` als Startwert.
 * **Bedienung:** Seite «Externe Daten», Karte «Swisseldex Datahub» mit Status,
-  «Verbindung testen», «Jetzt synchronisieren», Protokoll und empfangenen
-  Dateien.
+  Schalter «Automatisch abholen» mit Intervall, «Verbindung testen»,
+  «Jetzt synchronisieren», Protokoll und empfangenen Dateien.
 * **Archiv:** `<state>/swisseldex/received/<SHA-256-Präfix>_<Dateiname>`.
   * Die Datei wird byte-genau so gespeichert, wie sie von Swisseldex kam.
   * Ablauf: Download in eine `.part`-Datei, Prüfung der Grösse, `fsync`, dann

@@ -43,10 +43,10 @@ configuration:
         description: FTPES password from the Swisseldex portal. Not stored in the database.
       auto_sync:
         name: Sync automatically
-        description: Leave off until the first manual test succeeded.
+        description: Initial value only. Easier to switch under Externe Daten → Swisseldex; there it applies at once, without a restart, and then takes precedence over this field.
       sync_interval_hours:
         name: Interval (hours)
-        description: How often to sync automatically. Default 6.
+        description: Initial value only, default 6. Set under Externe Daten → Swisseldex, which then applies.
   smtp:
     name: E-mail sending (documents)
     description: >-

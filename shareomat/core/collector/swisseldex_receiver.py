@@ -18,7 +18,13 @@ Notes:
     optional `importer` (SX-2, shareomat.core.collector.sdat_import, wired in
     main.py) checks and imports the newly archived files; its result is part
     of the run record. Nothing on the Datahub is ever deleted, renamed or
-    uploaded, and no acknowledgements are sent (open question, see the brief).
+    uploaded, and no acknowledgements are sent (the receiving server generates
+    them, answer of the Swisseldex support to O5, docs/sdat_leg_import.md).
+
+    Automatic sync on/off and its interval can change at runtime
+    (set_schedule, from the "Externe Daten" page). main.py starts the
+    receiver with the schedule saved there, else with the add-on options
+    (shareomat.database.settings.get_swisseldex_schedule).
 
     Like the e-mail importer, the receiver keeps its state in a JSON file in
     the state directory (`<state>/swisseldex/state.json`), not in
@@ -66,7 +72,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from shareomat.config import SwisseldexConfig
+from shareomat.config import SWISSELDEX_SYNC_INTERVALS_HOURS, SwisseldexConfig
 from shareomat.core.collector.raw_backup import RawBackupError
 from shareomat.core.collector.swisseldex_ftpes import (
     MAX_FILE_BYTES,
@@ -313,6 +319,9 @@ class SwisseldexReceiver:
         raw_backup: Any = None,
     ) -> None:
         self._config = config
+        # The schedule can change at runtime ("Externe Daten", set_schedule); the rest of the config cannot.
+        self._auto_sync = config.auto_sync
+        self._interval_hours = config.sync_interval_hours
         self._importer = importer
         self._raw_backup = raw_backup
         self._shown_backup_warning = ""
@@ -343,10 +352,7 @@ class SwisseldexReceiver:
             return
         self._thread = threading.Thread(target=self._loop, name="swisseldex-receiver", daemon=True)
         self._thread.start()
-        logger.info(
-            "Swisseldex receiver started (automatic sync %s)",
-            f"every {self._config.sync_interval_hours} h" if self._config.auto_sync else "off",
-        )
+        logger.info("Swisseldex receiver started (automatic sync %s)", self._schedule_text())
 
     def stop(self, timeout: float = 5.0) -> None:
         """Ends a running download as incomplete (never recorded) and waits briefly."""
@@ -360,6 +366,33 @@ class SwisseldexReceiver:
                 logger.warning("Swisseldex receiver still busy at shutdown")
 
     # ── requests from the web UI ──
+
+    def set_schedule(self, auto_sync: bool, interval_hours: int) -> None:
+        """Switch automatic sync on/off and set its interval; effective at once, no restart.
+
+        Switching off also drops a planned retry. Switching on with the last
+        attempt longer ago than the interval starts a sync right away.
+        """
+        if interval_hours not in SWISSELDEX_SYNC_INTERVALS_HOURS:
+            raise ValueError(f"interval_hours={interval_hours} is not one of {SWISSELDEX_SYNC_INTERVALS_HOURS}")
+        with self._changed:
+            self._auto_sync = bool(auto_sync)
+            self._interval_hours = interval_hours
+            if not self._auto_sync:
+                self._auto_retry_index = 0
+                self._auto_retry_at = None
+            self._changed.notify_all()
+        logger.info("Swisseldex: automatic sync now %s", self._schedule_text())
+
+    def schedule(self) -> tuple[bool, int]:
+        """(automatic sync on, interval in hours) as currently in effect."""
+        with self._lock:
+            return self._auto_sync, self._interval_hours
+
+    @property
+    def configured(self) -> bool:
+        """Username and password are set in the add-on options."""
+        return bool(self._config.username and self._config.password)
 
     def request(self, kind: str, trigger: str = TRIGGER_MANUAL) -> RequestOutcome:
         """Queue a test or sync. Never blocks; the login gate is waited for in the background."""
@@ -423,11 +456,11 @@ class SwisseldexReceiver:
             not_backed_up = sum(1 for f in state["files"].values()
                                 if (f.get("raw_backup") or {}).get("status") != BACKUP_OK)
             return {
-                "configured": bool(self._config.username and self._config.password),
+                "configured": self.configured,
                 "state_error": self._state_error,
                 "host": self._config.host,
-                "auto_sync": self._config.auto_sync,
-                "interval_hours": self._config.sync_interval_hours,
+                "auto_sync": self._auto_sync,
+                "interval_hours": self._interval_hours,
                 "running": self._running[0] if self._running else None,
                 "pending": self._pending[0] if self._pending else None,
                 "login_wait_seconds": self.login_wait_seconds(),
@@ -523,15 +556,18 @@ class SwisseldexReceiver:
                 return record
         return None
 
+    def _schedule_text(self) -> str:
+        return f"every {self._interval_hours} h" if self._auto_sync else "off"
+
     def _next_auto_moment(self) -> datetime | None:
-        if not self._config.auto_sync or self._state_error:
+        if not self._auto_sync or self._state_error:
             return None
         if self._auto_retry_at is not None:
             return datetime.fromtimestamp(self._auto_retry_at, timezone.utc).replace(microsecond=0)
         last = _from_iso(self._state.get("last_sync_attempt_at"))
         if last is None:
             return _utc_now()
-        return last + timedelta(hours=self._config.sync_interval_hours)
+        return last + timedelta(hours=self._interval_hours)
 
     def _overdue_days(self) -> int | None:
         last = _from_iso(self._state.get("last_sync_success_at"))

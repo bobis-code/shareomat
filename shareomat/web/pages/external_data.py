@@ -31,7 +31,9 @@ Notes:
     shareomat.core.collector.swisseldex_receiver). The POST only queues the
     request and waits a bounded time for the result; a request that must wait
     for the login gate returns at once and shows up in the card's log.
-    Swisseldex writes nothing to the database and nothing to data_imports.
+    Swisseldex writes nothing to data_imports. The only thing the card stores
+    in the database is the automatic-sync schedule (on/off, interval): saved
+    first, then handed to the running receiver, audit-logged.
 """
 
 from __future__ import annotations
@@ -41,18 +43,25 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Callable, TypeVar
 
+from shareomat.config import SWISSELDEX_SYNC_INTERVALS_HOURS
 from shareomat.core.price_validation import PriceValidationError
 
+from shareomat.database.audit import log_event
 from shareomat.database.data_imports import list_recent_imports, record_import
 from shareomat.database.elcom_tariffs import list_elcom_tariffs, save_elcom_tariffs
 from shareomat.database.exchange_rates import list_exchange_rates, save_exchange_rates
 from shareomat.database.external_settings import get_external_data_settings, save_external_data_settings
 from shareomat.database.reference_prices import list_reference_prices, save_reference_price
+from shareomat.database.settings import (
+    get_swisseldex_schedule,
+    save_swisseldex_schedule,
+    swisseldex_interval_from_text,
+)
 from shareomat.external_data.bfe import BfeFetchError, download_reference_prices
 from shareomat.external_data.elcom import ElcomFetchError, download_elcom_tariffs
 from shareomat.external_data.market_forecast import MarketForecastError, download_exchange_rates
 from shareomat.models.external_data import DataImportRecord, ExternalDataSettings, ReferencePrice
-from shareomat.web.rendering import FormError, RequestContext, render_page
+from shareomat.web.rendering import FormError, RequestContext, form_bool, render_page
 from shareomat.web.state import get_state
 
 _T = TypeVar("_T")
@@ -102,6 +111,48 @@ def _swisseldex_action(kind: str, label: str) -> None:
     )
 
 
+def _addon_schedule() -> tuple[bool, int]:
+    """Automatic sync as set in the add-on options (the fallback until it is saved here)."""
+    runtime = get_state().runtime
+    if runtime is None:
+        return False, 6
+    return runtime.swisseldex.auto_sync, runtime.swisseldex.sync_interval_hours
+
+
+def _schedule_label(auto_sync: bool, interval_hours: int) -> str:
+    return f"ein, alle {interval_hours} h" if auto_sync else "aus"
+
+
+def _save_swisseldex_schedule(ctx: RequestContext) -> None:
+    """Store on/off and interval, then apply them to the running receiver at once."""
+    receiver = get_state().swisseldex
+    if receiver is None:
+        raise FormError("Swisseldex ist nicht aktiviert (Add-on-Optionen, Abschnitt «Swisseldex»).")
+    interval = swisseldex_interval_from_text(ctx.form.get("interval_hours"))
+    if interval is None:
+        raise FormError("Ungültiges Intervall. Möglich sind 1, 3, 6, 12 oder 24 Stunden.")
+    auto_sync = form_bool(ctx, "auto_sync")
+    if auto_sync and not receiver.configured:
+        raise FormError("Nicht eingeschaltet: Benutzername oder Passwort fehlt in den Add-on-Optionen "
+                        "(Abschnitt «Swisseldex»).")
+    before = receiver.schedule()
+    save_swisseldex_schedule(ctx.db_path, auto_sync, interval)
+    receiver.set_schedule(auto_sync, interval)
+    log_event(ctx.db_path, "swisseldex", "schedule", "changed",
+              f"vorher: {_schedule_label(*before)}; neu: {_schedule_label(auto_sync, interval)}")
+    if auto_sync:
+        get_state().set_flash(
+            f"Automatische Synchronisation eingeschaltet: alle {interval} Stunden. Gilt sofort, ohne Neustart.",
+            ok=True,
+        )
+    else:
+        get_state().set_flash(
+            "Automatische Synchronisation ausgeschaltet. Bitte regelmässig von Hand synchronisieren: "
+            "Swisseldex hält Nachrichten höchstens 30 Tage bereit.",
+            ok=False,
+        )
+
+
 def _swisseldex_view(receiver) -> dict | None:
     """The receiver's snapshot plus the SX-2 import result per received file (from the database)."""
     if receiver is None:
@@ -111,9 +162,16 @@ def _swisseldex_view(receiver) -> dict | None:
     from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 
     view = receiver.snapshot()
+    view["interval_choices"] = SWISSELDEX_SYNC_INTERVALS_HOURS
     db_path = get_state().db_path
     if db_path is None:
         return view
+    addon_auto, addon_interval = _addon_schedule()
+    schedule = get_swisseldex_schedule(db_path, addon_auto, addon_interval)
+    view["schedule_from_addon"] = schedule.from_addon_options
+    view["addon_schedule"] = _schedule_label(addon_auto, addon_interval)
+    view["addon_differs"] = (not schedule.from_addon_options
+                             and view["addon_schedule"] != _schedule_label(schedule.auto_sync, schedule.interval_hours))
     documents = documents_by_sha(db_path)
     for entry in view["files"]:
         record = documents.get(entry["sha256"])
@@ -165,6 +223,10 @@ def _handle_post(ctx: RequestContext) -> str | None:
 
     if action == "swisseldex_sync":
         _swisseldex_action("sync", "Synchronisation")
+        return None
+
+    if action == "swisseldex_schedule":
+        _save_swisseldex_schedule(ctx)
         return None
 
     if action == "swisseldex_import":

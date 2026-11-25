@@ -62,3 +62,20 @@ class OperationSettings:
     raw_backup_mode: str = "off"
     raw_backup_mount: str = ""
     raw_backup_subdir: str = "swisseldex-rohdaten"
+
+
+@dataclass(frozen=True)
+class SwisseldexSchedule:
+    """Automatic Swisseldex sync: on/off and the interval in hours.
+
+    Switched on the "Externe Daten" page and effective at once, without a
+    restart. Until it is saved there once, the add-on options
+    swisseldex.auto_sync / sync_interval_hours apply (from_addon_options=True),
+    so an installation that switched it on in the add-on keeps it after the
+    update. Kept out of OperationSettings on purpose: saving the other
+    settings writes every field, which would end the add-on fallback.
+    """
+
+    auto_sync: bool
+    interval_hours: int
+    from_addon_options: bool = False

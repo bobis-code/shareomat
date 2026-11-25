@@ -158,8 +158,28 @@
         <tr><th>Letzter Verbindungsversuch</th><td>{{ sx_time(sx.last_connection_at) }}</td></tr>
         <tr><th>Letzte erfolgreiche Synchronisation</th><td>{{ sx_time(sx.last_sync_success_at) }}</td></tr>
         <tr><th>Automatische Synchronisation</th><td>
-          {% if sx.auto_sync %}alle {{ sx.interval_hours }} h · nächste: {{ sx_time(sx.next_auto_at) }}
-          {% else %}aus (in den Add-on-Optionen einschaltbar){% endif %}</td></tr>
+          {% if sx.auto_sync %}<span class="status-pill status-pill-active">ein</span>
+            alle {{ sx.interval_hours }} h · nächste: {{ sx_time(sx.next_auto_at) }}
+          {% else %}<span class="status-pill status-pill-inactive">aus</span> nur von Hand{% endif %}
+          {% if sx.schedule_from_addon %}<span class="ts">(Wert aus der Add-on-Konfiguration, bis er hier gespeichert wird)</span>
+          {% elif sx.addon_differs %}<span class="ts">(hier eingestellt; die Add-on-Konfiguration «{{ sx.addon_schedule }}» gilt nicht mehr)</span>{% endif %}
+          <form method="post" action="{{ url_for('external_data', suffix='/swisseldex_schedule') }}"
+                class="actions-row" style="flex-wrap:wrap;align-items:center;margin-top:8px">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <span class="checkbox-row">
+              <input type="checkbox" id="sx_auto_sync" name="auto_sync" value="1" {{ 'checked' if sx.auto_sync }}
+                     {{ 'disabled' if sx.state_error or not sx.configured }}>
+              <label for="sx_auto_sync" style="margin:0">Automatisch abholen</label>
+            </span>
+            <label for="sx_interval" style="margin:0">alle</label>
+            <select id="sx_interval" name="interval_hours" style="padding:6px 8px;border:1px solid #ddd;border-radius:4px">
+              {% for h in sx.interval_choices %}
+              <option value="{{ h }}" {{ 'selected' if h == sx.interval_hours }}>{{ h }} {{ 'Stunde' if h == 1 else 'Stunden' }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn-secondary">Speichern</button>
+          </form>
+          <div class="ts">Gilt sofort, ohne Neustart des Add-ons.</div></td></tr>
         <tr><th>Dateien auf Swisseldex</th><td>{{ sx.remote_count if sx.remote_count is not none else '–' }}
           <span class="ts">(Shareomat löscht dort keine Dateien)</span></td></tr>
         <tr><th>Rohdatensicherung</th><td>

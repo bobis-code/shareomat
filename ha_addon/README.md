@@ -146,6 +146,15 @@ the whole add-on, use a Home Assistant backup (it contains `/data`). The
 Shareomat backup is the copy to file away, inspect and keep outside Home
 Assistant.
 
+### Automatic Swisseldex sync
+
+Externe Daten → Swisseldex: tick **Automatisch abholen**, choose the interval (1, 3, 6, 12 or
+24 hours) and save. It applies at once, without restarting the add-on, and is stored in
+Shareomat. Until it is saved there, the add-on options `swisseldex.auto_sync` and
+`sync_interval_hours` apply as the initial value. Each sync fetches new files, backs them up
+(see below) and imports them. Billing and sending are never automatic. Swisseldex keeps
+messages for at most 30 days, so leave it on.
+
 ### Raw backup of the Swisseldex originals (network storage)
 
 Settings → **Rohdatensicherung**. Shareomat copies every file fetched from the Swisseldex
