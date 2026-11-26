@@ -125,7 +125,7 @@ EXPECTED_MENU = [
                           ("live_energy_diagnostics", "Diagnose")]),
     ]),
     ("billing", "Abrechnung", [("", [("billing", "Abrechnungen"), ("invoices", "Rechnungen")])]),
-    ("documents", "Dokumente", [("", [("documents", "EBL-Meldungen"), ("email_templates", "E-Mail-Vorlagen")])]),
+    ("documents", "Dokumente", [("", [("documents", "Meldungen & Mitteilungen"), ("email_templates", "E-Mail-Vorlagen")])]),
     ("system", "System", [("", [("settings", "Einstellungen"), ("automation", "Automatisierung"),
                                 ("external_data", "Externe Daten"), ("apps", "Apps & Integrationen")])]),
 ]

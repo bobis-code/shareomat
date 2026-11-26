@@ -125,6 +125,14 @@ Die Zahlungsangaben stehen im Anhang. Falls Sie den Betrag in den letzten Tagen 
 
 """ + _SIGNATURE
 
+_CONTRACT_NOTICE_BODY = """Guten Tag {name}
+
+Der Gesellschaftsvertrag der {gemeinschaft} gilt ab {vertrag_gueltig_ab} in einer neuen Fassung (Version {vertrag_version}). Im Anhang finden Sie den vollständigen Vertrag.
+
+Bei Fragen erreichen Sie uns unter {vertreter_email}.
+
+""" + _SIGNATURE
+
 TEMPLATE_SPECS: dict[str, TemplateSpec] = {
     spec.kind: spec for spec in (
         TemplateSpec(
@@ -139,6 +147,19 @@ TEMPLATE_SPECS: dict[str, TemplateSpec] = {
             ),
             default_subject="Willkommen in der {gemeinschaft}",
             default_body=_WELCOME_BODY,
+        ),
+        TemplateSpec(
+            kind="contract_notice",
+            label="Vertragsmitteilung",
+            purpose="Für Teilnehmer, wenn eine neue Version des Gesellschaftsvertrags mitgeteilt wird "
+                    "(Checkliste → Mitteilungen). Als Brief steht derselbe Text über dem Vertrag.",
+            attachment="Gesellschaftsvertrag der neuen Version (PDF)",
+            placeholders=_COMMON + (
+                ("vertrag_version", "Nummer der neuen Vertragsversion"),
+                ("vertrag_gueltig_ab", "Neue Version gültig ab"),
+            ),
+            default_subject="{gemeinschaft}: Gesellschaftsvertrag Version {vertrag_version}, gültig ab {vertrag_gueltig_ab}",
+            default_body=_CONTRACT_NOTICE_BODY,
         ),
         TemplateSpec(
             kind="invoice",
@@ -292,6 +313,16 @@ def welcome_values(common: dict[str, str], *, contract_version: int | None, cont
         "vertrag_version": str(contract_version) if contract_version is not None else "–",
         "vertrag_gueltig_ab": _date(contract_valid_from),
         "beitritt_per": _date(joined_at),
+    }
+
+
+def contract_notice_values(common: dict[str, str], *, contract_version: int,
+                           contract_valid_from: date | None) -> dict[str, str]:
+    """Values of the "contract_notice" template for one new contract version."""
+    return {
+        **common,
+        "vertrag_version": str(contract_version),
+        "vertrag_gueltig_ab": _date(contract_valid_from),
     }
 
 

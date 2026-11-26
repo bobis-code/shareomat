@@ -125,7 +125,7 @@ NAV_GROUPS: tuple[NavGroup, ...] = (
     )),
     NavGroup("documents", "Dokumente", "Dokumente", "folder", (
         ("", (
-            ("documents", "EBL-Meldungen"),
+            ("documents", "Meldungen & Mitteilungen"),
             ("email_templates", "E-Mail-Vorlagen"),
         )),
     )),

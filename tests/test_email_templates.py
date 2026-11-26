@@ -13,6 +13,7 @@ from shareomat.core.email_templates import (
     TemplateError,
     cancellation_values,
     common_values,
+    contract_notice_values,
     document_values,
     fill_template,
     placeholders_in,
@@ -91,6 +92,8 @@ def test_default_texts_are_valid_and_fully_filled(kind):
     if kind == "welcome":
         values = welcome_values(_COMMON, contract_version=5, contract_valid_from=date(2027, 1, 1),
                                 joined_at=date(2027, 1, 1))
+    elif kind == "contract_notice":
+        values = contract_notice_values(_COMMON, contract_version=5, contract_valid_from=date(2027, 1, 1))
     elif kind == "cancellation":
         values = cancellation_values(_COMMON, _doc(DOC_TYPE_INVOICE, cancel_number="S-1"))
     elif kind == "reminder":
@@ -182,7 +185,7 @@ def test_welcome_values_without_dates():
 
 def test_defaults_without_stored_text(db_path):
     templates = list_email_templates(db_path)
-    assert [t.kind for t in templates] == ["welcome", "invoice", "credit", "cancellation", "reminder"]
+    assert [t.kind for t in templates] == ["welcome", "contract_notice", "invoice", "credit", "cancellation", "reminder"]
     assert all(t.is_default for t in templates)
 
 

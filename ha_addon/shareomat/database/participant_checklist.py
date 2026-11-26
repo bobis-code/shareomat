@@ -224,7 +224,7 @@ def _notice_point(rows: list, relevant: dict[int, object], tasks: dict) -> Point
             elif state == NOT_NEEDED:
                 state = DONE
         if a.notified_at is None:
-            texts.append(f"Mitteilung v{version.version} erfassen")
+            texts.append(f"Mitteilung v{version.version} senden")
             state = OPEN
             tasks.setdefault((version.id, "notice"), []).append(a)
         elif state == NOT_NEEDED:

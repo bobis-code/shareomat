@@ -326,6 +326,10 @@ class _Handler(BaseHTTPRequestHandler):
                 and segments[3] == "welcome" and segments[4] == "pdf":
             self._serve_welcome_pdf(segments[2], ingress_path)
             return
+        if segments == ["checklist", "notice-pdf"] or (
+                len(segments) == 4 and segments[0] == "documents" and segments[1] == "notices" and segments[3] == "pdf"):
+            self._serve_notice_pdf(segments, _flatten_qs(parsed.query), ingress_path)
+            return
         # URLs use hyphens ("meter-data"), but route names (_PAGE_MODULES keys,
         # ROUTE_PATHS keys, url_for() arguments) use underscores throughout —
         # normalize once here so route always means the same thing everywhere.
@@ -559,6 +563,24 @@ class _Handler(BaseHTTPRequestHandler):
         except (WelcomeMailError, PdfError) as exc:
             get_state().set_flash(f"PDF nicht erzeugt: {exc}", ok=False)
             self._redirect(url_for(ingress_path, "contract"))
+            return
+        self._send_pdf(name, data)
+
+    def _serve_notice_pdf(self, segments: list[str], query: dict, ingress_path: str) -> None:
+        """A contract notice as PDF: previewed (checklist) or stored (documents); on a problem back with the reason."""
+        from shareomat.core.delivery.pdf import PdfError
+        from shareomat.web.pages import checklist as checklist_page
+        from shareomat.web.pages import documents as documents_page
+
+        db_path = get_state().db_path
+        try:
+            if segments[0] == "checklist":
+                name, data = checklist_page.notice_draft_pdf(db_path, query)
+            else:
+                name, data = documents_page.notice_pdf(db_path, segments[2])
+        except (PdfError, FormError) as exc:
+            get_state().set_flash(f"PDF nicht erzeugt: {exc}", ok=False)
+            self._redirect(url_for(ingress_path, "checklist" if segments[0] == "checklist" else "documents"))
             return
         self._send_pdf(name, data)
 

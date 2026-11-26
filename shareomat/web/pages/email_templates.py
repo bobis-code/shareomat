@@ -40,6 +40,7 @@ from shareomat.core.email_templates import (
     TemplateError,
     cancellation_values,
     common_values,
+    contract_notice_values,
     document_values,
     fill_template,
     reminder_values,
@@ -109,6 +110,8 @@ def _example_values(ctx: RequestContext, kind: str) -> dict[str, str]:
     if kind == "welcome":
         return welcome_values(common, contract_version=5, contract_valid_from=date(2027, 1, 1),
                               joined_at=date(2027, 1, 1))
+    if kind == "contract_notice":
+        return contract_notice_values(common, contract_version=5, contract_valid_from=date(2027, 1, 1))
     if kind == "cancellation":
         return cancellation_values(common, _example_document(kind))
     if kind == "reminder":
@@ -134,18 +137,6 @@ def _suggested_addresses(ctx: RequestContext, smtp: SmtpConfig | None) -> list[s
     if contact and contact not in suggestions:
         suggestions.append(contact)
     return suggestions
-
-
-def _take_test_slot() -> bool:
-    """At most _TEST_MAILS_PER_HOUR test e-mails per hour (in memory): the form must not become a mass mailer."""
-    now = time.monotonic()
-    with _test_lock:
-        while _test_sent and now - _test_sent[0] > 3600:
-            _test_sent.popleft()
-        if len(_test_sent) >= _TEST_MAILS_PER_HOUR:
-            return False
-        _test_sent.append(now)
-        return True
 
 
 def _test_mail(ctx: RequestContext, what: str, to: str) -> OutgoingMail:
@@ -198,7 +189,7 @@ def _send_test_mail(ctx: RequestContext) -> str:
         mail = _test_mail(ctx, what, to)
     except PdfError as exc:
         raise FormError(f"Test nicht gesendet, PDF fehlt: {exc}")
-    if not _take_test_slot():
+    if not take_test_slot():
         raise FormError(f"Höchstens {_TEST_MAILS_PER_HOUR} Test-E-Mails pro Stunde. Bitte später wieder.")
     label = TEST_KINDS[what]
     try:
@@ -241,6 +232,19 @@ def _edit_url(ctx: RequestContext, kind: str) -> str:
 
 
 # ── Public interface ────────────────────────────────────────────────────────
+
+
+def take_test_slot() -> bool:
+    """At most _TEST_MAILS_PER_HOUR test e-mails per hour (in memory), shared by every "Test senden" in
+    Shareomat: no form may become a mass mailer."""
+    now = time.monotonic()
+    with _test_lock:
+        while _test_sent and now - _test_sent[0] > 3600:
+            _test_sent.popleft()
+        if len(_test_sent) >= _TEST_MAILS_PER_HOUR:
+            return False
+        _test_sent.append(now)
+        return True
 
 
 def handle_get(ctx: RequestContext) -> str:

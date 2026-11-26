@@ -1,9 +1,42 @@
 {% extends "base.html" %}
-{% block title %}EBL-Meldungen{% endblock %}
-{% block heading %}EBL-Meldungen{% endblock %}
+{% block title %}Meldungen & Mitteilungen{% endblock %}
+{% block heading %}Meldungen & Mitteilungen{% endblock %}
 {% block content %}
+<div class="card" id="mitteilungen">
+  <h2>Vertragsmitteilungen</h2>
+  <p class="ts">Was Shareomat unter Checkliste → Mitteilungen per E-Mail gesendet oder als Brief erstellt hat.
+    Eine Mitteilung gilt erst als eingetragen, wenn die E-Mail gesendet bzw. das Schreiben erstellt ist.</p>
+  {% if contract_notices %}
+  <div class="table-wrap" style="margin-top:12px">
+    <table>
+      <thead><tr><th>Nr.</th><th>Datum</th><th>Teilnehmer</th><th>Vertrag</th><th>Art</th><th>An</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for n in contract_notices %}
+        <tr>
+          <td class="ts">{{ n.id }}</td>
+          <td class="ts">{{ n.notice_date.strftime('%d.%m.%Y') }}</td>
+          <td>{{ n.participant_label }}</td>
+          <td class="ts">v{{ n.contract_version }}</td>
+          <td class="ts">{{ n.method_label }}</td>
+          <td class="ts">{{ n.recipient.splitlines()[0] if n.method != 'email' else n.recipient }}</td>
+          <td>{% if n.status in ('sent', 'created') %}<span class="status-pill status-pill-active">{{ n.status_label }}</span>
+              {% else %}<span class="status-error">{{ n.status_label }}</span>{% endif %}</td>
+          <td style="white-space:nowrap">
+            <a class="btn-small" href="{{ url_for('documents', suffix='/notices/' ~ n.id) }}">Ansehen</a>
+            <a class="btn-small" target="_blank" rel="noopener" href="{{ url_for('documents', suffix='/notices/' ~ n.id ~ '/pdf') }}">PDF</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="ts" style="margin-top:12px">Noch keine Vertragsmitteilungen.</p>
+  {% endif %}
+</div>
+
 <div class="card">
-  <h2>Eintritt neuer Teilnehmender in die LEG</h2>
+  <h2>EBL-Meldungen: Eintritt neuer Teilnehmender in die LEG</h2>
   <p class="ts">Meldung an den Netzbetreiber mit den Angaben des EBL-Formulars «Teilnahmeformular neue
     LEG-Teilnehmende». Ausdrucken, vom Teilnehmenden unterschreiben lassen und an EBL senden. Fehlende Angaben
     können auf dem Ausdruck auch von Hand ergänzt werden.</p>

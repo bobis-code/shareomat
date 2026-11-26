@@ -86,6 +86,26 @@ Muster-PDF scannen) im Einsatz.
      unterschrieben ist.
    * Nach dem Senden gilt die Erklärung als ausgestellt, eingefroren in genau der gesendeten
      Fassung.
+11. **Vertragsmitteilung** (Wunsch des Betreibers, 26.11.2026; ersetzt das reine Erfassen in der
+   Checkliste):
+   * Checkliste → «Mitteilungen senden»: Teilnehmer, Versandart (E-Mail, Brief, persönlich
+     übergeben) und Versanddatum wählen, dann «Vorschau» oder «Senden». Kein Nachweis-Feld:
+     den Nachweis schreibt Shareomat selbst.
+   * Die Vorschau zeigt pro Teilnehmer die E-Mail (Empfänger, Betreff, Text der Vorlage
+     «Vertragsmitteilung») mit dem Gesellschaftsvertrag der neuen Version als PDF-Anhang, dazu
+     «Test an mich senden» (an eine frei eingetragene Adresse, mit «[TEST]», nichts eingetragen).
+   * E-Mail: Vor der Übergabe wird die Mitteilung abgelegt, danach das Ergebnis. **Erst eine
+     gesendete E-Mail trägt die Mitteilung ein**, in derselben Transaktion, mit Message-ID als
+     Nachweis. Bei «Ergebnis unklar» geht an diesen Teilnehmer keine zweite E-Mail, bis unter
+     Dokumente geklärt ist, ob sie im Postfach unter «Gesendet» liegt. Eine E-Mail geht immer
+     heute hinaus.
+   * Brief / persönlich: Shareomat erstellt das Schreiben (Text der Vorlage über dem Vertrag) zum
+     Ausdrucken und trägt die Mitteilung mit dem gewählten Datum ein, beides oder nichts.
+   * Abgelegt unter Dokumente → «Meldungen & Mitteilungen» (Tabelle `contract_notices`). Der
+     Vertragstext wird nicht kopiert: Er ist der veröffentlichte, unveränderliche Text der
+     Version und wird über seine Prüfsumme kontrolliert, bevor ein PDF erneut erzeugt wird.
+   * Wer eine Mitteilung braucht, bestimmen dieselben Regeln wie beim Erfassen von Hand
+     (Gesamtkonzept 0.6.13, Abschnitt 3.4). Eine Mitteilung ist keine Zustimmung.
 
 ## Was nicht vollständig gesichert ist
 
@@ -100,6 +120,9 @@ Muster-PDF scannen) im Einsatz.
   Versandgrenzen üblicher Postfach-Anbieter. Die Grenzen selbst sind nicht geprüft.
 * **Zeitpunkt «Ergebnis unklar»:** Zeiten im Protokoll sind wie überall in Shareomat in UTC
   gespeichert.
+* **Form der Vertragsmitteilung:** Needs verification: ob eine E-Mail als «schriftlich» im Sinn
+  von §8 des Gesellschaftsvertrags gilt (Gesamtkonzept 0.6.13, R2). Shareomat bietet E-Mail und
+  Brief an und entscheidet das nicht.
 
 ## Konsequenzen
 
@@ -111,7 +134,10 @@ Muster-PDF scannen) im Einsatz.
 
 ## Betroffene Dateien
 
-* `shareomat/core/delivery/pdf.py`, `mail.py`, `document_mail.py`, `welcome_mail.py` (neu)
+* `shareomat/core/delivery/pdf.py`, `mail.py`, `document_mail.py`, `welcome_mail.py`, `notice_mail.py` (neu)
+* `shareomat/database/contract_notices.py`, `shareomat/models/contract_notice.py` (neu, Vertragsmitteilungen),
+  `shareomat/database/participant_contract.py` (`mark_notified_in`)
+* `shareomat/web/pages/checklist.py`, `documents.py` und `web/templates/documents/`
 * `shareomat/config.py` (`SmtpConfig`), `ha_addon/config.yaml`, `ha_addon/generate_runtime_config.py`,
   `ha_addon/translations/*.yaml`, `config/leg_config.example.yaml`
 * `shareomat/core/email_templates.py` (Vorlagen Stornobeleg und Mahnung)
@@ -120,4 +146,4 @@ Muster-PDF scannen) im Einsatz.
 * `shareomat/web/pages/invoices.py`, `contract.py`, `email_templates.py`, `shareomat/web/server.py`
   und die Vorlagen unter `web/templates/invoices/`, `contract/`, `email_templates/`, `checklist/`
 * `Dockerfile`, `ha_addon/Dockerfile`, `requirements.txt`, `ha_addon/requirements.txt`
-* Tests: `tests/test_email_sending.py`, `tests/test_welcome_mail.py`
+* Tests: `tests/test_email_sending.py`, `tests/test_welcome_mail.py`, `tests/test_contract_notice_mail.py`

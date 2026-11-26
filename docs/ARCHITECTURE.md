@@ -226,6 +226,7 @@ core/
     mail.py                   SMTP-Versand, nur verschlüsselt, ein Empfänger
     document_mail.py          Beleg, Stornobeleg, Mahnung senden und protokollieren
     welcome_mail.py           Willkommens-E-Mail mit Vertragspaket; Erklärung danach «ausgestellt»
+    notice_mail.py            Vertragsmitteilung per E-Mail (Vertrag als PDF) oder als Brief; erst danach eingetragen
 
 database/                   SQLite, Quelle der Wahrheit für Stammdaten
   sqlite.py                    Verbindung, Schema, additive Migrationen

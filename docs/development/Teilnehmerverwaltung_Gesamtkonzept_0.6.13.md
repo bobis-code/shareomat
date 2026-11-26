@@ -524,7 +524,8 @@ wenn Migration und Umstellung nachgewiesen sind.
 
 ### Offen
 
-* Automatischer Versand von Mitteilungen (E4, zusammen mit dem E-Mail-Versand der Belege).
+* ~~Versand von Mitteilungen (E4)~~: umgesetzt am 26.11.2026 (Vorschau mit E-Mail und Vertrag als
+  Anhang, Senden per E-Mail oder als Brief, Ablage unter Dokumente), siehe ADR-0011 Punkt 11.
 * R1–R4 (Abschnitt 2.3) bleiben rechtlich zu klären.
 * Historisierung von Messpunkt-Zuordnung und `active` (P3).
 * Zurückspielen einer Sicherung (TODO).

@@ -666,6 +666,18 @@ def mark_notified(
                     "paperless_id": paperless_id, "paperless_asn": paperless_asn}, recorded_by)
 
 
+def mark_notified_in(conn, assignment_id: int, notified_at: date, *, method: str, evidence: str,
+                     recorded_by: str, batch_id: str = "") -> None:
+    """Record the notice inside the caller's transaction, with the same rules as mark_notified.
+
+    For shareomat.database.contract_notices: the sent or created notice
+    document and the notice itself are stored together or not at all.
+    """
+    row = _load_for_update(conn, assignment_id)
+    _step_notice(conn, row, {"day": notified_at, "method": method, "evidence": evidence},
+                 write=True, recorded_by=recorded_by, batch_id=batch_id)
+
+
 def mark_consent(
     db_path: Path, assignment_id: int, consent_at: date, *, evidence: str = "",
     paperless_id: int | None = None, paperless_asn: int | None = None, recorded_by: str = "",

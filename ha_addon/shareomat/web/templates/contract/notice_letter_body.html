@@ -1,0 +1,9 @@
+{#- First page of a contract notice letter: sender, recipient, date, subject, text. Everything escaped. -#}
+<div class="notice-letter">
+  <p class="ts">{{ version.representative_name }}{% if version.representative_address_line %}<br>{{ version.representative_address_line }}{% endif %}
+    {%- if version.representative_postal_code or version.representative_city %}<br>{{ version.representative_postal_code }} {{ version.representative_city }}{% endif %}</p>
+  <p style="margin:2.2rem 0 2.2rem 55%">{% for line in recipient.splitlines() %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>
+  <p>{% if version.representative_city %}{{ version.representative_city }}, {% endif %}{{ notice_date.strftime('%d.%m.%Y') }}</p>
+  <h3>{{ subject }}</h3>
+  <div style="white-space:pre-wrap">{{ body }}</div>
+</div>

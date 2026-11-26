@@ -49,7 +49,7 @@
   {{ body | safe }}
   {% if appendix %}
   <div style="page-break-before:always;break-before:page"></div>
-  <p class="ts">Beilage zur Beitrittserklärung: vollständiger Gesellschaftsvertrag (Version {{ version.version }}).</p>
+  <p class="ts">{{ appendix_caption or ('Beilage zur Beitrittserklärung: vollständiger Gesellschaftsvertrag (Version ' ~ version.version ~ ').') }}</p>
   {{ appendix | safe }}
   {% endif %}
   <div class="meta">

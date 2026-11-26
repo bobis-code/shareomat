@@ -661,6 +661,37 @@ _SCHEMA_STATEMENTS = [
     """
     CREATE INDEX IF NOT EXISTS idx_sdat_series_document ON sdat_series(document_ref)
     """,
+    # ── Contract notices Shareomat sent or created (Dokumente → Meldungen & Mitteilungen) ──
+    # One row per e-mail or letter. No foreign keys on purpose: withdrawing a
+    # contract version removes its assignments, the record of what was sent stays.
+    # The contract text is not copied (it is the published, unchangeable version
+    # text, checked by contract_sha256).
+    """
+    CREATE TABLE IF NOT EXISTS contract_notices (
+        id INTEGER PRIMARY KEY,
+        assignment_id INTEGER NOT NULL,
+        participant_id TEXT NOT NULL,
+        participant_label TEXT NOT NULL,
+        contract_version_id INTEGER NOT NULL,
+        contract_version INTEGER NOT NULL,
+        method TEXT NOT NULL,
+        notice_date TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        attachment_name TEXT NOT NULL,
+        contract_sha256 TEXT NOT NULL,
+        status TEXT NOT NULL,
+        detail TEXT NOT NULL DEFAULT '',
+        pdf_sha256 TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        finished_at TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_contract_notices_assignment ON contract_notices(assignment_id)
+    """,
 ]
 
 # Additive column migrations: table -> {column_name: DDL fragment}.

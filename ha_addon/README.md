@@ -187,6 +187,12 @@ sends when you press the button, after a preview of recipient, text and PDF.
    e-mails per hour, each one in the audit log. Open the PDF and scan the QR payment part once
    with a banking app.
 
+**Contract notice** (Checkliste → *Mitteilungen senden*): choose the participants, the way
+(e-mail, letter, handed over) and the date, then **Vorschau** (each e-mail with the contract as
+PDF attachment, plus *Test an mich senden*) or **Senden**. A notice counts as given only once the
+e-mail was sent or the letter was created; both are filed under Dokumente → *Meldungen &
+Mitteilungen*. The text is the e-mail template *Vertragsmitteilung*.
+
 The PDF is made from the frozen document, exactly as it prints. Nothing is fetched while it is
 made. The only font in the image is Liberation Sans, which the QR-bill rules permit. Every
 attempt is logged. If the connection breaks after the hand-over, the document shows

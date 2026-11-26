@@ -25,12 +25,102 @@
       {{ task.assignments|length }} Mitteilung(en) offen.
     {% else %}Vertrag v{{ task.version.version }} gilt «mit Zustimmung aller»: {{ task.assignments|length }} Zustimmung(en) fehlen —
       ohne Zustimmung wird der Teilnehmer ab {{ task.version.valid_from.strftime('%d.%m.%Y') }} nicht abgerechnet.{% endif %}
-    <a class="btn-small" href="{{ url_for('checklist') }}?batch={{ task.kind }}&v={{ task.version.id }}#sammel">{{ 'Mitteilungen erfassen' if task.kind == 'notice' else 'Zustimmungen erfassen' }}</a>
+    <a class="btn-small" href="{{ url_for('checklist') }}?batch={{ task.kind }}&v={{ task.version.id }}#sammel">{{ 'Mitteilungen senden' if task.kind == 'notice' else 'Zustimmungen erfassen' }}</a>
   </div>
   {% endfor %}
 </div>
 
-{% if batch_kind %}
+{% if batch_kind == 'notice' %}
+{% set email = preview and preview.method == 'email' %}
+<div class="card" id="sammel">
+  <h2>Vertragsmitteilung{% if batch_version %} — Vertrag v{{ batch_version.version }}{% if batch_version.valid_from %}, gültig ab {{ batch_version.valid_from.strftime('%d.%m.%Y') }}{% endif %}{% endif %}</h2>
+  <p class="field-hint">Für Teilnehmer, die diese Version nicht selbst unterschrieben haben. Eine Mitteilung ist keine Zustimmung.</p>
+  {% if preview %}
+  <div class="info-box"><strong>Vorschau — noch nichts gesendet.</strong> {{ preview.method_label }}
+    · {{ 'heute' if preview.day == local_today else preview.day.strftime('%d.%m.%Y') }}
+    {% if not email %}<br>«Senden» erstellt die Schreiben (Text und Vertrag) zum Ausdrucken, legt sie unter Dokumente ab
+      und trägt die Mitteilung ein.{% endif %}</div>
+  {% if preview.error %}<div class="error-box">{{ preview.error }}</div>{% endif %}
+  {% if email and preview.problems %}
+  <div class="error-box"><strong>E-Mail-Versand nicht eingerichtet:</strong>
+    <ul style="margin:.3rem 0 0 1.2rem">{% for p in preview.problems %}<li>{{ p }}</li>{% endfor %}</ul>
+    Einrichten unter Home Assistant → Add-on Shareomat → Konfiguration → smtp, danach Add-on neu starten.</div>
+  {% endif %}
+  {% for d in preview.drafts %}
+  {% if d.refusal %}
+  <div class="notice-warn" style="margin:10px 0 0">{{ d.participant_label }}: wird nicht {{ 'gesendet' if email else 'erstellt' }} — {{ d.refusal }}</div>
+  {% else %}
+  <div class="ck-sub" style="margin:12px 0 0">
+    <div class="table-wrap"><table>
+      <tbody>
+        <tr><th style="width:8rem">An</th><td style="white-space:pre-line">{{ d.to }}</td></tr>
+        <tr><th>Betreff</th><td>{{ d.subject }}</td></tr>
+        <tr><th>{{ 'Anhang' if email else 'Schreiben' }}</th>
+          <td><a target="_blank" rel="noopener" href="{{ url_for('checklist', suffix='/notice-pdf') }}?t={{ token }}&a={{ d.assignment_id }}">
+            {{ d.attachment_name if email else 'Schreiben mit Vertrag als PDF' }}</a> <span class="ts">— bitte öffnen und prüfen</span></td></tr>
+      </tbody>
+    </table></div>
+    <pre style="white-space:pre-wrap;font-family:inherit;background:#f6f6f6;padding:12px;border-radius:6px;margin:8px 0 0">{{ d.body }}</pre>
+  </div>
+  {% endif %}
+  {% endfor %}
+  {% if preview.ready and not (email and preview.problems) %}
+  <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="actions-row">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="notice">
+    <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button type="submit" name="step" value="send">Senden ({{ preview.ready|length }})</button>
+    <a class="btn btn-muted" href="{{ url_for('checklist') }}?batch=notice{{ '&v=' ~ batch_version.id if batch_version }}#sammel">Auswahl ändern</a>
+  </form>
+  {% if email %}
+  <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="actions-row" style="flex-wrap:wrap;align-items:center">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="notice">
+    <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <label for="to_address" style="margin:0">Test an</label>
+    <input type="email" id="to_address" name="to_address" required maxlength="254" list="test_addresses"
+           placeholder="name@example.ch" style="padding:6px 8px;border:1px solid #ddd;border-radius:4px">
+    <datalist id="test_addresses">{% for a in preview.suggestions %}<option value="{{ a }}">{% endfor %}</datalist>
+    <button type="submit" name="step" value="test" class="btn-secondary">Test an mich senden</button>
+  </form>
+  <p class="ts">Der Test schickt die erste E-Mail der Vorschau mit «[TEST]» an diese Adresse. Nichts wird eingetragen.</p>
+  {% endif %}
+  {% else %}
+  <div class="actions-row"><a class="btn btn-muted" href="{{ url_for('checklist') }}?batch=notice{{ '&v=' ~ batch_version.id if batch_version }}#sammel">Auswahl ändern</a></div>
+  {% endif %}
+  {% elif candidates %}
+  <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="kind" value="notice">
+    <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
+    <div class="field checkbox-row"><input type="checkbox" id="sel_all"
+         onclick="for (const c of document.querySelectorAll('.sel-one')) c.checked = this.checked">
+      <label for="sel_all" style="margin:0">Alle auswählen ({{ candidates|length }})</label></div>
+    {% for a in candidates %}
+    <div class="field checkbox-row"><input type="checkbox" class="sel-one" id="sel_{{ a.id }}" name="sel_{{ a.id }}">
+      <label for="sel_{{ a.id }}" style="margin:0">{{ a.participant_id }}</label></div>
+    {% endfor %}
+    <div class="field"><label for="notice_method">Versandart</label>
+      <select id="notice_method" name="notice_method" required>
+        {% for key, label in send_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select></div>
+    <div class="field"><label for="batch_date">Versanddatum</label>
+      <input type="date" id="batch_date" name="batch_date" required value="{{ local_today.isoformat() }}">
+      <div class="field-hint">Bei E-Mail immer heute.</div></div>
+    <div class="actions-row">
+      <button type="submit" name="step" value="preview" class="btn-secondary">Vorschau</button>
+      <button type="submit" name="step" value="send">Senden</button>
+    </div>
+    <p class="field-hint">«Senden» schickt die E-Mails mit dem Vertrag als PDF (bei Brief: erstellt die Schreiben zum
+      Ausdrucken), legt sie unter Dokumente → Meldungen & Mitteilungen ab und trägt die Mitteilung ein.</p>
+  </form>
+  {% else %}
+  <p class="ts">Für diese Version ist bei keinem Teilnehmer eine Mitteilung offen.</p>
+  {% endif %}
+</div>
+{% elif batch_kind %}
 {% set spec = batch_kinds[batch_kind] %}
 <div class="card" id="sammel">
   <h2>{{ spec.title }}{% if batch_version %} — Vertrag v{{ batch_version.version }}{% endif %}</h2>
@@ -74,12 +164,6 @@
       <label for="sel_{{ a.id }}" style="margin:0">{{ a.participant_id }}</label></div>
     {% endfor %}
     <p class="field-hint">Ein Häkchen wählt nur aus. Gespeichert wird erst nach der Vorschau mit «Übernehmen».</p>
-    {% if batch_kind == 'notice' %}
-    <div class="field"><label for="notice_method">Versandart</label>
-      <select id="notice_method" name="notice_method" required>
-        {% for key, label in notice_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
-      </select></div>
-    {% endif %}
     <div class="field"><label for="batch_date">{{ spec.date_label }}</label><input type="date" id="batch_date" name="batch_date" required></div>
     {% if batch_kind == 'vnb_confirmed' %}
     <div class="field"><label for="effective_start">Bestätigter Beginn (Monatserster)</label><input type="date" id="effective_start" name="effective_start" required></div>
