@@ -35,6 +35,8 @@ Notes:
     e-mail with the contract as PDF attachment (or the letter); "Senden"
     sends the e-mails or creates the letters, files them under
     "Dokumente → Meldungen & Mitteilungen" and only then records the notice.
+    A participant's own section posts the same form for that one assignment
+    (with p=<participant>): the preview opens here with their panel kept open.
 """
 
 from __future__ import annotations
@@ -51,7 +53,7 @@ from shareomat.core.delivery.notice_mail import NoticeMailError, build_drafts, s
 from shareomat.core.delivery.pdf import PdfError, pdf_unavailable_reason, render_pdf
 from shareomat.core.paperless import PaperlessValueError, document_link, parse_number
 from shareomat.database.audit import list_events, log_event
-from shareomat.database.contract_notices import ContractNoticeError, local_today, resolve_unclear
+from shareomat.database.contract_notices import ContractNoticeError, local_today, notice_documents, resolve_unclear
 from shareomat.database.contract_versions import get_contract_version, list_contract_versions
 from shareomat.database.memberships import MembershipError, confirm_review
 from shareomat.database.participant_checklist import COLUMNS, STATE_LABELS, STATE_SYMBOLS, build_checklist
@@ -216,6 +218,11 @@ def _batch_candidates(checklist, kind: str, version_id: int | None) -> list:
     return result
 
 
+def _form_participant(ctx: RequestContext) -> str:
+    """The participant whose own section sent the form ("" for the collective form)."""
+    return (ctx.form.get("p") or "").strip()[:100]
+
+
 def _smtp() -> SmtpConfig | None:
     runtime = get_state().runtime
     return runtime.smtp if runtime is not None else None
@@ -252,7 +259,8 @@ def _notice_version(db_path, version_id: int | None):
 def _notice_preview(db_path, parked: dict) -> dict:
     """What the preview page shows: per participant the e-mail (or letter), or why it can not go out."""
     view = {"method": parked["method"], "method_label": SENDABLE_NOTICE_METHODS[parked["method"]],
-            "day": parked["day"], "drafts": [], "error": "", "problems": []}
+            "day": parked["day"], "drafts": [], "error": "", "problems": [],
+            "participant": parked.get("participant", "")}
     try:
         view["drafts"] = build_drafts(db_path, parked["version_id"], parked["assignment_ids"],
                                       method=parked["method"], notice_date=parked["day"])
@@ -307,7 +315,7 @@ def _send_notice_test(ctx: RequestContext, back: str) -> str:
     parked = _peek(token)
     if parked is None or parked["kind"] != "notice":
         raise FormError("Die Vorschau ist abgelaufen — bitte neu auswählen.")
-    back = f"{back}&t={token}"
+    back = f"{back}&t={token}#sammel"
     if parked["method"] != NOTICE_METHOD_EMAIL:
         raise FormError("Ein Test-Versand gibt es nur bei der Versandart E-Mail.")
     problems = _mail_problems()
@@ -351,8 +359,9 @@ def _notice_post(ctx: RequestContext, version_id: int | None, back: str) -> str:
         raise FormError("Bitte mindestens einen Teilnehmer auswählen.")
     method, day = _notice_choice(ctx)
     version = _notice_version(ctx.db_path, version_id)
-    token = _park({"kind": "notice", "version_id": version.id, "assignment_ids": ids, "method": method, "day": day})
-    return f"{back}&t={token}"
+    token = _park({"kind": "notice", "version_id": version.id, "assignment_ids": ids, "method": method, "day": day,
+                   "participant": _form_participant(ctx)})
+    return f"{back}&t={token}#sammel"
 
 
 def _joinable_versions(db_path) -> list:
@@ -406,6 +415,7 @@ def handle_get(ctx: RequestContext) -> str:
         joinable_versions=_joinable_versions(ctx.db_path), meter_roles=METER_ROLES, meter_role_labels=dict(METER_ROLES),
         acceptance_methods=ACCEPTANCE_METHODS, notice_methods=NOTICE_METHODS,
         send_methods=SENDABLE_NOTICE_METHODS, local_today=local_today(),
+        notice_docs=notice_documents(ctx.db_path, selected.assignments) if selected else {},
         batch_kind=batch_kind, batch_kinds=BATCH_KINDS, batch_version=batch_version, candidates=candidates,
         preview=preview, token=token, state_labels=STATE_LABELS, state_symbols=STATE_SYMBOLS,
         paperless_url=paperless_url, paperless_link=lambda number: document_link(paperless_url, number),
@@ -448,6 +458,9 @@ def handle_post(ctx: RequestContext) -> str | None:
     except ValueError:
         version_id = None
     back = f"{base}?batch={kind}" + (f"&v={version_id}" if version_id else "")
+    if _form_participant(ctx):
+        # Sent from one participant's section: their panel stays open under the preview.
+        back += f"&p={quote(_form_participant(ctx), safe='')}"
 
     if kind == "notice":
         return _notice_post(ctx, version_id, back)

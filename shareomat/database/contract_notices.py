@@ -113,11 +113,19 @@ def _load(conn, notice_id: int):
     return row
 
 
+def _batch_id(notice_id: int) -> str:
+    """Stored as notice_batch_id on the assignment: links the recorded notice to its e-mail / letter.
+
+    Collective entries use hex ids (secrets.token_hex), so "M<n>" never collides with them.
+    """
+    return f"M{notice_id}"
+
+
 def _record_notice(conn, row, evidence: str, recorded_by: str) -> str:
     """Record the notice on the assignment; "" or why it was already recorded / is no longer possible."""
     try:
         mark_notified_in(conn, row["assignment_id"], str_to_date(row["notice_date"]), method=row["method"],
-                         evidence=evidence[:500], recorded_by=recorded_by, batch_id=f"M{row['id']}")
+                         evidence=evidence[:500], recorded_by=recorded_by, batch_id=_batch_id(row["id"]))
     except ParticipantContractError as exc:
         return str(exc)
     return ""
@@ -238,6 +246,29 @@ def list_notices(db_path: Path, *, limit: int = 500) -> list[ContractNotice]:
     with connect(db_path) as conn:
         rows = conn.execute("SELECT * FROM contract_notices ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
     return [_to_notice(r) for r in rows]
+
+
+def notice_documents(db_path: Path, assignments) -> dict[int, ContractNotice]:
+    """Per assignment id: the e-mail / letter its recorded notice came from, or the e-mail whose outcome is unknown.
+
+    Assignments with a notice recorded by hand (no document in Shareomat) and
+    without an open e-mail are left out.
+    """
+    by_id = {a.id: a for a in assignments if a.id is not None}
+    if not by_id:
+        return {}
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT * FROM contract_notices WHERE assignment_id IN ({', '.join('?' * len(by_id))}) ORDER BY id",
+            tuple(by_id)).fetchall()
+    result: dict[int, ContractNotice] = {}
+    for row in rows:
+        assignment = by_id[row["assignment_id"]]
+        recorded_from_it = assignment.notified_at is not None and assignment.notice_batch_id == _batch_id(row["id"])
+        open_e_mail = assignment.notified_at is None and row["status"] in _OPEN
+        if recorded_from_it or open_e_mail:
+            result[row["assignment_id"]] = _to_notice(row)
+    return result
 
 
 def unclear_notice_for(db_path: Path, assignment_id: int) -> ContractNotice | None:

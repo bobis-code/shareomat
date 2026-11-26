@@ -1,12 +1,17 @@
-{#- Notice (and, for versions "with consent of all", consent) for one assignment `a` the member did not sign directly. -#}
+{#- Notice (and, for versions "with consent of all", consent) for one assignment `a` the member did not sign directly.
+    The notice is sent by Shareomat (same flow as Checkliste → «Mitteilungen senden», for this one participant);
+    only the consent is recorded by hand. Needs notice_docs, send_methods, local_today, notice_methods. -#}
 {% from "contract/_macros.html" import back, paperless_fields, paperless_ref, reason_field with context %}
+{% set doc = notice_docs.get(a.id) %}
 <div class="ck-sub">
   <div class="ck-section-head"><h4>Version {{ a.version_number }}{% if a.consent_based %} — «mit Zustimmung aller»{% endif %}</h4></div>
   <dl class="ck-kv">
     <dt>Mitteilung</dt>
     <dd>{% if a.notified_at %}✓ {{ a.notified_at.strftime('%d.%m.%Y') }}{% if a.notice_method %} · {{ notice_methods.get(a.notice_method, a.notice_method) }}{% endif %}
-      {%- if a.notice_evidence %} · {{ a.notice_evidence }}{% endif %} {{ paperless_ref(a.notice_paperless_id, a.notice_paperless_asn) }}
-      {%- if a.notice_batch_id %} <span class="ck-meta">· Sammel-Nr. {{ a.notice_batch_id }}</span>{% endif %}
+      {%- if doc %} · <a href="{{ url_for('documents', suffix='/notices/' ~ doc.id) }}">{{ 'E-Mail ansehen' if doc.method == 'email' else 'Schreiben ansehen' }}</a>
+      {%- else %} · <span class="ck-meta">von Hand eingetragen, kein Dokument in Shareomat</span>{% if a.notice_evidence %} · {{ a.notice_evidence }}{% endif %} {{ paperless_ref(a.notice_paperless_id, a.notice_paperless_asn) }}{% endif %}
+      {% elif doc %}<span class="ck-warn-text">E-Mail vom {{ doc.created_at.strftime('%d.%m.%Y') }}: Ergebnis unklar</span>
+        · <a href="{{ url_for('documents', suffix='/notices/' ~ doc.id) }}">klären</a>
       {% else %}<span class="ck-warn-text">offen</span>{% endif %}</dd>
     {% if a.consent_based %}
     <dt>Zustimmung</dt>
@@ -14,18 +19,31 @@
       {% else %}<span class="ck-warn-text">fehlt — nötig für die Abrechnung; eine Mitteilung ersetzt sie nicht</span>{% endif %}</dd>
     {% endif %}
   </dl>
-  {% if not a.notified_at or (a.consent_based and not a.consent_at) %}
+  {% if (not a.notified_at and not doc) or (a.consent_based and not a.consent_at) %}
   <div class="ck-forms">
-    {% if not a.notified_at %}
-    <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/notify') }}" class="ck-mini">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-      <h4>Mitteilung erfassen</h4>
-      <div class="field"><label>Mitgeteilt am</label><input type="date" name="notified_at" required></div>
-      <div class="field"><label>Versandart</label><select name="notice_method">
-        {% for key, label in notice_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
-      <div class="field"><label>Nachweis (optional)</label><input type="text" name="notice_evidence" maxlength="500" placeholder="z. B. E-Mail vom … mit Vertrag als PDF"></div>
-      {{ paperless_fields('notice_') }}
-      <button type="submit">Mitteilung speichern</button>
+    {% if not a.notified_at and not doc %}
+    {#- Posts to the checklist from both pages; a refused form comes back to this participant there. -#}
+    <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="ck-mini">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="return_to" value="checklist">
+      <input type="hidden" name="return_participant" value="{{ a.participant_id }}">
+      <input type="hidden" name="kind" value="notice">
+      <input type="hidden" name="version_id" value="{{ a.contract_version_id }}">
+      <input type="hidden" name="sel_{{ a.id }}" value="on">
+      <input type="hidden" name="p" value="{{ a.participant_id }}">
+      <h4>Mitteilung senden</h4>
+      <div class="field"><label for="notice_method_{{ a.id }}">Versandart</label>
+        <select id="notice_method_{{ a.id }}" name="notice_method" required>
+          {% for key, label in send_methods.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="batch_date_{{ a.id }}">Versanddatum</label>
+        <input type="date" id="batch_date_{{ a.id }}" name="batch_date" required value="{{ local_today.isoformat() }}">
+        <div class="field-hint">Bei E-Mail immer heute.</div></div>
+      <div class="actions-row">
+        <button type="submit" name="step" value="preview" class="btn-secondary">Vorschau</button>
+        <button type="submit" name="step" value="send">Senden</button>
+      </div>
+      <p class="field-hint">«Vorschau» zeigt die E-Mail mit dem Vertrag als PDF-Anhang (bei Brief: das Schreiben).
+        «Senden» schickt sie, legt sie unter Dokumente → Meldungen & Mitteilungen ab und trägt die Mitteilung ein.</p>
     </form>
     {% endif %}
     {% if a.consent_based and not a.consent_at %}
@@ -40,23 +58,24 @@
     {% endif %}
   </div>
   {% endif %}
-  {% if a.notified_at or a.consent_at %}
-  <details class="ck-more"><summary>Mitteilung/Zustimmung korrigieren</summary>
+  {% if a.notified_at %}
+  <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/correct') }}" class="ck-inline"
+        onsubmit="return confirm('Mitteilung zu Version {{ a.version_number }} zurücknehmen? Danach ist sie wieder offen und kann neu gesendet werden.')">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
+    <input type="hidden" name="section" value="notice">
+    <input type="hidden" name="notified_at" value="">
+    <input type="hidden" name="notice_method" value="">
+    <input type="hidden" name="notice_evidence" value="">
+    <input type="hidden" name="notice_paperless_id" value="">
+    <input type="hidden" name="notice_paperless_asn" value="">
+    <button type="submit" class="btn-small btn-muted">Mitteilung zurücknehmen</button>
+    <span class="ts">Entfernt nur den Eintrag. {{ 'Die gesendete E-Mail bleibt unter Dokumente.' if doc and doc.method == 'email' else ('Das Schreiben bleibt unter Dokumente.' if doc else '') }}</span>
+  </form>
+  {% endif %}
+  {% if a.consent_at %}
+  <details class="ck-more"><summary>Zustimmung korrigieren</summary>
     <div class="ck-more-body">
-      {% if a.notified_at %}
       <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/correct') }}" class="form-card ck-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
-        <input type="hidden" name="section" value="notice">
-        <div class="field"><label>Mitgeteilt am (leer = nicht mitgeteilt)</label><input type="date" name="notified_at" value="{{ a.notified_at.isoformat() }}"></div>
-        <div class="field"><label>Versandart</label><select name="notice_method"><option value="">—</option>
-          {% for key, label in notice_methods.items() %}<option value="{{ key }}" {{ 'selected' if key == a.notice_method }}>{{ label }}</option>{% endfor %}</select></div>
-        <div class="field ck-wide"><label>Nachweis</label><input type="text" name="notice_evidence" maxlength="500" value="{{ a.notice_evidence }}"></div>
-        {{ reason_field() }}
-        <div class="ck-actions ck-wide"><button type="submit">Korrektur speichern</button></div>
-      </form>
-      {% endif %}
-      {% if a.consent_at %}
-      <form method="post" action="{{ url_for('contract', suffix='/participants/' ~ a.id ~ '/correct') }}" class="form-card ck-form ck-separated">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">{{ back() }}
         <input type="hidden" name="section" value="consent">
         <div class="field"><label>Zustimmung am (leer = keine Zustimmung)</label><input type="date" name="consent_at" value="{{ a.consent_at.isoformat() }}"></div>
@@ -64,7 +83,6 @@
         {{ reason_field() }}
         <div class="ck-actions ck-wide"><button type="submit">Korrektur speichern</button></div>
       </form>
-      {% endif %}
     </div>
   </details>
   {% endif %}

@@ -32,6 +32,11 @@
 
 {% if batch_kind == 'notice' %}
 {% set email = preview and preview.method == 'email' %}
+{% if preview and preview.participant %}
+{% set change_url = url_for('checklist') ~ '?p=' ~ preview.participant|urlencode ~ '#mitteilung' %}
+{% else %}
+{% set change_url = url_for('checklist') ~ '?batch=notice' ~ ('&v=' ~ batch_version.id if batch_version else '') ~ '#sammel' %}
+{% endif %}
 <div class="card" id="sammel">
   <h2>Vertragsmitteilung{% if batch_version %} — Vertrag v{{ batch_version.version }}{% if batch_version.valid_from %}, gültig ab {{ batch_version.valid_from.strftime('%d.%m.%Y') }}{% endif %}{% endif %}</h2>
   <p class="field-hint">Für Teilnehmer, die diese Version nicht selbst unterschrieben haben. Eine Mitteilung ist keine Zustimmung.</p>
@@ -70,8 +75,9 @@
     <input type="hidden" name="kind" value="notice">
     <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
     <input type="hidden" name="token" value="{{ token }}">
+    {% if preview.participant %}<input type="hidden" name="p" value="{{ preview.participant }}">{% endif %}
     <button type="submit" name="step" value="send">Senden ({{ preview.ready|length }})</button>
-    <a class="btn btn-muted" href="{{ url_for('checklist') }}?batch=notice{{ '&v=' ~ batch_version.id if batch_version }}#sammel">Auswahl ändern</a>
+    <a class="btn btn-muted" href="{{ change_url }}">Auswahl ändern</a>
   </form>
   {% if email %}
   <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="actions-row" style="flex-wrap:wrap;align-items:center">
@@ -79,6 +85,7 @@
     <input type="hidden" name="kind" value="notice">
     <input type="hidden" name="version_id" value="{{ batch_version.id if batch_version else '' }}">
     <input type="hidden" name="token" value="{{ token }}">
+    {% if preview.participant %}<input type="hidden" name="p" value="{{ preview.participant }}">{% endif %}
     <label for="to_address" style="margin:0">Test an</label>
     <input type="email" id="to_address" name="to_address" required maxlength="254" list="test_addresses"
            placeholder="name@example.ch" style="padding:6px 8px;border:1px solid #ddd;border-radius:4px">
@@ -88,7 +95,7 @@
   <p class="ts">Der Test schickt die erste E-Mail der Vorschau mit «[TEST]» an diese Adresse. Nichts wird eingetragen.</p>
   {% endif %}
   {% else %}
-  <div class="actions-row"><a class="btn btn-muted" href="{{ url_for('checklist') }}?batch=notice{{ '&v=' ~ batch_version.id if batch_version }}#sammel">Auswahl ändern</a></div>
+  <div class="actions-row"><a class="btn btn-muted" href="{{ change_url }}">Auswahl ändern</a></div>
   {% endif %}
   {% elif candidates %}
   <form method="post" action="{{ url_for('checklist', suffix='/batch') }}" class="form-card">

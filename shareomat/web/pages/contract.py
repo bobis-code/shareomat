@@ -66,6 +66,7 @@ from shareomat.core.price_validation import PriceValidationError, finite_decimal
 from shareomat.core.participant_roles import ParticipantRoles, participant_roles, roles_by_participant
 from shareomat.database.audit import list_events
 from shareomat.database.community import get_community
+from shareomat.database.contract_notices import local_today, notice_documents
 from shareomat.database.contract_settings import get_contract_settings, save_contract_settings
 from shareomat.database.contract_versions import (
     ContractWorkflowError,
@@ -107,6 +108,7 @@ from shareomat.database.participants import get_participant, list_participants
 from shareomat.database.supplier_tariffs import get_supplier_tariff, list_supplier_tariffs
 from shareomat.leg_const import CONTRACT_STATUS_DRAFT
 from shareomat.models.contract import BILLING_CYCLE_MONTHLY, BILLING_CYCLES, ContractSettings, ContractVersion
+from shareomat.models.contract_notice import SENDABLE_NOTICE_METHODS
 from shareomat.models.participant import Participant
 from shareomat.models.external_data import SupplierTariff
 from shareomat.models.tariff import RATE_MODE_FLAT
@@ -664,6 +666,8 @@ def handle_get(ctx: RequestContext) -> str:
             issues=issues, current=assignment, m=assignment, notice_methods=NOTICE_METHODS, today=date.today(),
             paperless_url=paperless_url, paperless_link=lambda number: document_link(paperless_url, number),
             acceptance_methods=ACCEPTANCE_METHODS,
+            send_methods=SENDABLE_NOTICE_METHODS, local_today=local_today(),
+            notice_docs=notice_documents(ctx.db_path, [assignment]),
             events=list_events(ctx.db_path, entity="participant", entity_id=participant.participant_id),
         )
 

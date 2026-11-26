@@ -18,12 +18,14 @@ from shareomat.database.contract_notices import ContractNoticeError, list_notice
 from shareomat.database.participant_contract import (
     assign_contract,
     list_assignments_for_version,
+    mark_consent,
     mark_notified,
     record_departure,
 )
 from shareomat.database.participants import update_participant
 from shareomat.models.participant import Participant
 from shareomat.web.pages import checklist as checklist_page
+from shareomat.web.pages import contract as contract_page
 from shareomat.web.pages import documents as documents_page
 from shareomat.web.rendering import FormError, RequestContext
 from shareomat.web.state import get_state
@@ -179,8 +181,7 @@ def test_unknown_method_and_unpublished_version_are_refused(db, v2):  # noqa: F8
 # ── web: Checkliste and Dokumente ──
 
 
-@pytest.fixture
-def web(db, v2, tmp_path, smtp_server, fake_pdf):  # noqa: F811
+def _register(db, tmp_path):  # noqa: F811
     for name in ("inbox", "archive", "reports", "state"):
         (tmp_path / name).mkdir()
     get_state().register_db(db)
@@ -188,6 +189,11 @@ def web(db, v2, tmp_path, smtp_server, fake_pdf):  # noqa: F811
         paths=PathConfig(inbox=tmp_path / "inbox", archive=tmp_path / "archive", reports=tmp_path / "reports",
                          state=tmp_path / "state"),
         smtp=SmtpConfig(**SMTP_OK.__dict__)))
+
+
+@pytest.fixture
+def web(db, v2, tmp_path, smtp_server, fake_pdf):  # noqa: F811
+    _register(db, tmp_path)
     return v2
 
 
@@ -201,6 +207,10 @@ def _selection(db, version, method="email", day=None):  # noqa: F811
             "batch_date": (day or local_today()).isoformat()}
     form.update({f"sel_{i}": "on" for i in _ids(db, version).values()})
     return form
+
+
+def _token(location: str) -> str:
+    return location.split("&t=")[1].split("#")[0]
 
 
 def _page(location: str) -> str:
@@ -226,7 +236,7 @@ def test_preview_page_shows_each_e_mail_and_sends_nothing(db, web, smtp_server):
 
 def test_send_from_the_preview_files_under_documents(db, web, smtp_server, flashes):  # noqa: F811
     location = _post(step="preview", **_selection(db, web))
-    token = location.split("&t=")[1]
+    token = _token(location)
     assert _post(step="send", version_id=str(web.id), token=token) == "/documents#mitteilungen"
     assert sorted(m["to"][0] for m in smtp_server.outbox) == ["p2@example.ch", "p3@example.ch"]
     (name, content), = _attachments(smtp_server.outbox[0]["message"])
@@ -251,7 +261,7 @@ def test_e_mail_date_must_be_today(db, web, smtp_server):  # noqa: F811
 
 def test_test_mail_goes_only_to_the_given_address_and_records_nothing(db, web, smtp_server, flashes):  # noqa: F811
     location = _post(step="preview", **_selection(db, web))
-    token = location.split("&t=")[1]
+    token = _token(location)
     _post(step="test", version_id=str(web.id), token=token, to_address="pruefer@example.ch")
     (sent,) = smtp_server.outbox
     assert sent["to"] == ["pruefer@example.ch"] and sent["message"]["Subject"].startswith("[TEST] ")
@@ -263,7 +273,7 @@ def test_test_mail_goes_only_to_the_given_address_and_records_nothing(db, web, s
 
 def test_draft_pdf_only_for_the_own_preview(db, web):  # noqa: F811
     location = _post(step="preview", **_selection(db, web, method="letter", day=date(2027, 1, 10)))
-    token = location.split("&t=")[1]
+    token = _token(location)
     a2 = _ids(db, web)["p2"]
     name, data = checklist_page.notice_draft_pdf(db, {"t": token, "a": str(a2)})
     assert name == "Vertragsmitteilung_v2_Entwurf.pdf" and data.startswith(b"%PDF-")
@@ -286,6 +296,143 @@ def test_unknown_outcome_is_resolved_on_the_notice_page(db, web, monkeypatch, fl
     assert location == f"/documents/notices/{notice.id}" and list_notices(db)[0].status == "failed"
 
 
+# ── one participant's own section (Checkliste → participant, contract detail page) ──
+
+
+def _panel(participant="p2") -> str:
+    return checklist_page.handle_get(RequestContext(method="GET", ingress_path="", query={"p": participant}))
+
+
+def _section(html: str) -> str:
+    """The participant's «Mitteilung / Zustimmung» section."""
+    return html.split('id="mitteilung"')[1].split('id="abrechnung"')[0]
+
+
+def _take_back(assignment_id: int):
+    form = {"section": "notice", "notified_at": "", "notice_method": "", "notice_evidence": "",
+            "notice_paperless_id": "", "notice_paperless_asn": ""}
+    return contract_page.handle_post(RequestContext(method="POST", ingress_path="", form=form,
+                                                    segments=["participants", str(assignment_id), "correct"]))
+
+
+def test_participant_section_sends_with_preview_instead_of_a_manual_entry(db, web):  # noqa: F811
+    section = _section(_panel())
+    a2 = _ids(db, web)["p2"]
+    assert "Mitteilung senden" in section and f'name="sel_{a2}" value="on"' in section
+    assert f'name="version_id" value="{web.id}"' in section and 'name="p" value="p2"' in section
+    assert 'name="step" value="preview"' in section and 'name="step" value="send"' in section
+    for gone in ("Mitteilung erfassen", "Mitteilung speichern", 'name="notice_evidence"', "/notify", "Paperless",
+                 "Mitteilung zurücknehmen", "korrigieren"):
+        assert gone not in section, gone
+
+
+def test_preview_from_the_participant_shows_only_their_e_mail_and_keeps_the_panel(db, web, smtp_server):  # noqa: F811
+    a2 = _ids(db, web)["p2"]
+    form = {"version_id": str(web.id), "notice_method": "email", "batch_date": local_today().isoformat(),
+            f"sel_{a2}": "on", "p": "p2"}
+    location = _post(step="preview", **form)
+    assert location.startswith(f"/checklist?batch=notice&v={web.id}&p=p2&t=") and location.endswith("#sammel")
+    html = _page(location)
+    card = html.split('id="sammel"')[1].split('id="detail"')[0]
+    assert "Vorschau — noch nichts gesendet" in card and "p2@example.ch" in card and "p3@example.ch" not in card
+    assert "Gesellschaftsvertrag_v2.pdf" in card and "Senden (1)" in card and "Test an mich senden" in card
+    assert card.count('name="p" value="p2"') == 2 and 'href="/checklist?p=p2#mitteilung">Auswahl ändern' in card
+    assert "Haus 2" in html.split('id="detail"')[1]                          # the participant stays open
+    assert smtp_server.outbox == [] and list_notices(db) == []
+    token = _token(location)
+    assert _post(step="test", version_id=str(web.id), token=token, p="p2", to_address="pruefer@example.ch") == location
+    assert _post(step="send", version_id=str(web.id), token=token, p="p2") == "/documents#mitteilungen"
+    assert [m["to"][0] for m in smtp_server.outbox] == ["pruefer@example.ch", "p2@example.ch"]
+    assert {a.participant_id: a.notified_at for a in list_assignments_for_version(db, web.id)} == {
+        "p2": local_today(), "p3": None}
+
+
+def test_sent_notice_links_its_e_mail_and_can_be_taken_back(db, web, flashes):  # noqa: F811
+    ids = _ids(db, web)
+    _send(db, web, [ids["p2"]], _Transport())
+    (notice,) = list_notices(db)
+    section = _section(_panel())
+    assert f'href="/documents/notices/{notice.id}">E-Mail ansehen' in section
+    assert "Mitteilung senden" not in section and "Mitteilung zurücknehmen" in section
+    assert "Die gesendete E-Mail bleibt unter Dokumente." in section
+    assert _take_back(ids["p2"]) is None and flashes[-1][1]
+    p2 = {a.participant_id: a for a in list_assignments_for_version(db, web.id)}["p2"]
+    assert p2.notified_at is None and p2.notice_method == "" and p2.notice_evidence == ""
+    section = _section(_panel())
+    assert "Mitteilung senden" in section and "E-Mail ansehen" not in section and "zurücknehmen" not in section
+    assert [n.status for n in list_notices(db)] == ["sent"]                  # the e-mail stays under Dokumente
+    assert "corrected" in [e.action for e in list_events(db, entity="participant", entity_id="p2")]
+    assert len(_send(db, web, [ids["p2"]], _Transport()).done) == 1           # and it can be sent again
+    assert f'href="/documents/notices/{list_notices(db)[0].id}">E-Mail ansehen' in _section(_panel())
+
+
+def test_a_letter_links_the_letter(db, web):  # noqa: F811
+    _send(db, web, [_ids(db, web)["p2"]], _Transport(), method="letter", day=date(2027, 1, 10))
+    (notice,) = list_notices(db)
+    section = _section(_panel())
+    assert "10.01.2027 · Brief" in section and f'href="/documents/notices/{notice.id}">Schreiben ansehen' in section
+    assert "Das Schreiben bleibt unter Dokumente." in section
+
+
+def test_a_notice_recorded_by_hand_says_so_and_can_be_taken_back(db, web):  # noqa: F811
+    a2 = _ids(db, web)["p2"]
+    mark_notified(db, a2, date(2027, 1, 5), method="email", evidence="Test-Nachweis")
+    section = _section(_panel())
+    assert "05.01.2027 · E-Mail" in section and "von Hand eingetragen, kein Dokument in Shareomat" in section
+    assert "Mitteilung zurücknehmen" in section and "Mitteilung senden" not in section and "ansehen" not in section
+    _take_back(a2)
+    assert "Mitteilung senden" in _section(_panel())
+
+
+def test_an_unclear_e_mail_links_to_resolve_it_and_blocks_sending(db, web):  # noqa: F811
+    _send(db, web, [_ids(db, web)["p2"]], _Transport(MailError("Verbindung abgebrochen", uncertain=True)))
+    (notice,) = list_notices(db)
+    section = _section(_panel())
+    assert "Ergebnis unklar" in section and f'href="/documents/notices/{notice.id}">klären' in section
+    assert "Mitteilung senden" not in section and "zurücknehmen" not in section
+    resolve_unclear(db, notice.id, found_in_sent=False, recorded_by="admin")
+    assert "Mitteilung senden" in _section(_panel())
+
+
+def test_take_back_of_a_notice_that_is_not_recorded_is_refused(db, web):  # noqa: F811
+    with pytest.raises(FormError, match="Keine Änderung"):
+        _take_back(_ids(db, web)["p2"])
+
+
+@pytest.fixture
+def consent_version(db, monkeypatch, tmp_path, smtp_server, fake_pdf):  # noqa: F811
+    v1 = _v1(db, monkeypatch)
+    for p in ("p2", "p3"):
+        _sign(db, assign_contract(db, p, v1.id, v1.tariff_id, joined_at=date(2026, 1, 1)).id)
+    version = _successor(db, monkeypatch, date(2026, 9, 1), date(2027, 6, 1), consent_of_all=True)
+    _register(db, tmp_path)
+    return version
+
+
+def test_consent_version_sends_the_notice_and_records_the_consent(db, consent_version):  # noqa: F811
+    section = _section(_panel())
+    assert "«mit Zustimmung aller»" in section and "Mitteilung senden" in section
+    assert "Zustimmung erfassen" in section and "Zustimmung korrigieren" not in section
+    a2 = _ids(db, consent_version)["p2"]
+    mark_consent(db, a2, date(2026, 10, 1), evidence="Test-Protokoll")
+    section = _section(_panel())
+    assert "01.10.2026 · Test-Protokoll" in section and "Zustimmung korrigieren" in section
+    assert "Zustimmung erfassen" not in section and "Mitteilung senden" in section
+
+
+def test_contract_detail_page_has_the_same_section(db, web):  # noqa: F811
+    a2 = _ids(db, web)["p2"]
+    html = contract_page.handle_get(RequestContext(method="GET", ingress_path="",
+                                                   segments=["participants", str(a2), "declaration"]))
+    assert "Mitteilung senden" in html and 'name="step" value="preview"' in html and f'name="sel_{a2}"' in html
+    form = html.split('action="/checklist/batch"')[1].split("</form>")[0]          # errors come back to p2
+    assert 'name="return_to" value="checklist"' in form and 'name="return_participant" value="p2"' in form
+    _send(db, web, [a2], _Transport())
+    html = contract_page.handle_get(RequestContext(method="GET", ingress_path="",
+                                                   segments=["participants", str(a2), "declaration"]))
+    assert "E-Mail ansehen" in html and "Mitteilung zurücknehmen" in html and "Mitteilung senden" not in html
+
+
 # ── through the web server ──
 
 
@@ -302,3 +449,37 @@ def test_notice_pdf_routes_need_login(server, fake_pdf):  # noqa: F811
     assert status == 303 and headers["Location"] == "/checklist"
     status, headers, _ = browser.post("/checklist/batch", {"kind": "notice", "step": "send", "csrf_token": "falsch"})
     assert status in (303, 400, 403) and list_notices(server["db"]) == []
+
+
+def test_participant_preview_and_take_back_over_http(server, monkeypatch):  # noqa: F811
+    from tests.test_auth import _setup_admin
+    from tests.test_participant_workflow_0613 import _prepare_server_data
+
+    db_file = server["db"]
+    for row in _prepare_server_data(server, monkeypatch).values():
+        _sign(db_file, row.id)
+    v2 = _successor(db_file, monkeypatch, date(2026, 9, 1), date(2027, 6, 1))
+    a2 = _ids(db_file, v2)["p2"]
+    browser = _setup_admin(server)
+    status, _, html = browser.get("/checklist?p=p2")
+    assert status == 200 and "Mitteilung senden" in html
+    form = {"kind": "notice", "version_id": str(v2.id), f"sel_{a2}": "on", "p": "p2", "return_to": "checklist",
+            "return_participant": "p2", "notice_method": "email", "batch_date": local_today().isoformat()}
+    status, headers, _ = browser.post("/checklist/batch", {
+        **form, "step": "preview", "csrf_token": browser.page_csrf("/checklist?p=p2")})
+    assert status == 303 and "&p=p2&t=" in headers["Location"] and headers["Location"].endswith("#sammel")
+    _, _, html = browser.get(headers["Location"].split("#")[0])
+    card = html.split('id="sammel"')[1].split('id="detail"')[0]
+    assert "Vorschau — noch nichts gesendet" in card and "p2@example.ch" in card and "p3@example.ch" not in card
+    status, headers, _ = browser.post("/checklist/batch", {                # a refused form comes back to p2
+        **form, "step": "send", "batch_date": "2030-01-01", "csrf_token": browser.page_csrf("/checklist?p=p2")})
+    assert status == 303 and headers["Location"] == "/checklist?p=p2#detail"
+    mark_notified(db_file, a2, date(2027, 1, 5), method="letter")
+    _, _, html = browser.get("/checklist?p=p2")
+    assert "Mitteilung zurücknehmen" in html
+    status, headers, _ = browser.post(f"/contract/participants/{a2}/correct", {
+        "section": "notice", "notified_at": "", "notice_method": "", "notice_evidence": "",
+        "notice_paperless_id": "", "notice_paperless_asn": "", "return_to": "checklist", "return_participant": "p2",
+        "csrf_token": browser.page_csrf("/checklist?p=p2")})
+    assert status == 303 and headers["Location"] == "/checklist?p=p2#detail"
+    assert {a.participant_id: a.notified_at for a in list_assignments_for_version(db_file, v2.id)}["p2"] is None

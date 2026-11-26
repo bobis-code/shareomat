@@ -191,7 +191,10 @@ sends when you press the button, after a preview of recipient, text and PDF.
 (e-mail, letter, handed over) and the date, then **Vorschau** (each e-mail with the contract as
 PDF attachment, plus *Test an mich senden*) or **Senden**. A notice counts as given only once the
 e-mail was sent or the letter was created; both are filed under Dokumente → *Meldungen &
-Mitteilungen*. The text is the e-mail template *Vertragsmitteilung*.
+Mitteilungen*. The text is the e-mail template *Vertragsmitteilung*. The same form, for one
+participant, is in that participant's section *Mitteilung / Zustimmung*; there *Mitteilung
+zurücknehmen* removes a wrongly recorded notice so it can be sent again (the sent e-mail stays
+under Dokumente).
 
 The PDF is made from the frozen document, exactly as it prints. Nothing is fetched while it is
 made. The only font in the image is Liberation Sans, which the QR-bill rules permit. Every

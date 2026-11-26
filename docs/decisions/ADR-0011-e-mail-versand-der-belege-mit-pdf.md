@@ -106,6 +106,16 @@ Muster-PDF scannen) im Einsatz.
      Version und wird über seine Prüfsumme kontrolliert, bevor ein PDF erneut erzeugt wird.
    * Wer eine Mitteilung braucht, bestimmen dieselben Regeln wie beim Erfassen von Hand
      (Gesamtkonzept 0.6.13, Abschnitt 3.4). Eine Mitteilung ist keine Zustimmung.
+   * **Pro Teilnehmer** (Checkliste → Teilnehmer → «Mitteilung / Zustimmung», ebenso die
+     Vertragsseite des Teilnehmers) derselbe Ablauf für diesen einen Teilnehmer: Versandart,
+     Versanddatum, «Vorschau» oder «Senden». Das Formular zum Erfassen von Hand (mit Nachweis-
+     und Paperless-Feldern) gibt es dort nicht mehr (Nachtrag 26.11.2026).
+   * Eine eingetragene Mitteilung zeigt «E-Mail ansehen» bzw. «Schreiben ansehen», wenn
+     Shareomat sie erzeugt hat, sonst «von Hand eingetragen, kein Dokument in Shareomat».
+     «Mitteilung zurücknehmen» entfernt nur den Eintrag (als Korrektur im Verlauf); das
+     Dokument bleibt unter Dokumente, und die Mitteilung kann neu gesendet werden. Datum und
+     Versandart werden nicht mehr direkt geändert: zurücknehmen und neu senden. Die Zustimmung
+     wird weiterhin von Hand erfasst und korrigiert.
 
 ## Was nicht vollständig gesichert ist
 
