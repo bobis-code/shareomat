@@ -13,13 +13,16 @@ import sqlite3
 import threading
 from dataclasses import replace
 
+import pytest
+
 import main as app
 from shareomat.config import SwisseldexConfig
 from shareomat.core.collector.swisseldex_receiver import KIND_SYNC, SwisseldexReceiver
 from shareomat.database import billing
 from shareomat.web.state import get_state
+from tests.official_delivery import documents
 from tests.swisseldex_fake import FakeMailbox, session_factory
-from tests.test_billing_atomicity import case  # noqa: F401
+from tests.test_billing_atomicity import case, case_rows  # noqa: F401
 
 _TABLES = (
     "communities", "participants", "meters", "tariffs", "contract_versions", "participant_contract",
@@ -102,13 +105,19 @@ def test_enabled_receiver_is_registered_started_and_stopped(case, monkeypatch): 
     assert _receiver_threads() == []
 
 
-def test_default_source_sync_with_importer_does_not_disturb_a_release(case, monkeypatch):  # noqa: F811
-    """With the default data source the automatic import is skipped: no write to shareomat.db during a release."""
-    db, runtime, run_id, source = case
-    from tests.sdat_fixtures import Document, Series, build
+def test_automatic_import_during_a_release_refuses_it_and_a_retry_releases(case, monkeypatch):  # noqa: F811
+    """New official data arriving while a release recomputes stops that release; nothing is released on old data.
+
+    Until 0.6.33 the automatic import only ran with the data source SDAT and this
+    test checked that the default (CSV) source skipped it. SDAT is now the only
+    source (ADR-0012), so the import always runs and the release guard
+    (PRAGMA data_version) refuses. The draft stays; as the new delivery is part of
+    the basis, the draft is recomputed and the new draft releases.
+    """
+    db, runtime, run_id, _ = case
     box = FakeMailbox()
-    box.put("E66.xml", build(Document(series=[Series("CH1000000000000000000000000000001", "consumption", "total",
-                                                         ["1.000"] * 4)])))
+    for file_name, data in documents(case_rows(), name="neu"):
+        box.put(file_name, data)
     receiver = SwisseldexReceiver(
         SwisseldexConfig(enabled=True, username="u", password="p"), runtime.paths.state / "swisseldex",
         session_factory=session_factory(box, "u", "p"), importer=app._swisseldex_importer(db, runtime),
@@ -118,9 +127,18 @@ def test_default_source_sync_with_importer_does_not_disturb_a_release(case, monk
 
     def preview_with_sync(*args, **kwargs):
         result = real_preview(*args, **kwargs)
-        synced.append(receiver.run_now(KIND_SYNC))
+        if not synced:
+            synced.append(receiver.run_now(KIND_SYNC))   # once, exactly while the release recomputes
         return result
 
     monkeypatch.setattr(billing, "compute_billing_preview", preview_with_sync)
-    assert billing.release_billing_run(db, run_id, runtime=runtime).status == "released"
-    assert synced[0]["downloaded"] == 1 and synced[0]["import"] == "-"
+    with pytest.raises(billing.BillingWorkflowError, match="geändert"):
+        billing.release_billing_run(db, run_id, runtime=runtime)
+    assert synced[0]["downloaded"] == 2 and synced[0]["import"] != "-"
+    assert billing.get_billing_run(db, run_id).run.status == "draft"
+    monkeypatch.setattr(billing, "compute_billing_preview", real_preview)
+    with pytest.raises(billing.BillingWorkflowError, match="neu berechnen"):
+        billing.release_billing_run(db, run_id, runtime=runtime)
+    draft = billing.get_billing_run(db, run_id).run
+    new_run = billing.save_draft(db, real_preview(db, runtime, draft.period_start, draft.period_end))
+    assert billing.release_billing_run(db, new_run.id, runtime=runtime).status == "released"

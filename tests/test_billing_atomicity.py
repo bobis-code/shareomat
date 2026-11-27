@@ -11,7 +11,6 @@ Part of:
 
 from __future__ import annotations
 
-import csv
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -38,8 +37,20 @@ from shareomat.web.pages import billing as billing_page, invoices as invoices_pa
 from shareomat.web.pages.invoices import render_document
 from shareomat.web.rendering import FormError, RequestContext
 from shareomat.web.state import get_state
+from tests.official_delivery import deliver, mpid, use_official_data
 
 DAY = date(2027, 7, 1)
+PV, LOAD = mpid(1), mpid(2)
+
+
+def case_rows(load_kwh: str = "1") -> list[tuple]:
+    """One local day: the producer exports 1 kWh and the consumer imports `load_kwh` every quarter hour."""
+    start = datetime(2027, 6, 30, 22, tzinfo=timezone.utc)
+    rows = []
+    for slot in range(96):
+        timestamp = start + timedelta(minutes=15 * slot)
+        rows += [(timestamp, PV, "1", "export"), (timestamp, LOAD, load_kwh, "import")]
+    return rows
 
 
 @pytest.fixture
@@ -48,10 +59,10 @@ def case(tmp_path):
     init_db(db)
     save_community(db, Community(community_id="AUDIT-TEST", name="Synthetische Test-LEG",
                                  address_line="Beispielweg 0", postal_code="0000", city="Testort"))
-    for pid, role in (("test-pv", "producer"), ("test-load", "consumer")):
+    for pid, meter_id, role in (("test-pv", PV, "producer"), ("test-load", LOAD, "consumer")):
         create_participant(db, Participant(pid, pid, address_line="Beispielweg 0",
                                           postal_code="0000", city="Testort"))
-        create_meter(db, Meter(pid, pid, pid, role))
+        create_meter(db, Meter(meter_id, pid, pid, role))
     create_tariff(db, Tariff(local_rate_chf_kwh=Decimal("0.10"), grid_rate_chf_kwh=Decimal("0"),
                              feed_in_rate_chf_kwh=Decimal("0.10"), valid_from=date(2020, 1, 1)))
     paths = {}
@@ -59,21 +70,14 @@ def case(tmp_path):
         paths[name] = tmp_path / name
         paths[name].mkdir()
     runtime = RuntimeConfig(paths=PathConfig(**paths))
-    source = paths["inbox"] / "test-day.csv"
-    with source.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        start = datetime(2027, 6, 30, 22, tzinfo=timezone.utc)
-        for slot in range(96):
-            timestamp = (start + timedelta(minutes=15 * slot)).isoformat()
-            writer.writerow([timestamp, "test-pv", "1", "export"])
-            writer.writerow([timestamp, "test-load", "1", "import"])
+    use_official_data(db)
+    deliver(db, tmp_path, case_rows())
     preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
     assert not preview.availability.blocking_issues
     run = billing.save_draft(db, preview)
     get_state().register_db(db)
     get_state().register_runtime(runtime)
-    return db, runtime, run.id, source
+    return db, runtime, run.id, tmp_path
 
 
 def _action(db, run_id, action):
@@ -160,7 +164,7 @@ def test_competing_transitions_never_resurrect_or_release_twice(case, monkeypatc
 
 @pytest.mark.parametrize("change", ["tariff", "membership", "file", "new_file"])
 def test_basis_change_after_recomputation_refuses_release_and_can_retry(case, monkeypatch, change):
-    db, runtime, run_id, source = case
+    db, runtime, run_id, directory = case
     original = billing.compute_billing_preview
     changed = threading.Event()
     resume = threading.Event()
@@ -184,9 +188,11 @@ def test_basis_change_after_recomputation_refuses_release_and_can_retry(case, mo
                         else:
                             conn.execute("UPDATE participants SET active = 0 WHERE participant_id = 'test-load'")
             elif change == "file":
-                source.write_text(source.read_text(encoding="utf-8").replace(",1,import", ",2,import"), encoding="utf-8")
+                # The grid operator corrects the month: a later delivery with other values.
+                deliver(db, directory, case_rows(load_kwh="2"), name="korrektur")
             else:
-                (runtime.paths.inbox / "test-additional.csv").write_bytes(source.read_bytes())
+                # Another delivery with the same values: the basis changed even though the result would not.
+                deliver(db, directory, case_rows(), name="nochmals")
         finally:
             resume.set()
         with pytest.raises(billing.BillingWorkflowError, match="geändert"):

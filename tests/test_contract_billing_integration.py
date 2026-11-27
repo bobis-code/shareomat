@@ -4,14 +4,14 @@ shareomat.core.pipeline.leg_billing / get_tariff_for_date: publishing a
 new contract version only ever creates a normal, date-scoped tariff row,
 so a real compute_billing_preview() run picks the correct rate purely
 based on which period it is asked to bill — before the cutover, after it,
-and again after a scheduled version is withdrawn."""
+and again after a scheduled version is withdrawn.
+
+Since P2b (ADR-0012) on official SDAT data (tests/official_delivery.py)."""
 
 from __future__ import annotations
 
-import csv
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
-from pathlib import Path
 
 import pytest
 
@@ -30,6 +30,9 @@ from shareomat.models.contract import ContractVersion
 from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
 from shareomat.models.tariff import Tariff
+from tests.official_delivery import deliver, mpid, use_official_data
+
+M1, M2 = mpid(1), mpid(2)
 
 
 @pytest.fixture
@@ -37,10 +40,11 @@ def db_path(tmp_path):
     path = tmp_path / "shareomat.db"
     init_db(path)
     save_community(path, Community(community_id="ZEV-001", name="Test LEG"))
+    use_official_data(path)
     create_participant(path, Participant("solar", "Solar PV"))
     create_participant(path, Participant("cons_a", "Consumer A"))
-    create_meter(path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
-    create_meter(path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
+    create_meter(path, Meter(M1, "solar", "PV Meter", METER_ROLE_PRODUCER))
+    create_meter(path, Meter(M2, "cons_a", "Meter A", METER_ROLE_CONSUMER))
     # The "existing tariff" publish_version() needs for grid_rate_chf_kwh inheritance —
     # simulates the one-time emergency/first-setup tariff from the Tarife page.
     create_tariff(path, Tariff(
@@ -66,16 +70,6 @@ def _fixed_today(value: date):
         def today(cls):
             return value
     return _Fixed
-
-
-def _write_csv(directory: Path, filename: str, rows: list[tuple]) -> Path:
-    path = directory / filename
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        for row in rows:
-            writer.writerow(row)
-    return path
 
 
 def _draft(**overrides) -> ContractVersion:
@@ -108,13 +102,11 @@ def test_billing_uses_the_contract_rate_that_was_in_force_on_that_date(db_path, 
     publish_version(db_path, v2.id)
     monkeypatch.setattr(contract_versions_module, "date", date)
 
-    _write_csv(runtime.paths.inbox, "oct.csv", [
-        ("2026-10-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2026-10-01T12:00:00+00:00", "M2", "0.6", "import"),
-    ])
-    _write_csv(runtime.paths.inbox, "jan.csv", [
-        ("2027-01-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-01-01T12:00:00+00:00", "M2", "0.6", "import"),
+    deliver(db_path, db_path.parent, [
+        ("2026-10-01T12:00:00+00:00", M1, "1.0", "export"),
+        ("2026-10-01T12:00:00+00:00", M2, "0.6", "import"),
+        ("2027-01-01T12:00:00+00:00", M1, "1.0", "export"),
+        ("2027-01-01T12:00:00+00:00", M2, "0.6", "import"),
     ])
 
     # 01.10.2026 -> Vertrag v1 -> Tarif v1 (11 Rp.)
@@ -149,17 +141,19 @@ def test_only_effective_members_are_billed_per_day(db_path, runtime, monkeypatch
     cons = assign_contract(db_path, "cons_a", v1.id, v1.tariff_id, joined_at=date(2026, 10, 15))
     mark_accepted(db_path, cons.id, date(2026, 9, 20), method="paper", signed_by="cons_a", paper_location="Ordner")
 
-    _write_csv(runtime.paths.inbox, "oct.csv", [
-        ("2026-10-10T10:00:00+00:00", "M1", "1.0", "export"),   # before cons_a joined
-        ("2026-10-10T10:00:00+00:00", "M2", "0.5", "import"),
-        ("2026-10-20T10:00:00+00:00", "M1", "1.0", "export"),   # after the join
-        ("2026-10-20T10:00:00+00:00", "M2", "0.5", "import"),
-    ])
+    joined = datetime(2026, 10, 14, 22, 0, tzinfo=timezone.utc)   # 15.10.2026 00:00 local
+    # The grid operator allocates LEG energy to cons_a only from its join on.
+    deliver(db_path, db_path.parent, [
+        ("2026-10-10T10:00:00+00:00", M1, "1.0", "export"),   # before cons_a joined
+        ("2026-10-10T10:00:00+00:00", M2, "0.5", "import"),
+        ("2026-10-20T10:00:00+00:00", M1, "1.0", "export"),   # after the join
+        ("2026-10-20T10:00:00+00:00", M2, "0.5", "import"),
+    ], members=lambda meter, slot: meter != M2 or slot >= joined)
     preview = compute_billing_preview(db_path, runtime, date(2026, 10, 1), date(2026, 10, 31))
     by_pid = {i.participant_id: i for i in preview.line_items}
     assert by_pid["cons_a"].local_received_kwh == Decimal("0.5")      # only the 20.10. quarter hour
     assert by_pid["solar"].local_supplied_kwh == Decimal("0.5")
     assert by_pid["solar"].producer_credit_chf == Decimal("0.055")    # Gutschrift 0.5 kWh x 11 Rp.
     assert by_pid["cons_a"].local_amount_chf == Decimal("0.055")
-    assert preview.availability.excluded["M2"] == "vor dem Beitritt"
+    assert preview.availability.excluded[M2] == "vor dem Beitritt"
     assert any("Gemeinschaft" in i for i in preview.availability.blocking_issues)  # EBL start not recorded

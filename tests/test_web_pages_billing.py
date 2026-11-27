@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Tests for the "Abrechnungen" admin page (shareomat.web.pages.billing)."""
+"""Tests for the "Abrechnungen" admin page (shareomat.web.pages.billing). Official SDAT data since P2b."""
 
 from __future__ import annotations
 
-import csv
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -26,6 +26,7 @@ from shareomat.models.tariff import Tariff
 from shareomat.web.pages import billing as billing_page
 from shareomat.web.rendering import FormError, Redirect, RequestContext
 from shareomat.web.state import get_state
+from tests.official_delivery import deliver, mpid, use_official_data
 from datetime import date
 
 
@@ -48,21 +49,23 @@ def runtime(tmp_path, db_path):
     get_state().register_runtime(runtime)
 
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
+    use_official_data(db_path)
     create_participant(db_path, Participant("solar", "Solar PV"))
     create_participant(db_path, Participant("cons_a", "Consumer A"))
-    create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
-    create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
+    create_meter(db_path, Meter(mpid(1), "solar", "PV Meter", METER_ROLE_PRODUCER))
+    create_meter(db_path, Meter(mpid(2), "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
         local_rate_chf_kwh=Decimal("0.12"), grid_rate_chf_kwh=Decimal("0.28"),
         feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
     ))
 
-    inbox = tmp_path / "inbox"
-    with (inbox / "readings.csv").open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        writer.writerow(["2027-07-01T12:00:00+00:00", "M1", "1.0", "export"])
-        writer.writerow(["2027-07-01T12:00:00+00:00", "M2", "0.6", "import"])
+    # 01.07.2027, every quarter hour: releasable official data has no gaps.
+    start = datetime(2027, 6, 30, 22, 0, tzinfo=timezone.utc)
+    rows = []
+    for slot in range(96):
+        stamp = start + timedelta(minutes=15 * slot)
+        rows += [(stamp, mpid(1), "1.0", "export"), (stamp, mpid(2), "0.6", "import")]
+    deliver(db_path, tmp_path, rows)
     return runtime
 
 
@@ -95,14 +98,14 @@ def test_full_workflow_save_release(db_path, runtime):
 
     preview_ctx = RequestContext(
         method="GET", ingress_path="", segments=["preview"],
-        query={"period_start": "2027-07-01", "period_end": "2027-07-31"},
+        query={"period_start": "2027-07-01", "period_end": "2027-07-01"},
     )
     html = billing_page.handle_get(preview_ctx)
     assert "Consumer A" in html
 
     save_ctx = RequestContext(
         method="POST", ingress_path="", segments=["save"],
-        form={"csrf_token": csrf, "period_start": "2027-07-01", "period_end": "2027-07-31"},
+        form={"csrf_token": csrf, "period_start": "2027-07-01", "period_end": "2027-07-01"},
     )
     with pytest.raises(Redirect) as exc_info:
         billing_page.handle_post(save_ctx)
@@ -113,7 +116,7 @@ def test_full_workflow_save_release(db_path, runtime):
     assert "Freigeben" in detail_html
 
     release_ctx = RequestContext(
-        method="POST", ingress_path="", segments=[run_id, "release"], form={"csrf_token": csrf, "override_reason": "Testdaten"},
+        method="POST", ingress_path="", segments=[run_id, "release"], form={"csrf_token": csrf, "override_reason": ""},
     )
     with pytest.raises(Redirect):
         billing_page.handle_post(release_ctx)

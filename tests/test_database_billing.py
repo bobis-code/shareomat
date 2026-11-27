@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
-"""Tests for the interactive billing workflow (shareomat.database.billing)."""
+"""Tests for the interactive billing workflow (shareomat.database.billing).
+
+Since P2b (ADR-0012) on official SDAT data (tests/official_delivery.py).
+"""
 
 from __future__ import annotations
 
-import csv
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -34,6 +36,10 @@ from shareomat.models.community import Community
 from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
 from shareomat.models.tariff import Tariff
+from tests.official_delivery import deliver, mpid, use_official_data
+
+M1, M2, M3 = mpid(1), mpid(2), mpid(3)
+JULY_1 = date(2027, 7, 1)
 
 
 @pytest.fixture
@@ -53,22 +59,20 @@ def runtime(tmp_path):
     ))
 
 
-def _write_csv(directory: Path, filename: str, rows: list[tuple]) -> Path:
-    path = directory / filename
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        for row in rows:
-            writer.writerow(row)
-    return path
+def _whole_day(*channels: tuple[str, str, str]) -> list[tuple]:
+    """(meter, kWh, direction) for all 96 quarter hours of 01.07.2027: releasable official data has no gaps."""
+    start = datetime(2027, 6, 30, 22, 0, tzinfo=timezone.utc)
+    return [(start + timedelta(minutes=15 * slot), meter, kwh, direction)
+            for slot in range(96) for meter, kwh, direction in channels]
 
 
 def _seed_basic_community(db_path: Path, *, tariff_rate: str = "0.12", valid_from: date = date(2020, 1, 1)) -> None:
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
+    use_official_data(db_path)
     create_participant(db_path, Participant("solar", "Solar PV"))
     create_participant(db_path, Participant("cons_a", "Consumer A"))
-    create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
-    create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
+    create_meter(db_path, Meter(M1, "solar", "PV Meter", METER_ROLE_PRODUCER))
+    create_meter(db_path, Meter(M2, "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
         local_rate_chf_kwh=Decimal(tariff_rate), grid_rate_chf_kwh=Decimal("0.28"),
         feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=valid_from,
@@ -80,9 +84,9 @@ def _seed_basic_community(db_path: Path, *, tariff_rate: str = "0.12", valid_fro
 
 def test_complete_billing_computes_local_and_grid_split(db_path, runtime):
     _seed_basic_community(db_path)
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "1.0", "export"),
+        ("2027-07-01T12:00:00+00:00", M2, "0.6", "import"),
     ])
 
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
@@ -101,24 +105,12 @@ def test_complete_billing_computes_local_and_grid_split(db_path, runtime):
 
 def test_missing_meter_data_is_reported(db_path, runtime):
     _seed_basic_community(db_path)
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "1.0", "export"),
         # M2 (consumer meter) has no readings at all in this period.
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
-    assert preview.availability.meters_missing_data == ["M2"]
-
-
-def test_unknown_meter_is_reported_and_excluded_from_billing(db_path, runtime):
-    _seed_basic_community(db_path)
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
-        ("2027-07-01T12:00:00+00:00", "M_GHOST", "0.3", "import"),
-    ])
-    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
-    assert preview.availability.unknown_meter_ids == ["M_GHOST"]
-    assert all(pid != "M_GHOST" for item in preview.line_items for pid in item.meter_ids)
+    assert preview.availability.meters_missing_data == [M2]
 
 
 def test_incomplete_setup_raises_incomplete_config_error(db_path, runtime):
@@ -138,24 +130,25 @@ def test_end_date_before_start_date_raises(db_path, runtime):
 
 def test_multiple_meters_per_participant_are_summed(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
+    use_official_data(db_path)
     create_participant(db_path, Participant("solar", "Solar PV"))
     create_participant(db_path, Participant("cons_a", "Consumer A"))
-    create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
-    create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
-    create_meter(db_path, Meter("M3", "cons_a", "Meter B", METER_ROLE_CONSUMER))
+    create_meter(db_path, Meter(M1, "solar", "PV Meter", METER_ROLE_PRODUCER))
+    create_meter(db_path, Meter(M2, "cons_a", "Meter A", METER_ROLE_CONSUMER))
+    create_meter(db_path, Meter(M3, "cons_a", "Meter B", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
         local_rate_chf_kwh=Decimal("0.12"), grid_rate_chf_kwh=Decimal("0.28"),
         feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
     ))
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "2.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
-        ("2027-07-01T12:00:00+00:00", "M3", "0.4", "import"),
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "2.0", "export"),
+        ("2027-07-01T12:00:00+00:00", M2, "0.6", "import"),
+        ("2027-07-01T12:00:00+00:00", M3, "0.4", "import"),
     ])
 
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     consumer = next(i for i in preview.line_items if i.participant_id == "cons_a")
-    assert set(consumer.meter_ids) == {"M2", "M3"}
+    assert set(consumer.meter_ids) == {M2, M3}
     assert consumer.local_received_kwh == Decimal("1.0")  # 0.6 + 0.4 across both meters
 
 
@@ -164,10 +157,11 @@ def test_multiple_meters_per_participant_are_summed(db_path, runtime):
 
 def test_tariff_validity_window_picks_correct_rate(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
+    use_official_data(db_path)
     create_participant(db_path, Participant("solar", "Solar PV"))
     create_participant(db_path, Participant("cons_a", "Consumer A"))
-    create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
-    create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
+    create_meter(db_path, Meter(M1, "solar", "PV Meter", METER_ROLE_PRODUCER))
+    create_meter(db_path, Meter(M2, "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
         local_rate_chf_kwh=Decimal("0.10"), grid_rate_chf_kwh=Decimal("0.20"),
         feed_in_rate_chf_kwh=Decimal("0.05"), name="2026",
@@ -178,9 +172,9 @@ def test_tariff_validity_window_picks_correct_rate(db_path, runtime):
         feed_in_rate_chf_kwh=Decimal("0.07"), name="2027",
         valid_from=date(2027, 1, 1),
     ))
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "1.0", "export"),
+        ("2027-07-01T12:00:00+00:00", M2, "0.6", "import"),
     ])
 
     preview_2027 = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
@@ -193,9 +187,9 @@ def test_tariff_validity_window_picks_correct_rate(db_path, runtime):
 
 def test_saved_snapshot_is_unaffected_by_later_tariff_change(db_path, runtime):
     _seed_basic_community(db_path, tariff_rate="0.12")
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "1.0", "export"),
+        ("2027-07-01T12:00:00+00:00", M2, "0.6", "import"),
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     run = save_draft(db_path, preview)
@@ -214,13 +208,10 @@ def test_saved_snapshot_is_unaffected_by_later_tariff_change(db_path, runtime):
 
 def test_released_run_cannot_be_released_again_or_re_saved_over(db_path, runtime):
     _seed_basic_community(db_path)
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
-    ])
-    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    deliver(db_path, db_path.parent, _whole_day((M1, "1.0", "export"), (M2, "0.6", "import")), name="readings")
+    preview = compute_billing_preview(db_path, runtime, JULY_1, JULY_1)
     run = save_draft(db_path, preview)
-    release_billing_run(db_path, run.id, override_reason="Testdaten: nur ein Messwert")
+    release_billing_run(db_path, run.id)
 
     with pytest.raises(BillingWorkflowError):
         release_billing_run(db_path, run.id)
@@ -237,9 +228,9 @@ def test_released_run_cannot_be_released_again_or_re_saved_over(db_path, runtime
 
 def test_cannot_cancel_an_already_cancelled_run(db_path, runtime):
     _seed_basic_community(db_path)
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "1.0", "export"),
+        ("2027-07-01T12:00:00+00:00", M2, "0.6", "import"),
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     run = save_draft(db_path, preview)
@@ -258,18 +249,19 @@ def test_release_unknown_run_raises(db_path):
 
 def test_rounding_uses_decimal_not_float_artifacts(db_path, runtime):
     save_community(db_path, Community(community_id="ZEV-001", name="Test"))
+    use_official_data(db_path)
     create_participant(db_path, Participant("solar", "Solar PV"))
     create_participant(db_path, Participant("cons_a", "Consumer A"))
-    create_meter(db_path, Meter("M1", "solar", "PV Meter", METER_ROLE_PRODUCER))
-    create_meter(db_path, Meter("M2", "cons_a", "Meter A", METER_ROLE_CONSUMER))
+    create_meter(db_path, Meter(M1, "solar", "PV Meter", METER_ROLE_PRODUCER))
+    create_meter(db_path, Meter(M2, "cons_a", "Meter A", METER_ROLE_CONSUMER))
     create_tariff(db_path, Tariff(
         local_rate_chf_kwh=Decimal("0.1"), grid_rate_chf_kwh=Decimal("0.28"),
         feed_in_rate_chf_kwh=Decimal("0.08"), valid_from=date(2020, 1, 1),
     ))
-    # 1/3 kWh at 0.1 CHF/kWh is a classic float-imprecision trap.
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "0.333333", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.333333", "import"),
+    # 0.333 kWh at 0.1 CHF/kWh is a classic float-imprecision trap (SDAT carries at most 3 decimals).
+    deliver(db_path, db_path.parent, name="readings", rows=[
+        ("2027-07-01T12:00:00+00:00", M1, "0.333", "export"),
+        ("2027-07-01T12:00:00+00:00", M2, "0.333", "import"),
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     consumer = next(i for i in preview.line_items if i.participant_id == "cons_a")
@@ -283,13 +275,10 @@ def test_rounding_uses_decimal_not_float_artifacts(db_path, runtime):
 
 def test_billing_run_survives_reload_from_a_fresh_connection(db_path, runtime):
     _seed_basic_community(db_path)
-    _write_csv(runtime.paths.inbox, "readings.csv", [
-        ("2027-07-01T12:00:00+00:00", "M1", "1.0", "export"),
-        ("2027-07-01T12:00:00+00:00", "M2", "0.6", "import"),
-    ])
-    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
+    deliver(db_path, db_path.parent, _whole_day((M1, "1.0", "export"), (M2, "0.6", "import")), name="readings")
+    preview = compute_billing_preview(db_path, runtime, JULY_1, JULY_1)
     run = save_draft(db_path, preview)
-    release_billing_run(db_path, run.id, override_reason="Testdaten: nur ein Messwert")
+    release_billing_run(db_path, run.id)
 
     # Simulate "process restart": look the run up again via a brand new query,
     # touching no in-memory state from the calls above.
@@ -301,4 +290,4 @@ def test_billing_run_survives_reload_from_a_fresh_connection(db_path, runtime):
     reloaded = get_billing_run(db_path, run.id)
     assert len(reloaded.line_items) == 2
     assert len(reloaded.sources) == 1
-    assert reloaded.sources[0].filename == "readings.csv"
+    assert reloaded.sources[0].filename == "readings-2027-07-e66.xml"

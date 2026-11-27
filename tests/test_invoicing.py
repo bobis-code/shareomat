@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import csv
 import re
 import threading
 from datetime import date, datetime, timedelta, timezone
@@ -58,8 +57,10 @@ from shareomat.web.pages import invoices as invoices_page
 from shareomat.web.pages.invoices import render_document
 from shareomat.web.rendering import FormError, Redirect, RequestContext
 from shareomat.web.state import get_state
+from tests.official_delivery import deliver, mpid, use_official_data
 
 IBAN = "CH93 0076 2011 6238 5295 7"   # valid example IBAN
+M1, M2, M3, M4, M5 = (mpid(n) for n in range(1, 6))
 ISSUED = date(2027, 8, 5)
 LATER = date(2027, 12, 31)            # "today" for bookings in the tests
 
@@ -78,14 +79,15 @@ def db_path(tmp_path):
     get_state().register_db(path)
     save_community(path, Community(community_id="ZEV-001", name="LEG Test", address_line="Dorf 1",
                                    postal_code="4000", city="Basel"))
+    use_official_data(path)
     create_participant(path, _addr("solar", "Solar PV"))
     create_participant(path, _addr("cons_a", "Consumer A", email="a@example.ch"))
     create_participant(path, _addr("cons_b", "Consumer B"))
     create_participant(path, _addr("prosumer", "Prosumer"))
-    create_meter(path, Meter("M1", "solar", "PV", "producer"))
-    create_meter(path, Meter("M2", "cons_a", "Bezug A", "consumer"))
-    create_meter(path, Meter("M4", "cons_b", "Bezug B", "consumer"))
-    create_meter(path, Meter("M3", "prosumer", "Haus", "producer_consumer"))
+    create_meter(path, Meter(M1, "solar", "PV", "producer"))
+    create_meter(path, Meter(M2, "cons_a", "Bezug A", "consumer"))
+    create_meter(path, Meter(M4, "cons_b", "Bezug B", "consumer"))
+    create_meter(path, Meter(M3, "prosumer", "Haus", "producer_consumer"))
     create_tariff(path, Tariff(local_rate_chf_kwh=Decimal("0.10"), grid_rate_chf_kwh=Decimal("0"),
                                feed_in_rate_chf_kwh=Decimal("0.10"), valid_from=date(2020, 1, 1)))
     return path
@@ -101,27 +103,29 @@ def runtime(tmp_path, db_path):
     return runtime
 
 
-_CHANNELS = [("M1", "export"), ("M2", "import"), ("M4", "import"), ("M3", "import"), ("M3", "export")]
+_CHANNELS = [(M1, "export"), (M2, "import"), (M4, "import"), (M3, "import"), (M3, "export")]
 
 
-def _write_month(runtime: RuntimeConfig, values: dict[tuple[str, str], str], channels=_CHANNELS) -> None:
+def _month_rows(values: dict[tuple[str, str], str], channels=_CHANNELS) -> list[tuple]:
     """A complete July 2027 (every quarter hour, every channel); `values` go into the first slot, zeros elsewhere."""
     start = datetime(2027, 6, 30, 22, 0, tzinfo=timezone.utc)
     end = datetime(2027, 7, 31, 22, 0, tzinfo=timezone.utc)
-    with (runtime.paths.inbox / "jul.csv").open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        slot, first = start, True
-        while slot < end:
-            ts = slot.isoformat()
-            for meter, direction in channels:
-                writer.writerow([ts, meter, values.get((meter, direction), "0") if first else "0", direction])
-            slot += timedelta(minutes=15)
-            first = False
+    rows, slot, first = [], start, True
+    while slot < end:
+        for meter, direction in channels:
+            rows.append((slot, meter, values.get((meter, direction), "0") if first else "0", direction))
+        slot += timedelta(minutes=15)
+        first = False
+    return rows
+
+
+def _write_month(db_path: Path, values: dict[tuple[str, str], str], channels=_CHANNELS, **options) -> None:
+    """The grid operator's monthly delivery for July 2027 (tests/official_delivery.py)."""
+    deliver(db_path, db_path.parent, _month_rows(values, channels), **options)
 
 
 def _released_run(db_path: Path, runtime: RuntimeConfig, values: dict, *, override: str = "", channels=_CHANNELS) -> int:
-    _write_month(runtime, values, channels)
+    _write_month(db_path, values, channels)
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
     assert override or not preview.availability.blocking_issues, preview.availability.blocking_issues
     run = save_draft(db_path, preview)
@@ -130,7 +134,7 @@ def _released_run(db_path: Path, runtime: RuntimeConfig, values: dict, *, overri
 
 
 # solar delivers 2 kWh, A and B consume 1 kWh each -> 0.10 each, credit 0.20; prosumer idle.
-_SIMPLE = {("M1", "export"): "2.0", ("M2", "import"): "1.0", ("M4", "import"): "1.0"}
+_SIMPLE = {(M1, "export"): "2.0", (M2, "import"): "1.0", (M4, "import"): "1.0"}
 
 
 def _ready_profile(db_path, *, payee: str = "LEG Test Konto", iban: str = IBAN):
@@ -170,14 +174,14 @@ def test_issue_requires_payment_details(db_path, runtime):
 
 
 def test_overridden_release_is_never_invoiced(db_path, runtime):
-    """P0-06: a run released despite gaps (one day of data) stays an internal evaluation."""
-    with (runtime.paths.inbox / "jul.csv").open("w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        for meter, direction in _CHANNELS:
-            writer.writerow(["2027-07-01T10:00:00+00:00", meter, _SIMPLE.get((meter, direction), "0"), direction])
+    """P0-06: a run released with a written reason (here: substitute values) stays an internal evaluation.
+
+    With official data gaps can't be waved through at all; a soft issue such as the grid operator's
+    substitute values (quality 56) can, and such a run is never invoiced.
+    """
+    _write_month(db_path, _SIMPLE, conditions={datetime(2027, 6, 30, 22, 0, tzinfo=timezone.utc): "56"})
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
-    release_billing_run(db_path, run.id, override_reason="nur ein Tag")
+    release_billing_run(db_path, run.id, override_reason="Ersatzwerte des Netzbetreibers")
     _ready_profile(db_path)
     assert any("interne Auswertung" in p for p in issue_problems(db_path, run.id))
     with pytest.raises(InvoicingError, match="interne Auswertung"):
@@ -200,7 +204,7 @@ def test_issue_creates_numbered_frozen_documents_once(db_path, runtime, issued):
 
 def test_recipient_comes_from_the_billing_snapshot(db_path, runtime):
     """P0-05: master data changed after the draft was saved never reaches the documents."""
-    _write_month(runtime, _SIMPLE)
+    _write_month(db_path, _SIMPLE)
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     update_participant(db_path, "cons_a", _addr("cons_a", "Neue Mieterin", street="Neuweg 9"))
     release_billing_run(db_path, run.id)
@@ -221,7 +225,7 @@ def test_missing_address_at_billing_time_blocks(db_path, runtime):
 
 def test_prosumer_netting_and_zero_balance(db_path, runtime):
     """§3.4 netting; P1-11: an exactly balanced prosumer gets no 0.00 document."""
-    run_id = _released_run(db_path, runtime, {("M2", "import"): "1.0", ("M3", "export"): "1.0"})
+    run_id = _released_run(db_path, runtime, {(M2, "import"): "1.0", (M3, "export"): "1.0"})
     _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     docs = _by_participant(db_path)
@@ -231,7 +235,7 @@ def test_prosumer_netting_and_zero_balance(db_path, runtime):
 
 def test_balanced_prosumer_gets_no_document(db_path, runtime):
     # prosumer imports 1 and exports 1 in the same slot: LEG gives it 1 kWh from itself -> charge 0.10, credit 0.10
-    run_id = _released_run(db_path, runtime, {("M3", "import"): "1.0", ("M3", "export"): "1.0"})
+    run_id = _released_run(db_path, runtime, {(M3, "import"): "1.0", (M3, "export"): "1.0"})
     _ready_profile(db_path)
     assert issue_documents(db_path, run_id, render_document, today=ISSUED) == []
 
@@ -255,11 +259,11 @@ def test_floor_shares_are_monotone_and_never_exceed_the_pool():
 def test_payouts_never_exceed_received_payments(db_path, runtime):
     """P0-01 reproduced: credits 0.01/0.03/0.03, payments arriving in single cents."""
     create_participant(db_path, _addr("solar2", "Solar 2"))
-    create_meter(db_path, Meter("M5", "solar2", "PV 2", "producer"))
-    channels = _CHANNELS + [("M5", "export")]
-    run_id = _released_run(db_path, runtime, {("M1", "export"): "0.1", ("M3", "export"): "0.3",
-                                              ("M5", "export"): "0.3", ("M2", "import"): "0.3",
-                                              ("M4", "import"): "0.4"}, channels=channels)
+    create_meter(db_path, Meter(M5, "solar2", "PV 2", "producer"))
+    channels = _CHANNELS + [(M5, "export")]
+    run_id = _released_run(db_path, runtime, {(M1, "export"): "0.1", (M3, "export"): "0.3",
+                                              (M5, "export"): "0.3", (M2, "import"): "0.3",
+                                              (M4, "import"): "0.4"}, channels=channels)
     _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     docs = _by_participant(db_path)
@@ -558,10 +562,10 @@ def test_invoices_page_workflow(db_path, runtime):
 def _three_producers(db_path, runtime):
     """Credits 0.01 / 0.03 / 0.03, invoices A 0.03 / B 0.04."""
     create_participant(db_path, _addr("solar2", "Solar 2"))
-    create_meter(db_path, Meter("M5", "solar2", "PV 2", "producer"))
-    run_id = _released_run(db_path, runtime, {("M1", "export"): "0.1", ("M3", "export"): "0.3",
-                                              ("M5", "export"): "0.3", ("M2", "import"): "0.3",
-                                              ("M4", "import"): "0.4"}, channels=_CHANNELS + [("M5", "export")])
+    create_meter(db_path, Meter(M5, "solar2", "PV 2", "producer"))
+    run_id = _released_run(db_path, runtime, {(M1, "export"): "0.1", (M3, "export"): "0.3",
+                                              (M5, "export"): "0.3", (M2, "import"): "0.3",
+                                              (M4, "import"): "0.4"}, channels=_CHANNELS + [(M5, "export")])
     _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     return run_id, _by_participant(db_path)
@@ -645,7 +649,7 @@ def test_tampered_document_blocks_every_further_step(db_path, runtime, issued):
 
 def test_recipient_changes_after_the_draft_are_reported(db_path, runtime):
     """B3: the frozen recipient stays, but a later correction is shown before release and issuing."""
-    _write_month(runtime, _SIMPLE)
+    _write_month(db_path, _SIMPLE)
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     assert recipient_changes(db_path, run.id) == []
     update_participant(db_path, "cons_b", _addr("cons_b", "Consumer B", street="Korrigiert 5"))

@@ -124,7 +124,7 @@ def test_month_overview_leads_through_the_month(db_path, runtime):
     steps, nxt, _ = state()
     assert nxt == "Abrechnung berechnen"
     from shareomat.database.billing import compute_billing_preview, release_billing_run, save_draft
-    _write_month(runtime, _SIMPLE)
+    _write_month(db_path, _SIMPLE)
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     steps, nxt, m = state()
     assert m["label"] == "Juli 2027" and nxt == "Abrechnung prüfen & freigeben" and steps["issue"] == "waiting"

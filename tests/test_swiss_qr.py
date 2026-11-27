@@ -42,6 +42,8 @@ from tests.test_invoicing import (  # noqa: F401  (fixtures)
     IBAN,
     ISSUED,
     LATER,
+    M1,
+    M3,
     _SIMPLE,
     _by_participant,
     _ready_profile,
@@ -191,8 +193,8 @@ def test_invoice_carries_a_frozen_valid_qr_bill(db_path, runtime, issued_qr):
 
 
 def test_prosumer_qr_carries_the_balance(db_path, runtime):
-    run_id = _released_run(db_path, runtime, {("M3", "import"): "2.0", ("M3", "export"): "0.5",
-                                              ("M1", "export"): "1.5"})
+    run_id = _released_run(db_path, runtime, {(M3, "import"): "2.0", (M3, "export"): "0.5",
+                                              (M1, "export"): "1.5"})
     _ready_profile(db_path)
     issue_documents(db_path, run_id, render_document, today=ISSUED)
     doc = _by_participant(db_path)["prosumer"]
