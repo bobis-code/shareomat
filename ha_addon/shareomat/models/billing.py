@@ -91,6 +91,14 @@ class BillingRecord:
     local_cost_exact_chf: Decimal | None = None
     producer_payout_exact_chf: Decimal | None = None
 
+    # The exact LEG kWh behind those amounts, per tariff window (HT/NT; flat
+    # mode: everything in HT). Basis of the money balance of a billing run
+    # (admin fee, grid operator rounding), shareomat.database.billing, 0.6.31.
+    local_received_exact_kwh_ht: Decimal | None = None
+    local_received_exact_kwh_nt: Decimal | None = None
+    local_supplied_exact_kwh_ht: Decimal | None = None
+    local_supplied_exact_kwh_nt: Decimal | None = None
+
     # Audit
     slot_count: int = 0
     source_files: list[str] = field(default_factory=list)

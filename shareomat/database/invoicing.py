@@ -85,7 +85,7 @@ from shareomat.core.payments.swiss_qr import (
     split_street,
 )
 from shareomat.database.audit import log_event, record_event
-from shareomat.database.billing import get_billing_run
+from shareomat.database.billing import get_billing_run, money_balance_problems
 from shareomat.database.community import get_community
 from shareomat.database.contract_versions import get_contract_version_for_date, list_contract_versions
 from shareomat.database.settings import get_setting, set_setting
@@ -531,10 +531,8 @@ def issue_problems(db_path: Path, run_id: int, *, today: date | None = None, inc
     if not creditor["name"] or not creditor["address_line"] or not creditor["city"]:
         problems.append("Name und Adresse des LEG-Vertreters fehlen (Vertrag bzw. Gemeinschaft).")
     billable = [i for i in detail.line_items if _billable(i)]
-    charges = sum((i.net_amount_chf for i in billable if i.net_amount_chf > 0), Decimal(0))
-    credits = sum((-i.net_amount_chf for i in billable if i.net_amount_chf < 0), Decimal(0))
-    if charges != credits:
-        problems.append(f"Rappenabstimmung fehlgeschlagen: Rechnungen CHF {charges} ≠ Gutschriften CHF {credits}.")
+    # Money balance incl. the admin fee (B28, 0.6.31): one rule, kept with the cent rounding in billing.
+    problems.extend(money_balance_problems(run, detail.line_items))
     with connect(db_path) as conn:
         recipients = _recipients(conn, run_id)
         open_storno = {r["participant_id"]: r["number"] for r in conn.execute(

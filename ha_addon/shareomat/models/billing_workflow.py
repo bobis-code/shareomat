@@ -73,6 +73,28 @@ class BillingSourceFile:
     id: int | None = None
 
 
+@dataclass(frozen=True)
+class MoneyBalance:
+    """The exact money totals of a billing, fixed when its draft is saved (0.6.31, B28).
+
+    consumers: sum of the exact consumer amounts (the invoices are these, rounded to the cent)
+    producers: sum of the exact producer amounts (the credits are these, rounded to the cent)
+    admin_fee: LEG kWh received x the agreed fee per kWh, computed from energy and fee,
+               not from the amounts
+    rounding:  feed-in rate x (LEG kWh received - LEG kWh supplied): what remains because the grid
+               operator rounds the official split per quarter hour (0 with an exact energy clearing)
+
+    Invariant: consumers - producers == admin_fee + rounding, exactly. It holds whenever every
+    price window keeps Bezugspreis = Produzentenvergütung + Verwaltungsgebühr; anything else is
+    a margin without contractual basis.
+    """
+
+    consumers: Decimal
+    producers: Decimal
+    admin_fee: Decimal
+    rounding: Decimal
+
+
 @dataclass
 class BillingRun:
     """One immutable computed (draft) or released billing snapshot for a BillingPeriod."""
@@ -99,6 +121,7 @@ class BillingRun:
     notes: list[str] = field(default_factory=list)            # never blocking, kept with the run (rounding etc.)
     release_override_reason: str = ""
     result_fingerprint: str = ""
+    money: MoneyBalance | None = None   # None for runs saved before 0.6.31
     period_start: date | None = None  # joined in from billing_periods for display convenience
     period_end: date | None = None
     period_label: str = ""
@@ -153,6 +176,8 @@ class BillingPreview:
     # With e-mail/CSV: official SDAT values exist for the period but are not used. Shown on the
     # preview only - never part of the issues, so imported SDAT data changes nothing in a CSV billing.
     official_data_unused: bool = False
+    # Exact money totals (0.6.31); not part of the result fingerprint, which stays as before.
+    money: MoneyBalance | None = None
 
     @property
     def total_local_kwh(self) -> Decimal:

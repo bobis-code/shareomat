@@ -785,6 +785,12 @@ _COLUMN_MIGRATIONS: dict[str, dict[str, str]] = {
         "release_override_reason": "TEXT NOT NULL DEFAULT ''",
         # Hash of the computed result at save time; release recomputes and compares.
         "result_fingerprint": "TEXT NOT NULL DEFAULT ''",
+        # Exact money totals of the draft (0.6.31, B28): consumer and producer amounts, admin fee and the
+        # grid operator's rounding; consumers - producers == admin fee + rounding. Empty for older runs.
+        "money_consumers_chf": "TEXT NOT NULL DEFAULT ''",
+        "money_producers_chf": "TEXT NOT NULL DEFAULT ''",
+        "money_admin_fee_chf": "TEXT NOT NULL DEFAULT ''",
+        "money_rounding_chf": "TEXT NOT NULL DEFAULT ''",
     },
     "billing_records": {
         # Recipient as of saving the draft (label, address, e-mail as JSON):

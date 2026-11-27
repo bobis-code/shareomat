@@ -82,6 +82,7 @@ from shareomat.models.billing_workflow import (
     BillingRunDetail,
     BillingSourceFile,
     DataAvailability,
+    MoneyBalance,
 )
 from shareomat.models.meter_data import IntervalReading
 
@@ -197,6 +198,27 @@ def _allocate_cents(items: list[BillingLineItem]) -> None:
     credits = _largest_remainder([_exact_or_shown(i.producer_credit_exact_chf, i.producer_credit_chf) for i in items])
     for item, charge, credit in zip(items, charges, credits):
         item.charge_chf, item.credit_chf, item.net_amount_chf = charge, credit, charge - credit
+
+
+def _balance_of_group(tariff, records) -> tuple[Decimal, Decimal]:
+    """(admin fee, grid-operator rounding) of the records settled with one tariff, both exact.
+
+    Computed from the exact LEG kWh and the tariff's fee and feed-in rates, never from the money
+    amounts, so the balance check in money_balance_problems() is an independent control. The NT
+    feed-in rate falls back to HT exactly as in shareomat.core.pipeline.leg_billing.
+    """
+    fee = tariff.admin_fee_chf_kwh
+    feed_ht = tariff.feed_in_rate_chf_kwh
+    feed_nt = tariff.feed_in_rate_nt_chf_kwh if tariff.feed_in_rate_nt_chf_kwh is not None else feed_ht
+    admin_fee, rounding = Decimal(0), Decimal(0)
+    for rec in records:
+        received_ht = rec.local_received_exact_kwh_ht or Decimal(0)
+        received_nt = rec.local_received_exact_kwh_nt or Decimal(0)
+        supplied_ht = rec.local_supplied_exact_kwh_ht or Decimal(0)
+        supplied_nt = rec.local_supplied_exact_kwh_nt or Decimal(0)
+        admin_fee += (received_ht + received_nt) * fee
+        rounding += feed_ht * (received_ht - supplied_ht) + feed_nt * (received_nt - supplied_nt)
+    return admin_fee, rounding
 
 
 def _result_fingerprint(preview: BillingPreview) -> str:
@@ -539,12 +561,16 @@ def compute_billing_preview(
     meters_all = list_meters(db_path)
     participants_all = list_participants(db_path)
     start_dt, end_dt = _period_bounds(period_start, period_end)
+    balance_fee, balance_rounding = Decimal(0), Decimal(0)
     for tariff_id, group in readings_by_tariff.items():
         t = tariff_obj[tariff_id]
         config = replace(base_config, tariff=t, meters=meters_all, participants=participants_all)
         # Official SDAT data is already allocated by the grid operator: take it over, never distribute again.
         match_results = official_match_results(group, splits) if official else match_all(readings_to_slots(group))
         records = compute_billing(match_results, config, start_dt, end_dt, source_files=[x.filename for x in sources])
+        group_fee, group_rounding = _balance_of_group(t, records)
+        balance_fee += group_fee
+        balance_rounding += group_rounding
         for rec in records:
             acc = totals.setdefault(rec.participant_id, {
                 "label": rec.label, "meter_ids": set(), "local_received": 0.0, "local_cost": Decimal(0),
@@ -641,6 +667,12 @@ def compute_billing_preview(
         official_source=official,
         # The preview showed "no data" while the grid operator's values were imported (20.11.2026).
         official_data_unused=not official and _official_data_exists(db_path, period_start, period_end),
+        money=MoneyBalance(
+            consumers=sum((acc["local_cost"] for acc in totals.values()), Decimal(0)),
+            producers=sum((acc["payout"] for acc in totals.values()), Decimal(0)),
+            admin_fee=balance_fee,
+            rounding=balance_rounding,
+        ),
     )
 
 
@@ -863,6 +895,14 @@ def _load_notes(raw: str) -> list[str]:
     return data.get("notes", []) if isinstance(data, dict) else []
 
 
+def _load_money(row) -> MoneyBalance | None:
+    """The stored exact money totals, or None for a run saved before 0.6.31."""
+    values = [row[c] for c in ("money_consumers_chf", "money_producers_chf", "money_admin_fee_chf", "money_rounding_chf")]
+    if not all(values):
+        return None
+    return MoneyBalance(*(Decimal(v) for v in values))
+
+
 def _row_to_run(row) -> BillingRun:
     return BillingRun(
         id=row["id"],
@@ -888,6 +928,7 @@ def _row_to_run(row) -> BillingRun:
         notes=_load_notes(row["quality_issues"]),
         result_fingerprint=row["result_fingerprint"],
         release_override_reason=row["release_override_reason"],
+        money=_load_money(row),
         period_start=str_to_date(row["bp_start"]),
         period_end=str_to_date(row["bp_end"]),
         period_label=row["bp_label"] or "",
@@ -975,8 +1016,9 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
                     (billing_period_id, version, status, community_id, community_name, tariff_name,
                      local_rate_chf_kwh, grid_rate_chf_kwh, feed_in_rate_chf_kwh, participant_count,
                      total_local_kwh, total_leg_amount_chf, total_grid_kwh, total_grid_amount_chf,
-                     total_producer_credit_chf, quality_issues, result_fingerprint, computed_at, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     total_producer_credit_chf, quality_issues, result_fingerprint, computed_at, created_at, updated_at,
+                     money_consumers_chf, money_producers_chf, money_admin_fee_chf, money_rounding_chf)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     period_id, version, BILLING_STATUS_DRAFT,
@@ -994,6 +1036,8 @@ def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
                     }, ensure_ascii=False),
                     _result_fingerprint(preview),
                     now, now, now,
+                    *((str(preview.money.consumers), str(preview.money.producers), str(preview.money.admin_fee),
+                       str(preview.money.rounding)) if preview.money else ("", "", "", "")),
                 ),
             )
             run_id = cursor.lastrowid
@@ -1148,6 +1192,51 @@ def cancel_billing_run(db_path: Path, run_id: int) -> BillingRun:
             raise BillingWorkflowError("Stornierung nicht möglich — der Status wurde zwischenzeitlich geändert.")
     logger.info("Billing: cancelled run %d", run_id)
     return get_billing_run(db_path, run_id).run
+
+
+def money_balance_problems(run: BillingRun, items: list[BillingLineItem]) -> list[str]:
+    """Why the money of a run does not balance (empty = it does); checked before documents are issued.
+
+    Exact checks, no tolerance and no balancing entry (B28, 0.6.31):
+      * every line: net = charge - credit;
+      * the charges add up to the commercially rounded sum of the exact consumer amounts, the credits to
+        that of the exact producer amounts (that is how _allocate_cents distributes the cents);
+      * consumer amounts - producer amounts = admin fee + grid-operator rounding, exactly (MoneyBalance).
+    With an admin fee the invoices are therefore higher than the credits by the (rounded) fee; without
+    fee and with an exact energy clearing both sides are equal, as before.
+
+    Runs saved before 0.6.31 have no stored balance: for them the old rule (charges = credits) applies,
+    which only holds without admin fee; otherwise the run has to be recomputed.
+    """
+    problems = [
+        f"{i.participant_label}: Saldo CHF {i.net_amount_chf} ≠ Rechnung CHF {i.charge_chf} − Gutschrift CHF {i.credit_chf}."
+        for i in items if i.net_amount_chf != i.charge_chf - i.credit_chf
+    ]
+    charges = sum((i.charge_chf for i in items), Decimal(0))
+    credits = sum((i.credit_chf for i in items), Decimal(0))
+    money = run.money
+    if money is None:
+        if charges != credits:
+            problems.append(
+                f"Rappenabstimmung fehlgeschlagen: Rechnungen CHF {charges} ≠ Gutschriften CHF {credits}. Diese "
+                "Abrechnung wurde vor Version 0.6.31 gespeichert und enthält keine Angaben zur Verwaltungsgebühr — "
+                "bitte stornieren, neu berechnen und freigeben."
+            )
+        return problems
+    if charges != _chf(money.consumers):
+        problems.append(f"Rappenabstimmung fehlgeschlagen: Rechnungen CHF {charges} ≠ gerundeter Bezug "
+                        f"CHF {_chf(money.consumers)} (genau {money.consumers}).")
+    if credits != _chf(money.producers):
+        problems.append(f"Rappenabstimmung fehlgeschlagen: Gutschriften CHF {credits} ≠ gerundete Vergütung "
+                        f"CHF {_chf(money.producers)} (genau {money.producers}).")
+    if money.consumers - money.producers != money.admin_fee + money.rounding:
+        problems.append(
+            f"Geldabstimmung fehlgeschlagen: Bezug {money.consumers} − Vergütung {money.producers} = "
+            f"{money.consumers - money.producers} CHF, erwartet Verwaltungsgebühr {money.admin_fee} + Rundung der "
+            f"Netzbetreiber-Werte {money.rounding} = {money.admin_fee + money.rounding} CHF. Differenz ohne "
+            "vertragliche Grundlage."
+        )
+    return problems
 
 
 def list_billing_runs(db_path: Path) -> list[BillingRun]:
