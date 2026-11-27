@@ -135,16 +135,23 @@ add-on's own persistent `/data` (both survive add-on updates):
 * `manifest.json`: schema version and SHA-256 of every file (re-checked
   after writing).
 
-Add-on options (MQTT, IMAP, Swisseldex credentials) are **not** included.
-The file contains all personal data of the community, so store it safely.
+Add-on options (MQTT, IMAP, Swisseldex, SMTP credentials) are **not** included. Exception for
+now: the ENTSO-E token entered under *Externe Daten* is stored in the database and therefore is
+in the backup; it moves to the add-on options with the rebuild. The file contains all personal
+data of the community, so store it safely.
 Downloading needs the password again if it was last entered more than
 10 minutes ago, and every creation and download is in the audit log.
 Shareomat never deletes old backups.
 
-Restoring a Shareomat backup into `/data` is not a function yet. To restore
-the whole add-on, use a Home Assistant backup (it contains `/data`). The
-Shareomat backup is the copy to file away, inspect and keep outside Home
-Assistant.
+Since 0.6.32 every backup passes a **restore probe** before it is kept: the ZIP is checked entry
+by entry and the database is extracted and opened as a restore would do it.
+
+**Restoring** works on the command line, for a standalone installation (Docker, Linux, a new
+computer): `python -m shareomat.restore <backup.zip> --db <path/to/shareomat.db>` with
+Shareomat stopped. Existing data is moved to `vor-wiederherstellung-<time>/`, never deleted;
+see `docs/local-setup.md` (German). Inside the add-on there is no command line yet: to restore
+the add-on itself, use a Home Assistant backup (it contains `/data`). Restoring from the web
+interface follows with the rebuild.
 
 ### Automatic Swisseldex sync
 

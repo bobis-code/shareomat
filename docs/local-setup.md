@@ -116,6 +116,43 @@ Sowohl im Docker- als auch im nativen Weg bleiben `data/` und `config/` im
 Projektordner erhalten — ein Neustart (Container neu bauen, oder `python
 main.py` erneut aufrufen) verliert keine Daten.
 
+## Sicherung wiederherstellen
+
+Eine Sicherung aus **Einstellungen → Sicherung** (`shareomat-sicherung-….zip`) lässt sich ohne
+Home Assistant zurückspielen, auch auf einem neuen Rechner.
+
+1. **Shareomat beenden** (Docker: `docker compose stop`; nativ: Prozess beenden).
+2. Wiederherstellen, im Projektordner:
+
+   ```bash
+   python -m shareomat.restore pfad/zur/shareomat-sicherung-20261128T090000Z.zip --db data/shareomat.db
+   ```
+
+   Ohne `--db` gilt `SHAREOMAT_DB_PATH` bzw. `data/shareomat.db`.
+3. Shareomat wieder starten. Ist die Sicherung von einer älteren Version, migriert der Start
+   die Datenbank wie bei jedem Update, mit eigener geprüfter Kopie.
+
+Was dabei geschieht:
+
+* Geprüft wird alles **vor** jeder Änderung, auf einer entpackten Kopie:
+  * jeder Eintrag gegen das Inhaltsverzeichnis, mit Grösse und SHA-256;
+  * keine fremden Pfade;
+  * `integrity_check`;
+  * Schema-Version: Eine Sicherung einer neueren Shareomat-Version wird abgelehnt.
+
+  Schlägt etwas fehl, bricht die Wiederherstellung ab und **ändert nichts**.
+* Was bisher im Datenordner lag, wandert unverändert nach `vor-wiederherstellung-<Zeit>/`:
+  die Datenbank, die Dokumente, `live.db` und `coordinator.db`. Es wird nichts gelöscht und
+  nichts überschrieben. `live.db` und `coordinator.db` entstehen beim Start neu.
+* Alle Login-Sitzungen der wiederhergestellten Datenbank sind beendet; man meldet sich neu an.
+  Die Wiederherstellung steht im Audit-Protokoll.
+* Zugangsdaten (MQTT, IMAP, Swisseldex, SMTP) sind nicht in der Sicherung. Sie gehören in die
+  Konfiguration `config/leg_config.yaml` und müssen auf einem neuen Rechner dort eingetragen
+  werden.
+
+Jede neue Sicherung besteht diese Prüfungen schon beim Erstellen (Wiederherstellungsprobe):
+Eine Datei in der Sicherungsliste lässt sich also öffnen.
+
 ## Fehlersuche
 
 Teilnehmer- und Messpunkt-IDs dürfen Umlaute, Leerzeichen und Sonderzeichen

@@ -25,6 +25,12 @@ Notes:
       download request can never name a file outside the backup folder.
     * Nothing is ever deleted here; old backups are removed by the
       operator.
+    * Every new backup passes a restore probe before it gets its final name:
+      the ZIP is checked entry by entry and the database is extracted and
+      opened like a restore would do (P0b of the rebuild, 0.6.32).
+    * restore_backup() puts a backup back into a data folder (command line:
+      python -m shareomat.restore). All checks run on an extracted copy first;
+      existing data is moved aside, never deleted or overwritten.
 """
 
 from __future__ import annotations
@@ -41,6 +47,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from shareomat.database.sqlite import _SCHEMA_VERSION, now_iso
+
 BACKUP_FORMAT = 1
 _NAME = re.compile(r"^shareomat-sicherung-(\d{8}T\d{6}Z)\.zip$")
 _DOCUMENT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -52,6 +60,20 @@ _LOCK = threading.Lock()   # one backup at a time: same-second names can never o
 
 class BackupError(Exception):
     """A backup could not be created or verified; nothing was written."""
+
+
+class RestoreError(Exception):
+    """A backup could not be restored; the existing data is unchanged."""
+
+
+@dataclass
+class RestoreResult:
+    db_path: Path
+    schema_version: int
+    backup_created_at: str
+    documents: int
+    sessions_revoked: int
+    moved_aside: Path | None      # where the data that was there before now is (None: the folder was empty)
 
 
 @dataclass
@@ -130,6 +152,147 @@ def _verify_zip(path: Path, manifest: dict) -> None:
                 raise BackupError(f"Prüfsumme von {item['path']} stimmt nicht.")
 
 
+def _allowed_entry(path) -> bool:
+    """Only the database and plain document names in the documents folder (no path tricks)."""
+    if not isinstance(path, str):
+        return False
+    if path == _DB_ENTRY:
+        return True
+    return path.startswith(_DOCUMENTS_ENTRY) and bool(_DOCUMENT_NAME.match(path[len(_DOCUMENTS_ENTRY):]))
+
+
+def _stream_sha256(archive: zipfile.ZipFile, name: str) -> str:
+    digest = hashlib.sha256()
+    with archive.open(name) as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _checked_manifest(archive: zipfile.ZipFile) -> dict:
+    """The manifest of a backup ZIP after checking every entry: names, sizes and SHA-256. Raises BackupError."""
+    names = archive.namelist()
+    if _MANIFEST_ENTRY not in names:
+        raise BackupError("Die Sicherung enthält kein Inhaltsverzeichnis (manifest.json).")
+    try:
+        manifest = json.loads(archive.read(_MANIFEST_ENTRY))
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise BackupError("Das Inhaltsverzeichnis der Sicherung ist nicht lesbar.") from exc
+    if not isinstance(manifest, dict) or manifest.get("format") != BACKUP_FORMAT:
+        raise BackupError("Unbekanntes Format der Sicherung.")
+    files = manifest.get("files")
+    if not isinstance(files, list) or not all(isinstance(item, dict) for item in files):
+        raise BackupError("Das Inhaltsverzeichnis der Sicherung ist unvollständig.")
+    listed = [item.get("path") for item in files]
+    for path in listed:
+        if not _allowed_entry(path):
+            raise BackupError(f"Unerwarteter Eintrag in der Sicherung: {path!r}.")
+    if len(set(listed)) != len(listed) or _DB_ENTRY not in listed:
+        raise BackupError("Das Inhaltsverzeichnis der Sicherung ist unvollständig.")
+    if sorted(names) != sorted(listed + [_MANIFEST_ENTRY]):
+        raise BackupError("Die Sicherung enthält Dateien, die nicht im Inhaltsverzeichnis stehen, oder es fehlen welche.")
+    for item in files:
+        if archive.getinfo(item["path"]).file_size != item.get("size"):
+            raise BackupError(f"Grösse von {item['path']} stimmt nicht.")
+        if _stream_sha256(archive, item["path"]) != item.get("sha256"):
+            raise BackupError(f"Prüfsumme von {item['path']} stimmt nicht.")
+    return manifest
+
+
+def _extract(archive: zipfile.ZipFile, name: str, target: Path) -> None:
+    """Stream one checked entry to `target` (never through ZipFile.extract, which trusts the entry path)."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with archive.open(name) as source, target.open("xb") as sink:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            sink.write(chunk)
+
+
+def _inspect_database(path: Path) -> tuple[str, int | None]:
+    """(integrity_check result, highest schema version) of a database file, opened read-only."""
+    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    try:
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        has_versions = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
+        ).fetchone()
+        version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] if has_versions else None
+    finally:
+        conn.close()
+    return integrity, int(version) if version is not None else None
+
+
+def _probe_restore(zip_path: Path, work_dir: Path) -> None:
+    """Open a finished backup like a restore would: check entries, extract the database, check it."""
+    probe = work_dir / "probe"
+    probe.mkdir()
+    try:
+        with zipfile.ZipFile(zip_path) as archive:
+            manifest = _checked_manifest(archive)
+            _extract(archive, _DB_ENTRY, probe / _DB_ENTRY)
+        integrity, version = _inspect_database(probe / _DB_ENTRY)
+    except (zipfile.BadZipFile, OSError, sqlite3.Error) as exc:
+        raise BackupError(f"Die Wiederherstellungsprobe ist fehlgeschlagen ({exc}).") from exc
+    if integrity != "ok" or version != manifest.get("schema_version"):
+        raise BackupError(f"Die Wiederherstellungsprobe ist fehlgeschlagen ({integrity}, Schema {version}).")
+
+
+def _refuse_if_in_use(db_path: Path) -> None:
+    """Best effort: a database another process is writing to cannot be replaced. Shareomat must be stopped."""
+    if not db_path.exists():
+        return
+    try:
+        conn = sqlite3.connect(db_path, timeout=0)
+        try:
+            conn.execute("BEGIN EXCLUSIVE")
+            conn.rollback()
+        finally:
+            conn.close()
+    except sqlite3.OperationalError as exc:
+        raise RestoreError("Die Datenbank ist in Gebrauch. Shareomat zuerst beenden, dann erneut versuchen.") from exc
+
+
+def _after_restore(db_path: Path, backup_name: str, manifest: dict) -> int:
+    """On the restored copy: end every login session and record the restore in the audit log."""
+    conn = sqlite3.connect(db_path)
+    try:
+        with conn:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            revoked = 0
+            if "auth_sessions" in tables:
+                revoked = conn.execute("UPDATE auth_sessions SET revoked_at = ? WHERE revoked_at IS NULL",
+                                       (now_iso(),)).rowcount
+            if "audit_events" in tables:
+                columns = {r[1] for r in conn.execute("PRAGMA table_info(audit_events)")}
+                detail = (f"Sicherung vom {manifest.get('created_at', '?')} wiederhergestellt "
+                          f"(Schema {manifest.get('schema_version')}); {revoked} Sitzung(en) beendet")
+                values = {"occurred_at": now_iso(), "entity": "backup", "entity_id": backup_name,
+                          "action": "restored", "detail": detail}
+                if "actor" in columns:
+                    values["actor"] = "system"
+                conn.execute(f"INSERT INTO audit_events ({', '.join(values)}) VALUES ({', '.join('?' * len(values))})",
+                             tuple(values.values()))
+    finally:
+        conn.close()
+    return revoked
+
+
+def _move_aside(db_path: Path, stamp: str) -> Path | None:
+    """Move the database (with WAL files), the documents and the recomputable side databases to a new folder."""
+    folder = db_path.parent
+    candidates = [db_path, db_path.with_name(db_path.name + "-wal"), db_path.with_name(db_path.name + "-shm"),
+                  folder / "documents"]
+    for side in ("live.db", "coordinator.db"):
+        candidates += [folder / side, folder / (side + "-wal"), folder / (side + "-shm")]
+    present = [c for c in candidates if c.exists()]
+    if not present:
+        return None
+    aside = folder / f"vor-wiederherstellung-{stamp}"
+    aside.mkdir()
+    for item in present:
+        os.replace(item, aside / item.name)
+    return aside
+
+
 def create_backup(
     db_path: Path, target_dir: Path, *, documents_dir: Path | None = None, now: datetime | None = None,
 ) -> BackupInfo:
@@ -172,6 +335,7 @@ def _create_locked(db_path: Path, target_dir: Path, name: str, created: datetime
                 archive.write(document, _DOCUMENTS_ENTRY + document.name)
             archive.writestr(_MANIFEST_ENTRY, json.dumps(manifest, ensure_ascii=False, indent=2))
         _verify_zip(part, manifest)
+        _probe_restore(part, work_dir)
         if final.exists():
             raise BackupError("Eine Sicherung mit diesem Zeitstempel besteht bereits. Bitte kurz warten.")
         os.replace(part, final)
@@ -200,3 +364,65 @@ def find_backup(target_dir: Path, name: str) -> BackupInfo | None:
     if not isinstance(name, str) or _NAME.match(name) is None:
         return None
     return _info(Path(target_dir) / name)
+
+
+def restore_backup(zip_path: Path, db_path: Path, *, now: datetime | None = None) -> RestoreResult:
+    """Put a backup ZIP back as `db_path` (and its documents next to it). Raises RestoreError.
+
+    Shareomat must not run meanwhile. Every check runs on an extracted copy first: entries, sizes and
+    SHA-256 against the manifest, integrity_check, schema version (a newer schema than this program
+    knows is refused; an older one is migrated by the next start, with its own verified copy). Only
+    then is whatever is in the folder moved aside to vor-wiederherstellung-<time>/ and the copy moved
+    in; if that last step fails, the old data is moved back. On the restored database every login
+    session is ended and the restore is recorded in the audit log.
+    """
+    zip_path, db_path = Path(zip_path), Path(db_path)
+    if not zip_path.is_file():
+        raise RestoreError("Die Sicherungsdatei wurde nicht gefunden.")
+    stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    _refuse_if_in_use(db_path)
+    with tempfile.TemporaryDirectory(prefix=".wiederherstellung-", dir=db_path.parent) as work:
+        work_dir = Path(work)
+        try:
+            with zipfile.ZipFile(zip_path) as archive:
+                manifest = _checked_manifest(archive)
+                for item in manifest["files"]:
+                    _extract(archive, item["path"], work_dir / item["path"])
+        except BackupError as exc:
+            raise RestoreError(str(exc)) from exc
+        except (zipfile.BadZipFile, OSError) as exc:
+            raise RestoreError(f"Die Sicherungsdatei ist nicht lesbar ({exc}).") from exc
+        for item in manifest["files"]:
+            if _sha256(work_dir / item["path"]) != item["sha256"]:
+                raise RestoreError(f"Prüfsumme von {item['path']} stimmt nach dem Entpacken nicht.")
+        restored = work_dir / _DB_ENTRY
+        try:
+            integrity, version = _inspect_database(restored)
+        except sqlite3.Error as exc:
+            raise RestoreError(f"Die gesicherte Datenbank lässt sich nicht öffnen ({exc}).") from exc
+        if integrity != "ok":
+            raise RestoreError(f"Die gesicherte Datenbank ist nicht in Ordnung ({integrity}).")
+        if version is None or version != manifest.get("schema_version"):
+            raise RestoreError("Die Schema-Version der gesicherten Datenbank passt nicht zum Inhaltsverzeichnis.")
+        if version > _SCHEMA_VERSION:
+            raise RestoreError(f"Die Sicherung stammt von einer neueren Shareomat-Version (Schema {version}); "
+                               f"diese Version kennt Schema {_SCHEMA_VERSION}. Zuerst Shareomat aktualisieren.")
+        revoked = _after_restore(restored, zip_path.name, manifest)
+        documents = sum(1 for item in manifest["files"] if item["path"] != _DB_ENTRY)
+
+        moved_aside = _move_aside(db_path, stamp)
+        try:
+            os.replace(restored, db_path)
+            if (work_dir / "documents").exists():
+                os.replace(work_dir / "documents", db_path.parent / "documents")
+        except OSError as exc:
+            if moved_aside is not None:
+                for item in list(moved_aside.iterdir()):
+                    target = db_path.parent / item.name
+                    if not target.exists():
+                        os.replace(item, target)
+            raise RestoreError(f"Die wiederhergestellten Dateien konnten nicht an ihren Platz ({exc}); "
+                               "der bisherige Stand ist wieder da.") from exc
+    return RestoreResult(db_path=db_path, schema_version=version, backup_created_at=str(manifest.get("created_at", "")),
+                         documents=documents, sessions_revoked=revoked, moved_aside=moved_aside)
