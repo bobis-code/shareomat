@@ -124,10 +124,14 @@ def create_client(config: MqttConfig) -> "_mqtt_type.Client | None":
     status_topic = f"{config.topic_prefix}/status"
 
     def on_connect(client, userdata, flags, rc: int) -> None:
-        """Publish 'starting' status and re-apply tracked subscriptions on (re)connect."""
+        """Republish the last engine status ('starting' before the first) and re-apply subscriptions on (re)connect.
+
+        The broker's Will set "offline" on the disconnect; the last status itself is kept in userdata.
+        """
         if rc == 0:
             logger.info("MQTT connected to %s:%d", config.broker, config.port)
-            client.publish(status_topic, MQTT_STATUS_STARTING, qos=config.qos, retain=True)
+            status = (userdata or {}).get("status") or MQTT_STATUS_STARTING
+            client.publish(status_topic, status, qos=config.qos, retain=True)
             # Re-subscribe to all tracked topics (covers initial connect AND reconnect)
             for topic, qos_val in (userdata or {}).get("subscriptions", []):
                 client.subscribe(topic, qos_val)
@@ -180,6 +184,20 @@ def create_client(config: MqttConfig) -> "_mqtt_type.Client | None":
     return client
 
 
+def _remember_status(client: "_mqtt_type.Client", status: str) -> None:
+    """Keep the last engine status, so on_connect sends it again after a reconnect."""
+    userdata = client.user_data_get()
+    if not isinstance(userdata, dict):
+        userdata = {}
+    userdata["status"] = status
+    client.user_data_set(userdata)
+
+
+def mark_running(client: "_mqtt_type.Client", config: MqttConfig) -> None:
+    """Shareomat is up: status 'ok' from startup on, no longer only after a settlement run (B26, P2a)."""
+    publish_status(client, MQTT_STATUS_OK, config)
+
+
 def disconnect_client(client: "_mqtt_type.Client | None") -> None:
     """Disconnect from the MQTT broker and stop the background network loop."""
     if client is None:
@@ -197,6 +215,7 @@ def publish_status(
     config: MqttConfig,
 ) -> None:
     """Publish the engine status ('ok', 'error', 'starting') to the MQTT status topic."""
+    _remember_status(client, status)
     client.publish(
         f"{config.topic_prefix}/status",
         status,
@@ -256,6 +275,7 @@ def publish_system_state(
     qos = config.qos
 
     if status:
+        _remember_status(client, status)
         client.publish(f"{prefix}/status", status, qos=qos, retain=True)
     if last_run:
         client.publish(f"{prefix}/last_run", last_run, qos=qos, retain=True)

@@ -92,6 +92,10 @@ _MIN_EXPORT_PRICE_FETCH_INTERVAL_SECONDS = 3600  # ENTSO-E day-ahead publishes ~
 
 # How long the coordinator tasks wait for Emsomat's NBIRTH after the first cycle of a start.
 _COORDINATOR_ONLINE_WAIT_SECONDS = 30.0
+# Own clock for forecast and prices to Emsomat (ADR-0012 pt. 9, B27): every 15 minutes and at once when
+# Emsomat comes online. Live values are not on a clock; they go to Emsomat as they arrive.
+_COORDINATOR_INTERVAL_SECONDS = 900.0
+_COORDINATOR_POLL_SECONDS = 5.0
 # How long a shutdown waits for running coordinator tasks. Home Assistant stops an add-on after 10 s.
 _COORDINATOR_STOP_TIMEOUT_SECONDS = 5.0
 # Web requests and a running settlement together. With the coordinator (5 s), Sparkplug and the
@@ -331,6 +335,43 @@ def _start_coordinator_tasks(sparkplug_host: SparkplugHost, config: LegConfig, d
             logger.exception("Sparkplug coordinator tasks could not be started")
             return
         _coordinator_thread = thread
+
+
+def _coordinator_due(now: float, last: float | None, online: bool, was_online: bool) -> bool:
+    """Forecast and prices are due when Emsomat just came online, or 15 minutes after the last time."""
+    if not online:
+        return False
+    return not was_online or last is None or now - last >= _COORDINATOR_INTERVAL_SECONDS
+
+
+def _coordinator_clock(runtime: RuntimeConfig, db_path: Path, sparkplug_host: SparkplugHost) -> None:
+    """Start the coordinator tasks on their own clock, independent of any billing or file run (B27).
+
+    Until 0.6.33 forecast, price fetch and LEG data only went to Emsomat at the end of a settlement
+    cycle, i.e. the CSV run. Contents and topics are unchanged; only the trigger is new.
+    """
+    last: float | None = None
+    was_online = False
+    while not _COORDINATOR_STOP.wait(_COORDINATOR_POLL_SECONDS) and not _SHUTDOWN.is_set():
+        online = bool(sparkplug_host.emsomat_online)
+        now = time.monotonic()
+        if _coordinator_due(now, last, online, was_online):
+            try:
+                config = build_leg_config(db_path, runtime)
+            except IncompleteConfigError as exc:
+                logger.debug("Coordinator clock: setup incomplete, nothing sent (%s)", exc)
+            except Exception:
+                logger.exception("Coordinator clock: configuration could not be built")
+            else:
+                _start_coordinator_tasks(sparkplug_host, config, db_path)
+                last = now
+        was_online = online
+
+
+def _start_coordinator_clock(runtime: RuntimeConfig, db_path: Path, sparkplug_host: SparkplugHost) -> None:
+    """Daemon thread; it ends with the coordinator stop of the shutdown."""
+    threading.Thread(target=_coordinator_clock, args=(runtime, db_path, sparkplug_host),
+                     name="shareomat-coordinator-clock", daemon=True).start()
 
 
 def _stop_coordinator() -> None:
@@ -877,6 +918,8 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
     if sparkplug_components:
         shutdown.add("coordinator and Sparkplug", lambda: _stop_sparkplug(sparkplug_components))
     _log_automatic_functions(runtime, db_path, sparkplug_host)
+    if sparkplug_host is not None:
+        _start_coordinator_clock(runtime, db_path, sparkplug_host)
     shutdown.add("running settlement", _wait_for_running_settlement)
     if _SHUTDOWN.is_set():
         return
@@ -905,6 +948,11 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
         shutdown.add("Swisseldex receiver", lambda: swisseldex.stop(timeout=min(5.0, _drain_seconds_left())))
     if _SHUTDOWN.is_set():
         return
+
+    if mqtt_client is not None:
+        # "ok" as soon as Shareomat runs, also after a reconnect - not only after a CSV run (P2a).
+        from shareomat.ha.mqtt_runtime import mark_running
+        mark_running(mqtt_client, runtime.mqtt)
 
     # A signal during this cycle only sets the flag: the cycle ends normally, then the shutdown runs.
     _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host)

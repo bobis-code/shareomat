@@ -5,6 +5,10 @@
 Vorgeschlagen (12.11.2026, Swisseldex-Auftrag SX-3). Wird «Angenommen» nach dem Audit
 durch den Betreiber.
 
+**Teilweise ersetzt durch [ADR-0012](ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)
+(27.11.2026):** SDAT ist der einzige Abrechnungsweg, der CSV-Weg entfällt. Die Regeln zur
+offiziellen Zuteilung in diesem ADR gelten weiter.
+
 ## Kontext
 
 * Shareomat verteilt lokal erzeugte Energie selbst proportional (`leg_matcher.match_all`,

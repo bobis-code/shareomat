@@ -36,6 +36,10 @@ Bezug: [`docs/Zukunft.md`](../Zukunft.md) (Zielbild, §12 Entscheide vom
 [ADR-0005](ADR-0005-cross-house-sparkplug-b-zentraler-relay.md),
 [ADR-0006](ADR-0006-mqtt-3-1-1-fuer-sparkplug.md).
 
+**Ergänzt durch [ADR-0012](ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)
+(27.11.2026):** Eine Installation führt mehrere LEGs (offene Frage E6 dieses ADR beantwortet).
+Live-Quellen gehören über ihren Messpunkt zu genau einer LEG.
+
 ## Kontext
 
 Shareomat ist heute eine Verwaltungs- und Abrechnungsanwendung für **einen**

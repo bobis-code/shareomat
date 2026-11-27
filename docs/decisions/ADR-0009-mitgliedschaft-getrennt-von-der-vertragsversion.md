@@ -4,6 +4,10 @@
 
 Angenommen (16.11.2026, Entscheid E1 des Betreibers zum Gesamtkonzept 0.6.13).
 
+**Ergänzt durch [ADR-0012](ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)
+(27.11.2026):** Die Zuordnung Messpunkt → Mitgliedschaft bekommt einen Zeitraum
+(`meter_assignments`).
+
 ## Kontext
 
 * Bis Schema 17 stand alles zu einem Teilnehmer in `participant_contract`, eine Zeile

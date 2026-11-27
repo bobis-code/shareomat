@@ -322,6 +322,31 @@ nie zwei Läufe gleichzeitig auf Inbox/Archiv/State schreiben.
 Details und die exakte Reihenfolgebegründung: `shareomat/core/leg_runner.py`
 (Docstring "Notes").
 
+### Szenario: Prognose und Preise an Emsomat (seit 0.6.33)
+
+Prognose, Preisabruf und LEG-Daten für Emsomat haben einen eigenen Takt
+(`main._coordinator_clock`, ADR-0012). Sie hängen nicht mehr am Ende eines
+Abrechnungslaufs (B27).
+
+```text
+alle 5 s prüfen: Ist Emsomat online?
+  ├─ gerade online gekommen          → sofort senden
+  ├─ online, letzte Sendung ≥ 15 min → senden
+  └─ offline                         → nichts
+senden = LegConfig frisch bauen, dann Prognose, Exportpreis und NCMD
+         im Coordinator-Thread (_start_coordinator_tasks)
+```
+
+* Es läuft höchstens ein Coordinator-Thread. Ein zweiter Auslöser wird
+  übersprungen.
+* Der alte Auslöser am Ende von `_run_safe_cycle()` bleibt bis zum
+  Entfernen des CSV-Wegs bestehen. Er ist unschädlich.
+* Live-Werte haben keinen Takt. Sie gehen ereignisgesteuert an Emsomat
+  (WAN-Downlink → ParticipantRelay → Emsomat).
+* Der Engine-Status (`shareomat/status`) ist ab dem Start «ok». Nach einem
+  MQTT-Reconnect sendet Shareomat den letzten Status erneut, nicht mehr
+  «starting».
+
 ### Szenario: Vertragsänderung wirkt auf den nächsten Lauf
 
 ```text

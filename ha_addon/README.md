@@ -233,7 +233,7 @@ every `shareomat/cmd/run_once` MQTT command.
 
 | Topic | Retained | Description |
 |-------|----------|-------------|
-| `shareomat/status` | yes | `starting` · `ok` · `error` · `offline` (LWT) |
+| `shareomat/status` | yes | `starting` · `ok` · `error` · `offline` (LWT). Since 0.6.33 `ok` as soon as Shareomat runs, and the last status is sent again after a reconnect |
 | `shareomat/last_run` | yes | ISO timestamp of last successful run |
 | `shareomat/billing/{mpid}/total_cost_chf` | yes | Total billing cost |
 | `shareomat/billing/{mpid}/local_share_kwh` | yes | Locally shared energy |

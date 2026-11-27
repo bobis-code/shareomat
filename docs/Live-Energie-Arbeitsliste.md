@@ -576,7 +576,10 @@ begonnen.
 
 ## LE-24 – Shareomat: eigener Takt für die LEG-Daten an Emsomat
 
-* **Projekt:** Shareomat · **Priorität:** MITTEL · **Status:** OFFEN
+* **Projekt:** Shareomat · **Priorität:** MITTEL · **Status:** ERLEDIGT in 0.6.33
+  (27.11.2026): alle 15 Minuten und sofort, wenn Emsomat online kommt
+  (`main._coordinator_clock`, Tests `tests/test_coordinator_clock.py`). Teil von P2a
+  aus ADR-0012.
 * **Befund (09.11.2026, Realtest):** Prognose, Preise und LEG-Daten laufen nur am
   Ende eines Abrechnungszyklus. Ohne Zeitplan oder Auto-Scan ist das nur beim
   Start. Die Daten gelten 6 Stunden, danach hat Emsomat keine gültigen LEG-Daten

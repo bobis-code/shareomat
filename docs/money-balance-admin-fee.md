@@ -72,8 +72,9 @@ anlegt: der Tarif ohne Vertrag und der offene Prüfhinweis. Danach wurde die Tes
 mit 0.6.31 neu erzeugt, jetzt mit Gebühr in jeder Version.
 
 Für den Architekturumbau ist B28 ein **vor dem Umbau behobener Fehler**. Die
-Vergleichswerte der Vorbereitungsversion (≥ 0.6.31) enthalten die Korrektur bereits.
-Beim Vergleich alt gegen neu erscheint B28 deshalb nicht als Unterschied.
+freigegebenen Läufe der synthetischen Testdatenbank, mit denen der Umbau nachgewiesen wird,
+sind mit 0.6.31 erzeugt und enthalten die Korrektur bereits. Beim Vergleich alt gegen neu
+erscheint B28 deshalb nicht als Unterschied.
 
 ## Regressionstests
 

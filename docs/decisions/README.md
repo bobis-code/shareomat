@@ -86,6 +86,9 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
   Rohdatensicherung der Swisseldex-Originale auf einem Netzwerkspeicher (vorgeschlagen)
 * [ADR-0011](ADR-0011-e-mail-versand-der-belege-mit-pdf.md) —
   E-Mail-Versand der Belege mit PDF aus der eingefrorenen Fassung (vorgeschlagen)
+* [ADR-0012](ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md) —
+  Architekturumbau: mehrere LEGs, eigenständiger Betrieb, Aufteilung der Daten (ersetzt ADR-0008
+  teilweise)
 
 ## Verbindlichkeit
 
