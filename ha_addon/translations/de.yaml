@@ -117,3 +117,7 @@ configuration:
     name: IMAP-Abfrageintervall (nicht mehr verwendet)
     description: >-
       Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  entsoe_api_token:
+    name: ENTSO-E-Token (optional)
+    description: >-
+      Für Day-Ahead-Preise an Emsomat (kostenlos bei transparency.entsoe.eu). Hier gesetzt, hat er Vorrang vor der Eingabe unter Externe Daten. Wird nie in der Datenbank oder der Shareomat-Sicherung gespeichert.

@@ -98,7 +98,9 @@ Alle Werte darin sind erfunden.
 
 | Pfad | Inhalt |
 |---|---|
-| `config/leg_config.yaml` | Technische Laufzeitkonfiguration (Pfade, MQTT, Swisseldex, Web-Port) — von Git ignoriert, da hier Zugangsdaten stehen können |
+| `config/leg_config.yaml` | Technische Laufzeitkonfiguration (Pfade, MQTT, Swisseldex, Web-Port), ohne Zugangsdaten — von Git ignoriert |
+| `config/secrets.yaml` | Zugangsdaten (Passwörter, ENTSO-E-Token), Vorlage `config/secrets.example.yaml`. Unter Linux `chmod 600`, sonst startet Shareomat nicht. Von Git ignoriert. Eine Umgebungsvariable `SHAREOMAT_…` hat Vorrang |
+| `data/secrets.json` | Der unter «Externe Daten» eingegebene ENTSO-E-Token. Nie in der Datenbank und nie in der Sicherung |
 | `data/shareomat.db` | Gemeinschaft, Teilnehmer, Messpunkte, Verträge/Tarife, offizielle Messdaten, Abrechnungen — die eigentliche Anwendungsdatenbank |
 | `data/state/` | Swisseldex-Empfangsarchiv und -Status, Sicherungen |
 
@@ -136,9 +138,9 @@ Was dabei geschieht:
   nichts überschrieben. `live.db` und `coordinator.db` entstehen beim Start neu.
 * Alle Login-Sitzungen der wiederhergestellten Datenbank sind beendet; man meldet sich neu an.
   Die Wiederherstellung steht im Audit-Protokoll.
-* Zugangsdaten (MQTT, IMAP, Swisseldex, SMTP) sind nicht in der Sicherung. Sie gehören in die
-  Konfiguration `config/leg_config.yaml` und müssen auf einem neuen Rechner dort eingetragen
-  werden.
+* Zugangsdaten (MQTT, Swisseldex, SMTP, ENTSO-E-Token) sind nicht in der Sicherung. Sie gehören
+  in `config/secrets.yaml` (oder in Umgebungsvariablen) und müssen auf einem neuen Rechner dort
+  wieder eingetragen werden; einen unter «Externe Daten» eingegebenen Token dort neu eingeben.
 
 Jede neue Sicherung besteht diese Prüfungen schon beim Erstellen (Wiederherstellungsprobe):
 Eine Datei in der Sicherungsliste lässt sich also öffnen.

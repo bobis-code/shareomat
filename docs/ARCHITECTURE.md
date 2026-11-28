@@ -123,6 +123,12 @@ sources").
 * **Ausgang:** Web-UI (Abrechnungen, Belege als PDF), optional MQTT-Topics
   unter `{prefix}/...` (Engine-Status, Live-Werte; siehe
   `docs/emsomat-integration.md`).
+* **Zugangsdaten:** nie in der Datenbank, nie in der Sicherung (ADR-0012 Punkt 10).
+  `shareomat/config.py` lädt in fester Rangfolge Konfigurationsdatei, Geheimnisdatei
+  (`secrets.yaml`, unter Linux nur für Shareomat lesbar) und Umgebungsvariablen
+  `SHAREOMAT_…`; der in der Weboberfläche eingegebene ENTSO-E-Token liegt im
+  Geheimnisspeicher `data/secrets.json` (`shareomat/secret_store.py`). Kein Geheimnis
+  erscheint in einer `repr`, im Protokoll oder auf einer Seite.
 * **Persistenz:** `data/shareomat.db` (SQLite, Stammdaten + Betriebs­daten),
   `data/live.db` (letzte Live-Werte, ADR-0007), `data/coordinator.db`
   (Lastprognose und Day-Ahead-Preise für Emsomat, siehe §8),

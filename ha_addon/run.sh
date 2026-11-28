@@ -4,12 +4,9 @@ set -e
 
 echo "[INFO] Shareomat Add-on starting..."
 
-# Ensure persistent data directories exist in the HA config area
-mkdir -p \
-    /config/shareomat/inbox   \
-    /config/shareomat/archive \
-    /config/shareomat/reports \
-    /config/shareomat/state
+# Ensure the persistent data directory exists in the HA config area
+# (inbox/archive/reports went with the CSV path in 0.6.34; old ones are left alone).
+mkdir -p /config/shareomat/state
 
 # Generate the technical runtime config from add-on options and write env file.
 # Community/participants/meters/tariffs are NOT generated here — they live in

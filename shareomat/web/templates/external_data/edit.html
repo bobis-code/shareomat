@@ -4,16 +4,36 @@
 {% block content %}
 
 <div class="card">
+  <h2>ENTSO-E API-Token</h2>
+  <p>{% if entsoe_token.set %}<span class="ana-ok">✓</span>{% endif %} {{ entsoe_token.status }}</p>
+  <p class="ts">Für Day-Ahead-Preise und Erzeugungsprofile (Marktprognose). Kostenlos, Registrierung unter
+    <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener">transparency.entsoe.eu</a>.
+    Der Token wird nie angezeigt und steht nicht in der Datenbank und nicht in der Sicherung.</p>
+  {% if entsoe_token.changeable %}
+  <form class="form-card" method="post" action="{{ url_for('external_data', suffix='/entsoe_token') }}" autocomplete="off">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="entsoe_api_token">{{ 'Neuer Token' if entsoe_token.set else 'Token' }}</label>
+      <input type="password" id="entsoe_api_token" name="entsoe_api_token" autocomplete="new-password">
+    </div>
+    {% if needs_password_confirm %}
+    <div class="field">
+      <label for="entsoe_confirm_password">Ihr Shareomat-Passwort (zur Bestätigung)</label>
+      <input type="password" id="entsoe_confirm_password" name="confirm_password" autocomplete="current-password" required>
+    </div>
+    {% endif %}
+    <div class="actions-row">
+      <button type="submit">{{ 'Token ersetzen' if entsoe_token.set else 'Token hinterlegen' }}</button>
+      {% if entsoe_token.set %}<button type="submit" name="delete" value="1" class="btn-secondary">Token löschen</button>{% endif %}
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
   <h2>Grundeinstellungen</h2>
   <form class="form-card" method="post" action="{{ url_for('external_data', suffix='/settings') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field">
-      <label for="entsoe_api_token">ENTSO-E API-Token</label>
-      <input type="text" id="entsoe_api_token" name="entsoe_api_token"
-             value="{{ settings.entsoe_api_token }}" placeholder="noch nicht hinterlegt">
-      <div class="field-hint">Für Day-Ahead-Preise und Erzeugungsprofile (Marktprognose). Kostenlos, Registrierung unter
-        <a href="https://transparency.entsoe.eu/" target="_blank" rel="noopener">transparency.entsoe.eu</a>.</div>
-    </div>
     <div class="field">
       <label for="municipality_bfs_number">BFS-Gemeindenummer (Standard für ElCom-Abgleich)</label>
       <input type="number" id="municipality_bfs_number" name="municipality_bfs_number"

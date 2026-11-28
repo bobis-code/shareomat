@@ -21,7 +21,7 @@ mqtt:
   broker: "localhost"
   port: 1883
   username: ""
-  password: ""
+  # password: in config/secrets.yaml (see secrets.example.yaml), never here
   client_id: "shareomat"
   topic_prefix: "shareomat"
   discovery_prefix: "homeassistant"
@@ -37,7 +37,7 @@ email:
   imap_host: "imap.gmail.com"
   imap_port: 993
   username: ""
-  password: ""
+  # password: in config/secrets.yaml (see secrets.example.yaml), never here
   folder: "INBOX"
   allowed_senders: []
   poll_interval_seconds: 300
@@ -48,7 +48,7 @@ swisseldex:
   host: "datahub.swisseldex.ch"
   port: 21
   username: ""
-  password: ""
+  # password: in config/secrets.yaml (see secrets.example.yaml), never here
   auto_sync: false
   sync_interval_hours: 6
 
@@ -60,7 +60,7 @@ smtp:
   port: 465
   security: "ssl"
   username: ""
-  password: ""
+  # password: in config/secrets.yaml (see secrets.example.yaml), never here
   from_address: ""
   from_name: ""
 
@@ -89,7 +89,7 @@ wan:
   broker: ""  # e.g. "mqtt.shareomat.ch" - required if enabled
   port: 8883
   username: ""
-  password: ""
+  # password: in config/secrets.yaml (see secrets.example.yaml), never here
   tls_enabled: true
   tls_ca_cert: ""
   group_id: ""  # stable internal LEG ID - required if enabled, NO human-readable names

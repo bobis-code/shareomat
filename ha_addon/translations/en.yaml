@@ -117,3 +117,7 @@ configuration:
     name: IMAP poll interval (no longer used)
     description: >-
       Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  entsoe_api_token:
+    name: ENTSO-E token (optional)
+    description: >-
+      For day-ahead prices to Emsomat (free at transparency.entsoe.eu). Set here, it wins over the entry on Externe Daten. Never stored in the database or the Shareomat backup.

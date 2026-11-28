@@ -5,9 +5,12 @@ File: generate_runtime_config.py
 Purpose:
     Reads Home Assistant add-on options from /data/options.json and
     generates the technical runtime configuration Shareomat reads at
-    startup (paths, MQTT, e-mail import, web port). Also writes
-    /tmp/shareomat_env so run.sh can export runtime environment
-    variables (timezone, log level).
+    startup (paths, MQTT, Swisseldex, SMTP, web port), without any
+    credential. The credentials go to a separate secrets file in the
+    add-on's private /data (0600, ADR-0012 pt. 10): /config is visible to
+    other add-ons (File editor, Samba). Also writes /tmp/shareomat_env so
+    run.sh can export runtime environment variables (timezone, log level,
+    paths).
 
 Part of:
     Shareomat — Home Assistant Add-on
@@ -39,6 +42,7 @@ import yaml
 
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_OUTPUT = Path("/config/shareomat/leg_config.yaml")
+SECRETS_OUTPUT = Path("/data/secrets.yaml")
 ENV_OUTPUT = Path("/tmp/shareomat_env")
 EMSOMAT_MANIFEST = Path("/config/custom_components/emsomat/manifest.json")
 
@@ -51,7 +55,10 @@ _SPARKPLUG_ID = re.compile(r"^[^/+#\s\x00-\x1f\x7f]{1,64}$")
 # Runtime (technical) keys this script owns; every other top-level key in an
 # existing CONFIG_OUTPUT file (legacy "leg"/"participants"/"meters"/"tariffs")
 # is preserved as-is until Shareomat's one-time database import consumes it.
-_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex", "smtp", "paperless"}
+_RUNTIME_SECTIONS = {"paths", "mqtt", "email", "web", "swisseldex", "smtp", "paperless", "entsoe"}
+# Credentials: (section, key) taken out of the config file and written to SECRETS_OUTPUT.
+_SECRET_KEYS = (("mqtt", "password"), ("email", "password"), ("swisseldex", "password"), ("smtp", "password"),
+                ("entsoe", "api_token"))
 
 _SWISSELDEX_HOST = "datahub.swisseldex.ch"
 _SWISSELDEX_INTERVALS = (1, 3, 6, 12, 24)
@@ -155,6 +162,35 @@ def _smtp_section(opts: dict) -> dict:
     }
 
 
+def _split_secrets(config: dict, opts: dict) -> dict:
+    """Move every credential out of `config`; return them as {section: {key: value}} (empty ones left out)."""
+    config["entsoe"] = {"api_token": str(opts.get("entsoe_api_token") or "").strip()}
+    secrets: dict = {}
+    for section, key in _SECRET_KEYS:
+        value = str((config.get(section) or {}).pop(key, "") or "")
+        if value:
+            secrets.setdefault(section, {})[key] = value
+    config.pop("entsoe", None)
+    return secrets
+
+
+def _write_private(path: Path, data: dict) -> None:
+    """Write `data` as YAML readable by the owner only, from the first byte, replacing the old file."""
+    import os
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp = tempfile.mkstemp(prefix=".secrets-", suffix=".tmp", dir=path.parent)
+    try:
+        if hasattr(os, "fchmod"):          # Linux (the add-on); tests may run elsewhere
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=True)
+        os.replace(temp, path)
+    except BaseException:
+        Path(temp).unlink(missing_ok=True)
+        raise
+
+
 def main() -> None:
     if not OPTIONS_PATH.exists():
         print(f"[ERROR] Options file not found: {OPTIONS_PATH}", file=sys.stderr)
@@ -229,16 +265,21 @@ def main() -> None:
     sparkplug = _sparkplug_section(opts, existing)
     if sparkplug is not None:
         config["sparkplug"] = sparkplug
+    secrets = _split_secrets(config, opts)
+    _write_private(SECRETS_OUTPUT, secrets)
+    print(f"[INFO] Credentials written to {SECRETS_OUTPUT} (owner only): "
+          f"{', '.join(sorted(f'{s}.{k}' for s, values in secrets.items() for k in values)) or 'none'}")
 
     CONFIG_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     with CONFIG_OUTPUT.open("w", encoding="utf-8") as f:
         yaml.dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    print(f"[INFO] Runtime config written to {CONFIG_OUTPUT}")
+    print(f"[INFO] Runtime config written to {CONFIG_OUTPUT} (without credentials)")
 
     timezone = opts.get("timezone", "Europe/Zurich")
     log_level = opts.get("log_level", "info").upper()
     env_lines = [
         f'export SHAREOMAT_CONFIG_PATH="{CONFIG_OUTPUT}"',
+        f'export SHAREOMAT_SECRETS_PATH="{SECRETS_OUTPUT}"',
         f'export SHAREOMAT_DB_PATH="/data/shareomat.db"',
         f'export SHAREOMAT_TZ="{timezone}"',
         f'export SHAREOMAT_LOG_LEVEL="{log_level}"',

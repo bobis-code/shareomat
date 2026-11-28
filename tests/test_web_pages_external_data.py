@@ -31,15 +31,19 @@ def test_get_renders_page(db_path):
     assert "ENTSO-E" in html
 
 
-def test_post_settings_saves_token_and_municipality(db_path):
+def test_post_settings_saves_the_municipality_and_never_a_token(db_path):
     ctx = RequestContext(
         method="POST", ingress_path="", segments=["settings"],
         form={"entsoe_api_token": "  my-token  ", "municipality_bfs_number": "5250"},
     )
     assert external_data.handle_post(ctx) is None
-    settings = get_external_data_settings(db_path)
-    assert settings.entsoe_api_token == "my-token"
-    assert settings.municipality_bfs_number == "5250"
+    assert get_external_data_settings(db_path).municipality_bfs_number == "5250"
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM settings WHERE setting_value LIKE '%my-token%'").fetchone()[0] == 0
+    finally:
+        conn.close()
 
 
 def test_elcom_fetch_remembers_municipality_as_new_default(db_path, monkeypatch):

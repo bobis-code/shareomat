@@ -3,7 +3,8 @@
 File: shareomat/web/pages/external_data.py
 
 Purpose:
-    "Externe Daten" admin page: ENTSO-E API token, on-demand ElCom tariff
+    "Externe Daten" admin page: ENTSO-E API token (status only, kept in the
+    secret store), on-demand ElCom tariff
     lookup, on-demand SNB exchange rate lookup, on-demand BFE official
     reference-price fetch, and a log of recent external data fetches.
 
@@ -181,6 +182,45 @@ def _swisseldex_view(receiver) -> dict | None:
     return view
 
 
+_TOKEN_SOURCE_TEXT = {
+    "store": "hinterlegt (hier eingegeben)",
+    "secrets_file": "hinterlegt (aus der Add-on-Option bzw. Geheimnisdatei, hier nicht änderbar)",
+    "environment": "hinterlegt (aus der Umgebungsvariable, hier nicht änderbar)",
+}
+
+
+def _token_view(db_path) -> dict:
+    """Status of the ENTSO-E token: never the value, only whether and where it is set."""
+    from shareomat.secret_store import ENTSOE_API_TOKEN, SOURCE_STORE, resolve
+    _, source = resolve(db_path, ENTSOE_API_TOKEN)
+    return {"set": bool(source), "status": _TOKEN_SOURCE_TEXT.get(source, "nicht hinterlegt"),
+            "changeable": source in ("", SOURCE_STORE)}
+
+
+def _save_entsoe_token(ctx: RequestContext) -> None:
+    """Replace or delete the token in the secret store (the password check runs in the server first)."""
+    from shareomat.database.audit import log_event
+    from shareomat.secret_store import ENTSOE_API_TOKEN, SecretStore, SecretStoreError, store_path
+
+    if not _token_view(ctx.db_path)["changeable"]:
+        raise FormError("Der Token kommt aus der Add-on-Option bzw. Umgebung und lässt sich hier nicht ändern.")
+    store = SecretStore(store_path(ctx.db_path))
+    try:
+        if ctx.form.get("delete") == "1":
+            if store.delete(ENTSOE_API_TOKEN):
+                log_event(ctx.db_path, "secrets", ENTSOE_API_TOKEN, "deleted", "ENTSO-E-Token gelöscht")
+            get_state().set_flash("ENTSO-E-Token gelöscht.", ok=True)
+            return
+        token = (ctx.form.get("entsoe_api_token") or "").strip()
+        if not token:
+            raise FormError("Bitte den neuen Token eingeben.")
+        store.set(ENTSOE_API_TOKEN, token)
+    except SecretStoreError as exc:
+        raise FormError(f"Token nicht gespeichert: {exc}")
+    log_event(ctx.db_path, "secrets", ENTSOE_API_TOKEN, "changed", "ENTSO-E-Token neu hinterlegt")
+    get_state().set_flash("ENTSO-E-Token hinterlegt.", ok=True)
+
+
 def handle_get(ctx: RequestContext) -> str:
     """Render settings, fetched-data tables, and the recent-imports log."""
     settings = get_external_data_settings(ctx.db_path)
@@ -193,7 +233,7 @@ def handle_get(ctx: RequestContext) -> str:
     )
     return render_page(
         "external_data/edit.html", ctx, "external_data",
-        settings=settings, imports=imports, now_year=date.today().year,
+        settings=settings, imports=imports, now_year=date.today().year, entsoe_token=_token_view(ctx.db_path),
         pv_reference_prices=pv_reference_prices,
         exchange_rates=exchange_rates,
         elcom_tariffs=elcom_tariffs,
@@ -242,9 +282,12 @@ def _handle_post(ctx: RequestContext) -> str | None:
             )
         return None
 
+    if action == "entsoe_token":
+        _save_entsoe_token(ctx)
+        return None
+
     if action == "settings":
         save_external_data_settings(ctx.db_path, ExternalDataSettings(
-            entsoe_api_token=(ctx.form.get("entsoe_api_token") or "").strip(),
             municipality_bfs_number=(ctx.form.get("municipality_bfs_number") or "").strip(),
         ))
         get_state().set_flash("Grundeinstellungen gespeichert.", ok=True)
@@ -261,10 +304,7 @@ def _handle_post(ctx: RequestContext) -> str | None:
         # that's the "feste Ortschaft hinterlegen" behaviour: use once, stays pre-filled next time.
         current_settings = get_external_data_settings(ctx.db_path)
         if current_settings.municipality_bfs_number != str(municipality):
-            save_external_data_settings(ctx.db_path, ExternalDataSettings(
-                entsoe_api_token=current_settings.entsoe_api_token,
-                municipality_bfs_number=str(municipality),
-            ))
+            save_external_data_settings(ctx.db_path, ExternalDataSettings(municipality_bfs_number=str(municipality)))
 
         try:
             tariffs = download_elcom_tariffs(municipality, year)

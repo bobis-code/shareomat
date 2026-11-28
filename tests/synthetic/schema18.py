@@ -56,7 +56,6 @@ from shareomat.database.data_imports import record_import
 from shareomat.database.elcom_tariffs import save_elcom_tariffs
 from shareomat.database.email_templates import save_email_template
 from shareomat.database.exchange_rates import save_exchange_rates
-from shareomat.database.external_settings import save_external_data_settings
 from shareomat.database.memberships import confirm_review
 from shareomat.database.meters import assign_meter_to_participant, create_meter, set_meter_active
 from shareomat.database.participant_contract import (
@@ -81,7 +80,7 @@ from shareomat.external_data.elcom import ElcomTariffComponents
 from shareomat.external_data.market_forecast import ExchangeRate
 from shareomat.models.community import Community
 from shareomat.models.contract import ContractSettings, ContractVersion
-from shareomat.models.external_data import DataImportRecord, ExternalDataSettings, ReferencePrice, SupplierTariff
+from shareomat.models.external_data import DataImportRecord, ReferencePrice, SupplierTariff
 from shareomat.models.invoicing import PaymentProfile
 from shareomat.models.live_source import ADAPTER_EMSOMAT_LOCAL, ADAPTER_HA_MQTT
 from shareomat.models.meter import Meter
@@ -624,7 +623,10 @@ def _settings(db: Path) -> None:
     save_email_template(db, "invoice", "Ihre Rechnung {belegnummer}",
                         "Guten Tag {name}\n\nSynthetische Vorlage für {belegnummer}.")
     save_swisseldex_schedule(db, True, 6)
-    save_external_data_settings(db, ExternalDataSettings(entsoe_api_token=ENTSOE_TEST_TOKEN, municipality_bfs_number="9999"))
+    # As 0.6.31 stored them: the token was a `settings` row until 0.6.34 (now the secret store, which
+    # moves such a row on the first start); the municipality right after it.
+    set_setting(db, "entsoe_api_token", ENTSOE_TEST_TOKEN)
+    set_setting(db, "municipality_bfs_number", "9999")
 
 
 def _accounts(db: Path) -> None:

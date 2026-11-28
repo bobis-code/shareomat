@@ -92,11 +92,15 @@ def test_data_import_log_is_append_only_and_ordered(db_path):
     assert imports[0].detail == "timeout"
 
 
-def test_external_data_settings_default_empty_token(db_path):
-    settings = get_external_data_settings(db_path)
-    assert settings.entsoe_api_token == ""
+def test_external_data_settings_default_empty(db_path):
+    assert get_external_data_settings(db_path) == ExternalDataSettings()
 
 
 def test_external_data_settings_roundtrip(db_path):
-    save_external_data_settings(db_path, ExternalDataSettings(entsoe_api_token="secret-token-123"))
-    assert get_external_data_settings(db_path).entsoe_api_token == "secret-token-123"
+    save_external_data_settings(db_path, ExternalDataSettings(municipality_bfs_number="5250"))
+    assert get_external_data_settings(db_path).municipality_bfs_number == "5250"
+
+
+def test_the_token_is_no_external_data_setting_any_more():
+    """Since 0.6.35 the ENTSO-E token is a secret (shareomat.secret_store), never a database setting."""
+    assert not hasattr(ExternalDataSettings(), "entsoe_api_token")

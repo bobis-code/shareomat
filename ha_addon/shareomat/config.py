@@ -24,9 +24,10 @@ Notes:
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -67,7 +68,7 @@ class PathConfig:
     archive: Path
     reports: Path
     state: Path
-    share_inbox: str = ""  # Not used since 0.6.34 (CSV path removed, ADR-0012); add-on option kept until P3
+    share_inbox: str = ""  # Not used since 0.6.34 (CSV path removed, ADR-0012); add-on option kept until the new configuration (P7)
     backups: Path | None = None  # "Sicherung erstellen" target; None = <state>/backups
 
 
@@ -96,7 +97,7 @@ class MqttConfig:
     broker: str = "localhost"
     port: int = DEFAULT_MQTT_PORT
     username: str = ""
-    password: str = ""
+    password: str = field(default="", repr=False)
     client_id: str = "shareomat"
     topic_prefix: str = DEFAULT_TOPIC_PREFIX
     discovery_prefix: str = "homeassistant"
@@ -121,7 +122,7 @@ class EmailConfig:
     imap_host: str = "imap.gmail.com"
     imap_port: int = DEFAULT_IMAP_PORT
     username: str = ""
-    password: str = ""             # Gmail: use an App Password, never the account password
+    password: str = field(default="", repr=False)   # Gmail: an App Password, never the account password
     folder: str = "INBOX"
     allowed_senders: list[str] = field(default_factory=list)  # empty = accept any sender
     poll_interval_seconds: int = 300
@@ -181,7 +182,7 @@ class WanConfig:
     broker: str = ""
     port: int = 8883
     username: str = ""
-    password: str = ""
+    password: str = field(default="", repr=False)
     tls_enabled: bool = True
     tls_ca_cert: str = ""
     group_id: str = ""
@@ -273,6 +274,21 @@ def smtp_problems(smtp: SmtpConfig) -> list[str]:
 
 
 @dataclass
+class EntsoeConfig:
+    """ENTSO-E Transparency Platform token (day-ahead prices for Emsomat).
+
+    Only set here when it comes from the secrets file (HA add-on option) or
+    the environment; otherwise the web UI keeps it in the secret store
+    (shareomat.secret_store). Never in the database since 0.6.35.
+    """
+
+    api_token: str = ""
+
+    def __repr__(self) -> str:
+        return f"EntsoeConfig(api_token={'set' if self.api_token else 'empty'})"
+
+
+@dataclass
 class RuntimeConfig:
     """The technical configuration that comes from Docker/Home-Assistant options, not SQLite."""
 
@@ -287,6 +303,9 @@ class RuntimeConfig:
     # Paperless-ngx base URL for evidence links (shareomat.core.paperless). Only
     # a link target for the operator's browser — Shareomat never calls it.
     paperless_url: str = ""
+    entsoe: EntsoeConfig = field(default_factory=EntsoeConfig)
+    # Where each secret that is set came from ("section.key" -> SECRET_SOURCE_*); names only, no values.
+    secret_sources: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -475,12 +494,87 @@ def _parse_paperless(raw: dict[str, Any]) -> str:
         return ""
 
 
-def load_runtime_config(config_path: Path) -> RuntimeConfig:
-    """Read the technical runtime configuration YAML (paths, MQTT, e-mail, web port)."""
+# Every secret of the runtime configuration: (section, key) -> environment variable.
+SECRET_FIELDS: dict[tuple[str, str], str] = {
+    ("mqtt", "password"): "SHAREOMAT_MQTT_PASSWORD",
+    ("email", "password"): "SHAREOMAT_EMAIL_PASSWORD",
+    ("wan", "password"): "SHAREOMAT_WAN_PASSWORD",
+    ("swisseldex", "password"): "SHAREOMAT_SWISSELDEX_PASSWORD",
+    ("smtp", "password"): "SHAREOMAT_SMTP_PASSWORD",
+    ("entsoe", "api_token"): "SHAREOMAT_ENTSOE_API_TOKEN",
+}
+SECRET_SOURCE_CONFIG_FILE = "config_file"     # in the configuration file itself (discouraged)
+SECRET_SOURCE_SECRETS_FILE = "secrets_file"   # in the secrets file (HA add-on option, or by hand)
+SECRET_SOURCE_ENVIRONMENT = "environment"
+SECRETS_FILENAME = "secrets.yaml"
+
+
+def secrets_file_path(config_path: Path, environ: Mapping[str, str] | None = None) -> Path:
+    """SHAREOMAT_SECRETS_PATH, else `secrets.yaml` next to the configuration file."""
+    override = (environ if environ is not None else os.environ).get("SHAREOMAT_SECRETS_PATH", "").strip()
+    return Path(override) if override else Path(config_path).parent / SECRETS_FILENAME
+
+
+def _apply_secrets(raw: dict[str, Any], secrets_path: Path, environ: Mapping[str, str]) -> dict[str, str]:
+    """Merge the secrets file and the environment into `raw`, later wins: file < secrets file < environment.
+
+    The secrets file holds only secrets; on Linux it is refused if other users
+    can read it (the start fails with a clear message instead). Returns where
+    each set secret came from - names only, never values.
+    """
+    from shareomat.secret_store import SecretStoreError, check_private_file
+
+    sources: dict[str, str] = {}
+    for (section, key) in SECRET_FIELDS:
+        if str((raw.get(section) or {}).get(key) or ""):
+            sources[f"{section}.{key}"] = SECRET_SOURCE_CONFIG_FILE
+    if sources:
+        logger.warning("Credentials in the configuration file (%s): better move them to %s",
+                       ", ".join(sorted(sources)), secrets_path.name)
+    if secrets_path.exists():
+        check_private_file(secrets_path)
+        try:
+            secret_raw = yaml.safe_load(secrets_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise SecretStoreError(f"{secrets_path} kann nicht gelesen werden: {type(exc).__name__}") from exc
+        if not isinstance(secret_raw, dict):
+            raise SecretStoreError(f"{secrets_path} hat kein gültiges Format.")
+        unknown = sorted(f"{section}.{key}" for section, values in secret_raw.items() if isinstance(values, dict)
+                         for key in values if (section, key) not in SECRET_FIELDS)
+        if unknown:
+            logger.warning("Unknown entries in %s ignored: %s", secrets_path.name, ", ".join(unknown))
+        for (section, key) in SECRET_FIELDS:
+            value = str(((secret_raw.get(section) or {}) if isinstance(secret_raw.get(section), dict) else {}).get(key) or "")
+            if value:
+                raw.setdefault(section, {})
+                if raw[section] is None:
+                    raw[section] = {}
+                raw[section][key] = value
+                sources[f"{section}.{key}"] = SECRET_SOURCE_SECRETS_FILE
+    for (section, key), variable in SECRET_FIELDS.items():
+        value = environ.get(variable, "")
+        if value:
+            raw.setdefault(section, {})
+            if raw[section] is None:
+                raw[section] = {}
+            raw[section][key] = value
+            sources[f"{section}.{key}"] = SECRET_SOURCE_ENVIRONMENT
+    return sources
+
+
+def load_runtime_config(config_path: Path, *, secrets_path: Path | None = None,
+                        environ: Mapping[str, str] | None = None) -> RuntimeConfig:
+    """Read the technical runtime configuration: file, then secrets file, then environment (ADR-0012 pt. 10).
+
+    Raises shareomat.secret_store.SecretStoreError if the secrets file can't be
+    used safely (readable by others, broken) - the start then shows the error.
+    """
     logger.info("Loading runtime config from %s", config_path)
+    environ = os.environ if environ is None else environ
 
     with config_path.open(encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f) or {}
+    sources = _apply_secrets(raw, secrets_path or secrets_file_path(config_path, environ), environ)
 
     return RuntimeConfig(
         paths=_parse_paths(raw),
@@ -492,6 +586,8 @@ def load_runtime_config(config_path: Path) -> RuntimeConfig:
         swisseldex=_parse_swisseldex(raw),
         smtp=_parse_smtp(raw),
         paperless_url=_parse_paperless(raw),
+        entsoe=EntsoeConfig(api_token=str((raw.get("entsoe") or {}).get("api_token") or "").strip()),
+        secret_sources=sources,
     )
 
 

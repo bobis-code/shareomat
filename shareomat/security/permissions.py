@@ -34,6 +34,7 @@ PERMISSIONS = {
     "system.configure": "System und Automatisierung einstellen",
     "backup.manage": "Sicherungen erstellen und herunterladen",
     "raw_backup.configure": "Rohdatensicherung (Netzwerkspeicher) einstellen",
+    "secrets.change": "Zugangsdaten (Token, Passwörter) ändern",
     "account.self": "Eigenes Konto (Passwort, Geräte)",
 }
 
@@ -68,6 +69,8 @@ def required_permission(method: str, route: str, segments: list[str]) -> str:
         return "account.self" if route == "account" else "view"
     if route == "settings" and segments[:1] == ["raw_backup"]:
         return "raw_backup.configure"   # where the untouched originals go: password again, audit log
+    if route == "external_data" and segments[:1] == ["entsoe_token"]:
+        return "secrets.change"         # a secret: password again, audit log without the value
     if route == "invoices":
         if segments[:1] == ["settings"]:
             return "payment_profile.change"

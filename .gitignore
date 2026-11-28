@@ -238,6 +238,11 @@ data/shareomat.db-shm
 # local config with credentials — never commit
 config/leg_config.yaml
 
+# credentials outside the database (ADR-0012 pt. 10) — never commit, wherever they are
+secrets.yaml
+secrets.json
+.secrets-*.tmp
+
 # local working status/todo list — not for the public repo
 TODO.md
 

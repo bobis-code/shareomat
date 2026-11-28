@@ -23,9 +23,8 @@ from shareomat.core.pipeline import export_price_forecast as prices
 from shareomat.database import billing
 from shareomat.database.consumption_forecasts import latest_computed_at, list_consumption_forecasts, save_consumption_forecast
 from shareomat.database.day_ahead_prices import list_day_ahead_prices
-from shareomat.database.external_settings import save_external_data_settings
 from shareomat.database.sqlite import init_db
-from shareomat.models.external_data import ExternalDataSettings
+from shareomat.secret_store import ENTSOE_API_TOKEN, SecretStore, store_path
 from shareomat.models.forecast import ConsumptionForecastPoint
 from shareomat.sparkplug.coordinator_store import coordinator_db_path, init_coordinator_db
 from shareomat.sparkplug.host import SparkplugHost
@@ -62,7 +61,7 @@ def _host():
 
 
 def _with_prices(db, monkeypatch):
-    save_external_data_settings(db, ExternalDataSettings(entsoe_api_token="t"))
+    SecretStore(store_path(db)).set(ENTSOE_API_TOKEN, "t")
     monkeypatch.setattr(prices, "download_day_ahead_prices", lambda *a, **k: [
         SimpleNamespace(start=SOON + timedelta(hours=i), price_eur_mwh=Decimal("100")) for i in range(24)
     ])

@@ -32,3 +32,15 @@ def isolate_web_state(monkeypatch):
     from shareomat.web.state import WebState
 
     monkeypatch.setattr(_ws, "_state", WebState())
+
+
+@pytest.fixture(autouse=True)
+def isolate_fixed_secrets(monkeypatch):
+    """No test sees a secret another test registered (shareomat.secret_store.register_fixed_secrets);
+    SHAREOMAT_* secret variables of the developer's shell never reach a test."""
+    import shareomat.secret_store as store
+    from shareomat.config import SECRET_FIELDS
+
+    for variable in (*SECRET_FIELDS.values(), "SHAREOMAT_SECRETS_PATH", "SHAREOMAT_SECRET_STORE_PATH"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(store, "_fixed", {})

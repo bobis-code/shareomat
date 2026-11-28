@@ -53,6 +53,7 @@ not here — see "Ersteinrichtung" below.
 | `log_level` | Log verbosity (`debug/info/warning/error`) | `info` |
 | `mqtt_tls` / `mqtt_ca_cert` | MQTT broker TLS | `false` / |
 | `ingress_enabled` | Enable the Shareomat web interface | `true` |
+| `entsoe_api_token` | ENTSO-E token for day-ahead prices to Emsomat (optional). Wins over the entry on *Externe Daten* | |
 | `share_inbox`, `email_*` (IMAP import) | Not used since 0.6.34: meter data comes only from the grid operator via Swisseldex. The options stay so that an existing configuration keeps loading; they will be removed with the new configuration interface. | |
 
 ## Ersteinrichtung
@@ -122,10 +123,12 @@ add-on's own persistent `/data` (both survive add-on updates):
 * `manifest.json`: schema version and SHA-256 of every file (re-checked
   after writing).
 
-Add-on options (MQTT, IMAP, Swisseldex, SMTP credentials) are **not** included. Exception for
-now: the ENTSO-E token entered under *Externe Daten* is stored in the database and therefore is
-in the backup; it moves to the add-on options with the rebuild. The file contains all personal
-data of the community, so store it safely.
+Credentials (MQTT, Swisseldex, SMTP passwords, the ENTSO-E token) are **not** included. Since
+0.6.35 the add-on writes them to `/data/secrets.yaml` (readable by the add-on only) instead of
+`/config/shareomat/leg_config.yaml`, and the ENTSO-E token is no longer in the database: on the
+first start it moves from there into `/data/secrets.json`, and the database is rebuilt so no copy
+of it stays in the file. Backups made before 0.6.35 still contain the token. The backup file
+contains all personal data of the community, so store it safely.
 Downloading needs the password again if it was last entered more than
 10 minutes ago, and every creation and download is in the audit log.
 Shareomat never deletes old backups.

@@ -12,10 +12,10 @@ import main as app_main
 from shareomat.config import LegConfig, MqttConfig, PathConfig, ProcessingConfig
 from shareomat.database.consumption_forecasts import save_consumption_forecast
 from shareomat.database.day_ahead_prices import list_day_ahead_prices, save_day_ahead_prices
-from shareomat.database.external_settings import save_external_data_settings
 from shareomat.database.sqlite import init_db
 from shareomat.models.community import Community
-from shareomat.models.external_data import DayAheadPricePoint, ExternalDataSettings
+from shareomat.models.external_data import DayAheadPricePoint
+from shareomat.secret_store import ENTSOE_API_TOKEN, SecretStore, store_path
 from shareomat.models.forecast import ConsumptionForecastPoint
 from shareomat.models.tariff import Tariff
 
@@ -111,7 +111,6 @@ def test_publish_coordinator_sparkplug_uses_native_resolution_export_price(tmp_p
 def test_recompute_export_price_skips_without_token(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
-    save_external_data_settings(db_path, ExternalDataSettings(entsoe_api_token=""))
 
     calls = []
     monkeypatch.setattr(app_main, "fetch_and_persist_day_ahead_prices", lambda *a, **k: calls.append(1))
@@ -124,7 +123,7 @@ def test_recompute_export_price_skips_without_token(tmp_path, monkeypatch) -> No
 def test_recompute_export_price_fetches_with_configured_token(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
-    save_external_data_settings(db_path, ExternalDataSettings(entsoe_api_token="real-token"))
+    SecretStore(store_path(db_path)).set(ENTSOE_API_TOKEN, "real-token")
 
     calls = []
     monkeypatch.setattr(app_main, "fetch_and_persist_day_ahead_prices", lambda db_path, api_token: calls.append(api_token))
@@ -137,7 +136,7 @@ def test_recompute_export_price_fetches_with_configured_token(tmp_path, monkeypa
 def test_recompute_export_price_throttles_within_interval(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "shareomat.db"
     init_db(db_path)
-    save_external_data_settings(db_path, ExternalDataSettings(entsoe_api_token="real-token"))
+    SecretStore(store_path(db_path)).set(ENTSOE_API_TOKEN, "real-token")
     save_day_ahead_prices(app_main._coordinator_store(db_path), [DayAheadPricePoint(slot_start=datetime.now(timezone.utc), price_chf_kwh=Decimal("0.1"))])
 
     calls = []

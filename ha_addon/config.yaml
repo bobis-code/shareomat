@@ -84,6 +84,9 @@ options:
   # Optional: Adresse von Paperless-ngx (z. B. http://homeassistant.local:8000) für
   # Links zu Nachweisen. Shareomat ruft Paperless nie selbst auf.
   paperless_url: ""
+  # Optional: ENTSO-E-Token für Day-Ahead-Preise an Emsomat. Alternativ unter
+  # Externe Daten eingeben. Hier gesetzt, hat er Vorrang.
+  entsoe_api_token: ""
 
 schema:
   mqtt_host: str
@@ -131,3 +134,4 @@ schema:
     from_address: str
     from_name: str?
   paperless_url: str?
+  entsoe_api_token: password?

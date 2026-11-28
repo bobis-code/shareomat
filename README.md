@@ -158,14 +158,23 @@ and logged in a recent-imports history on the same page.
 
 ## Configuration
 
-Shareomat splits configuration into two places, deliberately:
+Shareomat splits configuration into three places, deliberately:
 
-- **`leg_config.yaml`** (technical runtime settings only) — paths, MQTT
-  broker, Swisseldex, Sparkplug, web server port. For the add-on this is generated
-  from the add-on options; for standalone use, copy
+- **`leg_config.yaml`** (technical runtime settings only, no credentials) — paths,
+  MQTT broker, Swisseldex, Sparkplug, web server port. For the add-on this is
+  generated from the add-on options; for standalone use, copy
   `config/leg_config.example.yaml` to `config/leg_config.yaml` and edit the
-  local file. It is intentionally ignored by Git because it may contain
-  broker addresses and MQTT/Swisseldex credentials.
+  local file. It is ignored by Git because it holds broker addresses.
+- **Credentials** (passwords, the ENTSO-E token) — never in the database or in a
+  backup (ADR-0012). One place loads them, the later source wins: the config
+  file, then the secrets file `config/secrets.yaml` (copy
+  `config/secrets.example.yaml`; on Linux `chmod 600`, otherwise the start is
+  refused), then environment variables (`SHAREOMAT_MQTT_PASSWORD`,
+  `SHAREOMAT_SWISSELDEX_PASSWORD`, `SHAREOMAT_SMTP_PASSWORD`,
+  `SHAREOMAT_WAN_PASSWORD`, `SHAREOMAT_ENTSOE_API_TOKEN`). The add-on writes the
+  secrets file itself, into its private `/data`. The ENTSO-E token can also be
+  entered on **Externe Daten**; it is then kept in `data/secrets.json`, shown
+  only as "hinterlegt", and changing it needs the password again.
 - **The admin web interface** (backed by `data/shareomat.db`) —
   Gemeinschaft, Teilnehmer, Messpunkte, Vertrag (which governs Tarife), and
   automation settings. This is the data that actually changes as a LEG
@@ -180,8 +189,9 @@ Shareomat splits configuration into two places, deliberately:
 | `web.enabled` / `port` | Admin web interface — always available; standalone (`http://localhost:8099`) or, if run as the HA add-on, also behind Home Assistant Ingress |
 
 Never commit real passwords or private MQTT/Swisseldex credentials. Use the Home
-Assistant add-on options for add-on deployments, or keep local credentials
-only in the ignored `config/leg_config.yaml`.
+Assistant add-on options for add-on deployments, or keep local credentials only
+in the ignored `config/secrets.yaml` (`secrets.yaml` and `secrets.json` are
+git-ignored everywhere).
 
 Upgrading from a version where `leg_config.yaml` still contained
 `participants`/`meters`/`tariffs`/`leg`? Those sections are imported into

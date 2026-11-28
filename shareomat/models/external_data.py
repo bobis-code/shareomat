@@ -89,9 +89,12 @@ class DayAheadPricePoint:
 
 @dataclass
 class ExternalDataSettings:
-    """Credentials/settings for external data sources, entered via the web UI (never YAML)."""
+    """Settings for external data sources, entered via the web UI.
 
-    entsoe_api_token: str = ""
+    The ENTSO-E token is a secret and lives in shareomat.secret_store since
+    0.6.35 (ADR-0012 pt. 10), never in the database.
+    """
+
     municipality_bfs_number: str = ""  # default municipality for the ElCom tariff lookup
 
 

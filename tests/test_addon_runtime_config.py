@@ -22,6 +22,7 @@ def addon(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "OPTIONS_PATH", tmp_path / "options.json")
     monkeypatch.setattr(module, "CONFIG_OUTPUT", tmp_path / "leg_config.yaml")
     monkeypatch.setattr(module, "ENV_OUTPUT", tmp_path / "env")
+    monkeypatch.setattr(module, "SECRETS_OUTPUT", tmp_path / "secrets.yaml")   # read by load_runtime_config next to the config
     monkeypatch.setattr(module, "EMSOMAT_MANIFEST", tmp_path / "manifest.json")
     return module
 

@@ -65,11 +65,11 @@ from shareomat.core.pipeline.leg_billing import resolve_producer_rate_series
 from shareomat.database.config_builder import IncompleteConfigError, build_leg_config
 from shareomat.database.consumption_forecasts import latest_computed_at, list_consumption_forecasts, save_consumption_forecast
 from shareomat.database.day_ahead_prices import latest_fetched_at, list_day_ahead_prices
-from shareomat.database.external_settings import get_external_data_settings
 from shareomat.database.meter_readings import list_meter_readings
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
 from shareomat.ha.mqtt_runtime import setup_mqtt, shutdown_mqtt
+from shareomat.secret_store import ENTSOE_API_TOKEN, entsoe_api_token, move_database_secrets, register_fixed_secrets
 from shareomat.sparkplug import coordinator_mapping
 from shareomat.sparkplug.bridge import mirror_host_to_uplink
 from shareomat.sparkplug.coordinator_store import coordinator_db_path, ensure_separate_from, init_coordinator_db
@@ -143,7 +143,7 @@ def _maybe_recompute_export_price_forecast(db_path: Path) -> None:
     throttled (same pattern as _maybe_recompute_demand_forecast above). No-op without a configured
     ENTSO-E token - graceful degradation, not an error (see
     fetch_and_persist_day_ahead_prices())."""
-    token = get_external_data_settings(db_path).entsoe_api_token
+    token = entsoe_api_token(db_path)
     if not token:
         return
     store = _coordinator_store(db_path)
@@ -427,7 +427,7 @@ def _log_automatic_functions(runtime: RuntimeConfig, db_path: Path, sparkplug_ho
         logger.info("Automatic functions: Sparkplug is not active, no LEG data to Emsomat, no forecast, no price fetch")
         return
     try:
-        price_fetch = "active (ENTSO-E/SNB)" if get_external_data_settings(db_path).entsoe_api_token else "off (no ENTSO-E token)"
+        price_fetch = "active (ENTSO-E/SNB)" if entsoe_api_token(db_path) else "off (no ENTSO-E token)"
     except Exception:
         price_fetch = "unknown"
     logger.info(
@@ -721,9 +721,18 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
         return
 
     runtime.paths.state.mkdir(parents=True, exist_ok=True)
+    # Secrets from the secrets file or the environment win over the web UI store (ADR-0012 pt. 10).
+    register_fixed_secrets({ENTSOE_API_TOKEN: (runtime.entsoe.api_token,
+                                               runtime.secret_sources.get(ENTSOE_API_TOKEN, ""))})
 
     db_path = resolve_db_path()
     init_db(db_path)
+    try:
+        moved = move_database_secrets(db_path)
+        if moved:
+            logger.info("Secrets moved out of the database into the secret store: %s", ", ".join(moved))
+    except Exception:
+        logger.exception("Secrets in the database could not be moved; they stay where they are")
     try:
         if import_legacy_yaml_if_empty(db_path, _RUNTIME_CONFIG_PATH):
             logger.info("Legacy configuration imported into %s", db_path)

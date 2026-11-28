@@ -224,11 +224,13 @@ def test_addon_options_are_written_to_the_runtime_config(tmp_path, monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     for name, file in (("OPTIONS_PATH", "options.json"), ("CONFIG_OUTPUT", "leg_config.yaml"), ("ENV_OUTPUT", "env"),
-                       ("EMSOMAT_MANIFEST", "manifest.json")):
+                       ("EMSOMAT_MANIFEST", "manifest.json"), ("SECRETS_OUTPUT", "secrets.yaml")):
         monkeypatch.setattr(module, name, tmp_path / file)
     config = _generate(module, smtp={"enabled": True, "host": "smtp.example.ch", "port": 587, "security": "starttls",
                                      "username": "u", "password": PASSWORD, "from_address": "leg@example.ch"})
-    assert config["smtp"]["security"] == "starttls" and config["smtp"]["password"] == PASSWORD
+    assert config["smtp"]["security"] == "starttls" and "password" not in config["smtp"]   # never in /config
+    from shareomat.config import load_runtime_config
+    assert load_runtime_config(module.CONFIG_OUTPUT).smtp.password == PASSWORD             # from the secrets file
     assert _generate(module)["smtp"]["enabled"] is False                  # no section: off
 
 
