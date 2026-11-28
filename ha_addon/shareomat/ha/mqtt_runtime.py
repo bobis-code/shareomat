@@ -3,10 +3,11 @@
 File: shareomat/ha/mqtt_runtime.py
 
 Purpose:
-    MQTT runtime: low-level client operations and lifecycle orchestration
-    for the Shareomat settlement engine.
-    Publishes billing results, handles status topics, listens for command
-    triggers, and manages daemon mode and graceful shutdown.
+    MQTT runtime: low-level client operations and lifecycle for the
+    Shareomat settlement engine: connect, engine status, graceful shutdown.
+    The billing values, system topics and commands of the former CSV run
+    (run_once, auto_scan) were removed in 0.6.34 (ADR-0012); their HA
+    entities are retired by mqtt_discovery.retire_entities().
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
@@ -23,19 +24,15 @@ Notes:
 
     Status lifecycle on shareomat/status (always retained):
         offline   — Last Will Testament (broker sends on ungraceful disconnect)
-        starting  — published in on_connect, immediately after broker CONNACK
-        ok        — published after every successful settlement cycle
-        error     — published when a settlement cycle raises an exception
+        starting  — published in on_connect until Shareomat runs
+        ok        — published once Shareomat runs (mark_running), and again
+                    after every reconnect (the last status is kept)
+        error     — publish_status(..., "error") if a part fails for good
 
     Retained topics:
         shareomat/status                      — engine state
-        shareomat/last_run                    — last run timestamp
-        shareomat/billing/{participant_id}/*  — per-participant billing values
-        homeassistant/sensor/*/config        — HA Discovery (always required)
-
-    NOT retained:
-        shareomat/cmd/run_once  — command (subscribed, never published here)
-        shareomat/auto_scan/set — switch command topic
+        shareomat/live/*                      — live values (live_sensors.py)
+        homeassistant/*/*/config             — HA Discovery
 
     Coordinator-/Market-data for Emsomat (day-ahead export price, LEG
     producer feed-in credit, LEG demand forecast) no longer travels over
@@ -43,8 +40,6 @@ Notes:
     publish_coordinator_ncmd() and shareomat/sparkplug/coordinator_mapping.py
     (ADR-0004 Hard Cut: the former {prefix}/energy_data/* topics have been
     removed without a plain-MQTT replacement).
-
-    Incoming retained messages on command topics are silently discarded.
 
     Reconnect behaviour:
         reconnect_delay_set() configures exponential backoff (1s–120s).
@@ -56,17 +51,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from shareomat.config import MqttConfig
 from shareomat.leg_const import (
-    MQTT_STATUS_ERROR,
     MQTT_STATUS_OFFLINE,
     MQTT_STATUS_OK,
     MQTT_STATUS_STARTING,
 )
-from shareomat.models.billing import BillingRecord
-from shareomat.ha.entities import _topic_safe
 
 if TYPE_CHECKING:
     import paho.mqtt.client as _mqtt_type
@@ -87,17 +79,6 @@ try:
 except ImportError:
     _PAHO_AVAILABLE = False
     logger.warning("paho-mqtt not installed — MQTT features are unavailable")
-
-# ── Module-level watcher reference (wired up from main.py) ───────────────────
-
-_watcher_ref = None  # type: ignore[assignment]
-
-
-def register_watcher(watcher) -> None:
-    """Register a WatcherThread so the auto_scan MQTT switch can control it."""
-    global _watcher_ref
-    _watcher_ref = watcher
-
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
@@ -225,146 +206,6 @@ def publish_status(
     logger.debug("MQTT status -> %s", status)
 
 
-def publish_billing(
-    client: "_mqtt_type.Client",
-    records: list[BillingRecord],
-    config: MqttConfig,
-) -> None:
-    """Publish per-participant billing results as individual retained MQTT values."""
-    prefix = config.topic_prefix
-    qos = config.qos
-    retain = config.retain
-
-    for rec in records:
-        pid_safe = _topic_safe(rec.participant_id)
-        base = f"{prefix}/billing/{pid_safe}"
-
-        fields = {
-            "label": rec.label,
-            "meter_ids": ";".join(rec.meter_ids),
-            "total_import_kwh": round(rec.total_import_kwh, 4),
-            "local_share_kwh": round(rec.local_received_kwh, 4),
-            "grid_import_kwh": round(rec.grid_import_kwh, 4),
-            "local_cost_chf": round(rec.local_cost_chf, 4),
-            "grid_cost_chf": round(rec.grid_cost_chf, 4),
-            "total_cost_chf": round(rec.total_cost_chf, 4),
-            "period_start": rec.period_start.isoformat(),
-            "period_end": rec.period_end.isoformat(),
-        }
-
-        for key, value in fields.items():
-            client.publish(f"{base}/{key}", str(value), qos=qos, retain=retain)
-
-        logger.debug("MQTT billing published for %s", rec.participant_id)
-
-    logger.info("MQTT billing published for %d participant(s)", len(records))
-
-
-def publish_system_state(
-    client: "_mqtt_type.Client",
-    config: MqttConfig,
-    *,
-    status: str = "",
-    last_run: str = "",
-    inbox_count: int | None = None,
-    report_count: int | None = None,
-    last_error: str = "",
-) -> None:
-    """Publish any combination of engine system state topics (all kwargs optional)."""
-    prefix = config.topic_prefix
-    qos = config.qos
-
-    if status:
-        _remember_status(client, status)
-        client.publish(f"{prefix}/status", status, qos=qos, retain=True)
-    if last_run:
-        client.publish(f"{prefix}/last_run", last_run, qos=qos, retain=True)
-    if inbox_count is not None:
-        client.publish(f"{prefix}/inbox_count", str(inbox_count), qos=qos, retain=True)
-    if report_count is not None:
-        client.publish(f"{prefix}/report_count", str(report_count), qos=qos, retain=True)
-    # last_error is always published (empty string clears a previous error)
-    client.publish(f"{prefix}/last_error", last_error, qos=qos, retain=True)
-    logger.debug("MQTT system state published (status=%s)", status or "-")
-
-
-def setup_command_subscription(
-    client: "_mqtt_type.Client",
-    on_run: Callable[[], None],
-    config: MqttConfig,
-) -> None:
-    """Register the run_once subscription on the client (non-blocking)."""
-    cmd_topic = f"{config.topic_prefix}/cmd/run_once"
-    auto_scan_topic = f"{config.topic_prefix}/auto_scan/set"
-
-    def on_message(client, userdata, message) -> None:
-        """Dispatch an incoming command topic to the settlement trigger or auto-scan switch."""
-        topic = message.topic
-        if message.retain:
-            logger.debug("Discarding retained message on %s", topic)
-            return
-        if topic == cmd_topic:
-            logger.info("Command received on %s — triggering settlement run", topic)
-            try:
-                on_run()
-            except Exception as exc:
-                logger.error("Unhandled error in command-triggered run: %s", exc)
-        elif topic == auto_scan_topic:
-            payload = message.payload.decode("utf-8", errors="ignore").strip()
-            logger.info("auto_scan/set received: %s", payload)
-            if _watcher_ref is not None:
-                if payload == "ON":
-                    _watcher_ref.resume()
-                    client.publish(
-                        f"{config.topic_prefix}/auto_scan/state", "ON",
-                        qos=config.qos, retain=True,
-                    )
-                elif payload == "OFF":
-                    _watcher_ref.pause()
-                    client.publish(
-                        f"{config.topic_prefix}/auto_scan/state", "OFF",
-                        qos=config.qos, retain=True,
-                    )
-            else:
-                logger.debug("auto_scan/set received but no watcher registered")
-
-    client.on_message = on_message
-
-    # Register all topics in userdata so on_connect re-subscribes after reconnect
-    userdata = client.user_data_get() or {}
-    subs = userdata.get("subscriptions", [])
-    for topic in (cmd_topic, auto_scan_topic):
-        if (topic, config.qos) not in subs:
-            subs.append((topic, config.qos))
-    userdata["subscriptions"] = subs
-    client.user_data_set(userdata)
-
-    client.subscribe(cmd_topic, qos=config.qos)
-    client.subscribe(auto_scan_topic, qos=config.qos)
-    logger.info("Command subscription active: %s", cmd_topic)
-
-
-def start_command_listener(
-    client: "_mqtt_type.Client",
-    on_run: Callable[[], None],
-    config: MqttConfig,
-) -> None:
-    """Subscribe to run_once and block until KeyboardInterrupt."""
-    setup_command_subscription(client, on_run, config)
-    logger.info(
-        "Daemon mode active — listening for commands on: %s/cmd/run_once",
-        config.topic_prefix,
-    )
-    import time
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("MQTT command listener stopped")
-    finally:
-        disconnect_client(client)
-
-
 # ── Lifecycle orchestration ───────────────────────────────────────────────────
 
 
@@ -376,40 +217,6 @@ def setup_mqtt(mqtt_config: MqttConfig) -> object | None:
     if client is None:
         logger.warning("MQTT requested but client could not connect — running without MQTT")
     return client
-
-
-def should_run_daemon(
-    mqtt_config: MqttConfig,
-    mqtt_client: object | None,
-    *,
-    cron_schedule: str,
-    auto_scan_enabled: bool,
-) -> bool:
-    """Return True when at least one daemon service is configured.
-
-    Takes cron_schedule/auto_scan_enabled explicitly (rather than a full
-    LegConfig) because they are only known once the database-backed
-    OperationSettings can be read — which does not require a complete
-    setup (community/participants/meters/tariff), unlike a full LegConfig.
-    """
-    return (
-        (mqtt_client is not None and mqtt_config.command_topic_enabled)
-        or bool(cron_schedule)
-        or auto_scan_enabled
-    )
-
-
-def run_mqtt_daemon(
-    mqtt_config: MqttConfig,
-    mqtt_client: object,
-    on_run: Callable[[], None],
-) -> None:
-    """Enter daemon mode: block and wait for run commands from the MQTT broker."""
-    logger.info(
-        "Daemon mode — publish any payload to %s/cmd/run_once to trigger a run",
-        mqtt_config.topic_prefix,
-    )
-    start_command_listener(mqtt_client, on_run=on_run, config=mqtt_config)
 
 
 def shutdown_mqtt(mqtt_client: object | None) -> None:

@@ -74,8 +74,9 @@ einer bereits ausgeführten fachlichen Aktion.
 - Ein stornierter Lauf kann nicht erneut freigegeben werden.
 - Nicht stornierte Rechnungen/Gutschriften verhindern weiterhin die
   Stornierung des zugehörigen Laufs.
-- Qualitätsfehler, schriftliche Übersteuerung und die Beschränkung
-  übersteuerter Freigaben auf interne Auswertungen bleiben unverändert.
+- Qualitätsfehler und schriftliche Übersteuerung bleiben unverändert. Seit
+  0.6.34 ist eine mit Begründung freigegebene Abrechnung verrechenbar
+  (vorher nur interne Auswertung), Versand nur von Hand (ADR-0013).
 - Abrechnungspositionen, Quellen- und Empfängersnapshots werden nicht
   aktualisiert. Dokumentnummern, eingefrorene HTML-Belege und Prüfsummen
   verwenden die bestehenden Regeln.

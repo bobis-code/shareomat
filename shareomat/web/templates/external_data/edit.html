@@ -197,9 +197,7 @@
           {% else %}alle empfangenen Dateien geprüft{% endif %}
           {% if sx.community_id %} · CommunityID laut Netzbetreiber: {{ sx.community_id }}{% endif %}</td></tr>
         <tr><th>Abrechnung</th><td>
-          {% if sx.billing_uses_sdat %}verwendet die offiziellen SDAT-Daten (Einstellungen → Messdaten-Quelle)
-          {% else %}verwendet weiterhin die bisherigen Messdateien. Die offiziellen Daten gelten erst mit
-          «Messdaten-Quelle: SDAT (EBL/Swisseldex)» unter Einstellungen.{% endif %}
+          verwendet nur die offiziellen SDAT-Daten.
           Abrechnungen werden nie automatisch erstellt oder freigegeben.</td></tr>
       </tbody>
     </table>
@@ -221,8 +219,8 @@
     {% endif %}
   </div>
   <div class="field-hint">Verbindung testen liest nur das Verzeichnis. Synchronisieren lädt neue Dateien herunter und
-    archiviert sie lokal. Mit der Messdaten-Quelle «SDAT» werden sie danach automatisch importiert, sonst nur mit dem
-    Button «Empfangene Dateien erneut prüfen und importieren». Swisseldex erlaubt nur eine Anmeldung pro Minute –
+    archiviert sie lokal; danach werden sie automatisch importiert. «Empfangene Dateien erneut prüfen und importieren»
+    wiederholt den Import, etwa nachdem ein fehlender Messpunkt erfasst wurde. Swisseldex erlaubt nur eine Anmeldung pro Minute –
     ein zweiter Vorgang wird automatisch kurz verzögert.</div>
 
   <h3 style="margin-top:18px">Protokoll

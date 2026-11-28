@@ -37,14 +37,12 @@ def server(tmp_path, monkeypatch):
     state = get_state()
     state.register_db(db)
     state.register_runtime(runtime)
-    runs = []
-    state.register_on_run(lambda: runs.append(1))
     monkeypatch.setattr(login, "FAILED_LOGIN_DELAY_SECONDS", 0)
     monkeypatch.setattr(login, "ACCOUNT_DELAY_FACTOR", 0)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-    yield {"port": httpd.server_address[1], "db": db, "runtime": runtime, "runs": runs, "tmp": tmp_path}
+    yield {"port": httpd.server_address[1], "db": db, "runtime": runtime, "tmp": tmp_path}
     httpd.shutdown()
 
 
@@ -114,7 +112,7 @@ def _setup_admin(srv, browser: Browser | None = None) -> Browser:
 def _protected_paths():
     public = {"login", "first_login", "logout", "static", "banner"}
     return [p for name, p in ROUTE_PATHS.items() if name not in public] + [
-        "/reports/download?f=x.json", "/contract/participants/1/document", "/invoices/1/print",
+        "/contract/participants/1/document", "/invoices/1/print",
         "/invoices/runs/1/print-all", "/invoices/reminders/1/print"]
 
 
@@ -127,8 +125,9 @@ def test_fresh_install_is_closed_and_only_the_setup_code_opens_it(server):
         status, headers, _ = b.get(path)
         assert status == 303 and headers["Location"] == "/first-login", path
     assert b.get("/static/app.css")[0] == 200
-    status, headers, _ = b.post("/actions/run", {"csrf_token": "x"})
-    assert status == 303 and server["runs"] == []
+    status, headers, _ = b.post("/settings/backup", {"csrf_token": "x"})
+    assert status == 303 and headers["Location"] == "/first-login"
+    assert not (server["tmp"] / "state" / "backups").exists()
 
     status, _, html = b.post("/first-login", {"login_csrf": b.login_csrf("/first-login"), "code": "AAAA-BBBB-CCCC",
                                               "username": "admin", "password": PASSWORD, "password_repeat": PASSWORD})
@@ -257,11 +256,13 @@ def test_posts_without_session_have_no_side_effects(server):
     body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"csrf_token\"\r\n\r\nx\r\n"
             f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"evil.csv\"\r\n"
             f"Content-Type: text/csv\r\n\r\na,b\r\n--{boundary}--\r\n").encode()
-    status, headers, _ = b.request("POST", "/meter-data/upload", body=body,
+    status, headers, _ = b.request("POST", "/contract/participants/1/confirm", body=body,
                                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
     assert status == 303 and headers["Location"] == "/login"
-    assert list(server["runtime"].paths.inbox.iterdir()) == []
-    assert b.post("/actions/run", {"csrf_token": "x"})[0] == 303 and server["runs"] == []
+    from shareomat.web.pages.contract import documents_dir
+    assert not documents_dir(server["db"]).exists() or list(documents_dir(server["db"]).iterdir()) == []
+    assert b.post("/settings/backup", {"csrf_token": "x"})[0] == 303
+    assert not (server["tmp"] / "state" / "backups").exists()
     b.post("/invoices/settings", {"payee": "Evil", "iban": IBAN, "postal_code": "1", "city": "X"})
     assert get_payment_profile(server["db"]).payee == ""
     assert b.post("/logout", {"csrf_token": "x"})[1]["Location"] == "/login"
@@ -424,49 +425,17 @@ def _multipart(fields: dict, filename: str, content: bytes, boundary: str = "B0u
     return parts, {"Content-Type": f"multipart/form-data; boundary={boundary}"}
 
 
-def test_upload_with_a_wrong_csrf_token_never_touches_the_inbox(server):
-    """Round 6 P1-01 reproduced: a refused upload used to overwrite an existing inbox file."""
+def test_upload_with_a_wrong_csrf_token_never_stores_the_file(server):
+    """Round 6 P1-01: the token is checked before a single byte is written (now for signed documents;
+    the meter-data upload this was found on went with the CSV path in 0.6.34)."""
+    from shareomat.web.pages.contract import documents_dir
     a = _setup_admin(server)
-    inbox = server["runtime"].paths.inbox
-    (inbox / "readings.csv").write_text("ORIGINAL_VALID_CONTENT", encoding="utf-8")
-    body, headers = _multipart({"csrf_token": "wrong"}, "readings.csv", b"ATTACKER_REPLACEMENT")
-    status, _, _ = a.request("POST", "/meter-data/upload", body=body, headers=headers)
+    body, headers = _multipart({"csrf_token": "wrong"}, "erklaerung.pdf", b"%PDF-1.4 ATTACKER")
+    status, _, _ = a.request("POST", "/contract/participants/1/confirm", body=body, headers=headers)
     assert status == 303
-    assert sorted(p.name for p in inbox.iterdir()) == ["readings.csv"]
-    assert (inbox / "readings.csv").read_text(encoding="utf-8") == "ORIGINAL_VALID_CONTENT"
-    assert "Sicherheits-Token" in a.get("/meter-data")[2]
-    body, headers = _multipart({"csrf_token": a.page_csrf()}, "readings.csv", b"SECOND_FILE")
-    a.request("POST", "/meter-data/upload", body=body, headers=headers)
-    assert (inbox / "readings.csv").read_text(encoding="utf-8") == "ORIGINAL_VALID_CONTENT"   # never overwritten
-    assert (inbox / "readings-2.csv").read_text(encoding="utf-8") == "SECOND_FILE"
-
-
-def test_parallel_uploads_of_the_same_name_never_overwrite_each_other(server):
-    """Round 7 P1-V7-01: parallel uploads used to pick the same free name and replace each other."""
-    import threading
-    a = _setup_admin(server)
-    inbox = server["runtime"].paths.inbox
-    (inbox / "readings.csv").write_text("ORIGINAL", encoding="utf-8")
-    csrf = a.page_csrf()
-    count = 8
-    barrier = threading.Barrier(count)
-    statuses = []
-
-    def upload(i: int) -> None:
-        body, headers = _multipart({"csrf_token": csrf}, "readings.csv", f"DATA_{i}".encode())
-        barrier.wait()
-        statuses.append(a.request("POST", "/meter-data/upload", body=body, headers=headers)[0])
-
-    threads = [threading.Thread(target=upload, args=(i,)) for i in range(count)]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-    assert statuses == [303] * count
-    names = sorted(p.name for p in inbox.iterdir())
-    assert names == sorted(["readings.csv"] + [f"readings-{n}.csv" for n in range(2, count + 2)])   # no temp left
-    contents = {(inbox / n).read_text(encoding="utf-8") for n in names}
-    assert contents == {"ORIGINAL"} | {f"DATA_{i}" for i in range(count)}
+    target = documents_dir(server["db"])
+    assert not target.exists() or [p for p in target.rglob("*") if p.is_file()] == []
+    assert "Sicherheits-Token" in a.get("/contract")[2]
 
 
 @pytest.mark.parametrize("hard_links", [True, False])

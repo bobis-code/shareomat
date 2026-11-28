@@ -15,7 +15,7 @@ Part of:
 Notes:
     Weekday/time-of-day bucketing happens in LOCAL time (zoneinfo, not SQL
     strftime) so DST transitions don't shift which historical samples match
-    a given target slot — same reasoning as leg_report.py/leg_normalizer.py.
+    a given target slot (the wall clock, not UTC, decides the weekday and hour).
 
     Known simplification: a meter with no reading for a historical slot
     simply contributes nothing to that slot's total (not an artificial

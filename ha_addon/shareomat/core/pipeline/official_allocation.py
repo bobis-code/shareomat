@@ -3,18 +3,18 @@
 File: shareomat/core/pipeline/official_allocation.py
 
 Purpose:
-    The second settlement path of ADR-0008: turns the grid operator's
-    official E66 split (LEG energy / residual energy per metering point and
-    quarter hour) into the same MatchResult objects the internal allocation
-    (leg_matcher.match_all) produces - WITHOUT allocating anything again.
+    The settlement path of ADR-0008, since 0.6.34 the only one (ADR-0012):
+    turns the grid operator's official E66 split (LEG energy / residual
+    energy per metering point and quarter hour) into the MatchResult
+    objects leg_billing settles - WITHOUT allocating anything again.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
-    Path 1, raw meter data (CSV, Excel, ...): leg_matcher distributes the
-    locally produced energy proportionally (Art. 19g StromVV).
-    Path 2, official SDAT data: the grid operator already allocated it; that
+    The grid operator allocates the locally produced energy proportionally
+    (Art. 19g StromVV). Until 0.6.34 Shareomat also did that itself for raw
+    meter data (CSV, Excel; leg_matcher, removed). The grid operator's
     allocation is authoritative for billing and is taken over as it is:
 
         meter_local_received[m]  = E66 LEG energy, consumption (LGZ-LEGE)

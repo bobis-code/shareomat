@@ -32,7 +32,7 @@ docker compose up --build
 Beim ersten Start baut Docker das Image (`python:3.12-slim` als Basis,
 Abhängigkeiten aus `requirements.txt`), danach startet der Container direkt.
 `docker-compose.yml` bindet Port `8099` an den Host und mountet `./data` und
-`./config` in den Container — Datenbank, Inbox und Konfiguration liegen also
+`./config` in den Container — Datenbank, Datenordner und Konfiguration liegen also
 weiterhin im Projektordner, nicht nur im Container.
 
 Weboberfläche öffnen: **http://localhost:8099**
@@ -59,9 +59,8 @@ cp config/leg_config.example.yaml config/leg_config.yaml
 python main.py
 ```
 
-Ohne Docker legt `main.py` die Ordner `data/inbox`, `data/archive`,
-`data/reports` und `data/state` beim ersten Start selbst an. Die
-SQLite-Datenbank entsteht unter `data/shareomat.db`.
+Ohne Docker legt `main.py` den Ordner `data/state` beim ersten Start selbst
+an. Die SQLite-Datenbank entsteht unter `data/shareomat.db`.
 
 Weboberfläche öffnen: **http://localhost:8099**
 
@@ -84,33 +83,24 @@ Alle vier Schritte lassen sich jederzeit über die Seitenleiste erneut öffnen
 und anpassen; nichts davon steckt in `leg_config.yaml`, alles landet in
 `data/shareomat.db`.
 
-## Testdaten einspielen
+## Testdaten
 
-Um den Abrechnungslauf ohne echte Messdaten des Netzbetreibers zu testen,
-genügt eine einfache CSV-Datei in `data/inbox/`:
+Abgerechnet wird nur mit den offiziellen SDAT-Lieferungen des Netzbetreibers
+(Swisseldex, siehe `docs/sdat_leg_import.md`). Das Einlesen von CSV-Dateien
+aus `data/inbox/` wurde in 0.6.34 entfernt (ADR-0012).
 
-```csv
-timestamp,mpid,value_kwh,direction
-2024-06-01T12:00:00+00:00,CH001...,0.125,export
-2024-06-01T12:00:00+00:00,CH002...,0.080,import
-```
-
-`mpid` muss einem in Schritt 3 angelegten Messpunkt entsprechen. Danach auf
-der Seite **"Messdaten"** auf **"Jetzt ausführen"** klicken, oder die Datei
-per Auto-Scan automatisch aufnehmen lassen (siehe "Automatisierung" in der
-Seitenleiste). Ergebnisse landen unter `data/reports/`, die Eingabedatei wird
-nach erfolgreicher Verarbeitung nach `data/archive/` verschoben.
+Zum Ausprobieren ohne echte Daten gibt es eine synthetische Testinstallation:
+`tests/fixtures/schema18_synthetic/` (eingefrorene Datenbank, entpacken und mit
+`SHAREOMAT_DB_PATH` starten) oder für Lasttests `python -m tests.synthetic.load`.
+Alle Werte darin sind erfunden.
 
 ## Daten- und Konfigurationsablage
 
 | Pfad | Inhalt |
 |---|---|
-| `config/leg_config.yaml` | Technische Laufzeitkonfiguration (Pfade, MQTT, E-Mail, Web-Port) — von Git ignoriert, da hier Zugangsdaten stehen können |
-| `data/shareomat.db` | Gemeinschaft, Teilnehmer, Messpunkte, Verträge/Tarife, Automatik — die eigentliche Anwendungsdatenbank |
-| `data/inbox/` | Hier abgelegte Mess-Dateien werden beim nächsten Lauf verarbeitet |
-| `data/archive/` | Bereits verarbeitete Dateien |
-| `data/reports/` | Erzeugte Abrechnungs- und Detail-Reports (CSV/JSON) |
-| `data/state/` | Interner Verarbeitungsstatus (z. B. bereits gesehene Dateien) |
+| `config/leg_config.yaml` | Technische Laufzeitkonfiguration (Pfade, MQTT, Swisseldex, Web-Port) — von Git ignoriert, da hier Zugangsdaten stehen können |
+| `data/shareomat.db` | Gemeinschaft, Teilnehmer, Messpunkte, Verträge/Tarife, offizielle Messdaten, Abrechnungen — die eigentliche Anwendungsdatenbank |
+| `data/state/` | Swisseldex-Empfangsarchiv und -Status, Sicherungen |
 
 Sowohl im Docker- als auch im nativen Weg bleiben `data/` und `config/` im
 Projektordner erhalten — ein Neustart (Container neu bauen, oder `python
@@ -159,9 +149,6 @@ Teilnehmer- und Messpunkt-IDs dürfen Umlaute, Leerzeichen und Sonderzeichen
 enthalten. Die Bearbeitungslinks kodieren diese als URL-Pfadsegment. Nach einer
 Änderung der ID muss der Bearbeitungslink über die jeweilige Teilnehmer- oder
 Messpunktliste neu geöffnet werden.
-
-Downloadlinks für Berichte kodieren auch Sonderzeichen im Dateinamen als
-URL-Parameter, damit etwa `+`, `&` oder `#` unverändert beim Download ankommen.
 
 - **`http://localhost:8099` antwortet nicht (Docker):** Prüfen, ob der
   Container läuft (`docker compose ps`) und ob Port 8099 bereits von einem

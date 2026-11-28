@@ -3,7 +3,8 @@
 File: tests/test_f03_validation.py
 
 Purpose:
-    Regressions for non-finite prices and malformed interval CSV files.
+    Regressions for non-finite prices. The tests of malformed interval CSV
+    files went with the CSV path in 0.6.34 (ADR-0012).
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
@@ -18,7 +19,6 @@ from decimal import Decimal
 
 import pytest
 
-from shareomat.core.pipeline.leg_parser import parse_csv
 from shareomat.database import supplier_tariffs, tariffs
 from shareomat.database import contract_versions, day_ahead_prices, elcom_tariffs, price_forecasts, reference_prices
 from shareomat.database.sqlite import connect, init_db
@@ -31,7 +31,6 @@ from shareomat.models.tariff import Tariff
 from shareomat.web.pages import tariffs as page
 from shareomat.web.rendering import FormError, RequestContext, form_decimal
 from shareomat.web.state import get_state
-from tests.test_leg_runner_overlaps import env, _outputs, _row, _write, _PRODUCER, _CONSUMER  # noqa: F401
 
 
 @pytest.fixture
@@ -171,51 +170,6 @@ GOOD = "2027-01-01T00:00:00Z,TEST_METER,1,import,valid\n"
 NEXT = "2027-01-01T00:15:00Z,TEST_METER,2,import,valid\n"
 
 
-@pytest.mark.parametrize("bad", ["2027-01-01T00:00:00Z,TEST_METER\n",
-                                "2027-01-01T00:00:00Z,TEST_METER,1\n",
-                                "2027-01-01T00:00:00Z,TEST_METER,1,import\n",
-                                "2027-01-01T00:00:00Z,TEST_METER,,import,valid\n",
-                                "invalid,TEST_METER,1,import,valid\n",
-                                "2027-01-01T00:00:00,TEST_METER,1,import,valid\n",
-                                "2027-01-01T00:00:00Z,TEST_METER,NaN,import,valid\n",
-                                "2027-01-01T00:00:00Z,TEST_METER,Infinity,import,valid\n",
-                                "2027-01-01T00:00:00Z,TEST_METER,1,import,valid,extra\n"])
-def test_bad_csv_row_is_reported_without_losing_later_good_rows(tmp_path, caplog, bad):
-    path = tmp_path / "test.csv"
-    path.write_text(HEADER + bad + GOOD + NEXT, encoding="utf-8")
-    errors = []
-    result = parse_csv(path, errors=errors)
-    assert [r.value_kwh for r in result] == [1, 2]
-    assert len(errors) == 1 and "Zeile 2" in errors[0]
-    assert "test.csv:2" in caplog.text
-
-
-@pytest.mark.parametrize("header", ["timestamp,meter_id,value_kwh\n", "timestamp,value_kwh,direction\n",
-                                   "timestamp,meter_id,value_kwh,direction,direction\n", ""])
-def test_csv_invalid_header_even_without_data_is_reported(tmp_path, header):
-    path = tmp_path / "test.csv"
-    path.write_text(header, encoding="utf-8")
-    errors = []
-    assert parse_csv(path, errors=errors) == []
-    assert len(errors) == 1
-
-
-def test_csv_unclosed_quote_is_reported(tmp_path):
-    path = tmp_path / "test.csv"
-    path.write_text(HEADER + GOOD + '"unterminated', encoding="utf-8")
-    errors = []
-    assert len(parse_csv(path, errors=errors)) == 1
-    assert errors
-
-
-def test_csv_identical_and_conflicting_duplicates_keep_existing_policy(tmp_path):
-    path = tmp_path / "test.csv"
-    path.write_text(HEADER + GOOD + GOOD + GOOD.replace(",1,import", ",3,import") + NEXT, encoding="utf-8")
-    errors = []
-    assert [r.value_kwh for r in parse_csv(path, errors=errors)] == [1, 2]
-    assert len(errors) == 1 and "Doppelzeile" in errors[0]
-
-
 @pytest.mark.parametrize("kind", ["reference", "forecast", "day_ahead", "elcom"])
 @pytest.mark.parametrize("value", [Decimal("NaN"), Decimal("Infinity"), Decimal("-Infinity")])
 def test_other_price_stores_reject_non_finite(db, kind, value):
@@ -286,56 +240,6 @@ def test_manual_supplier_formats_and_signed_values_are_preserved(db, raw):
 def test_ambiguous_manual_decimal_formats_are_rejected(raw):
     with pytest.raises(FormError):
         form_decimal(RequestContext(method="POST", ingress_path="", form={"p": raw}), "p", label="Preis")
-
-
-def test_legacy_mpid_and_missing_optional_quality_remain_supported(tmp_path):
-    path = tmp_path / "legacy.csv"
-    path.write_text("timestamp,mpid,value_kwh,direction\n2027-01-01T00:00:00Z,TEST_METER,1,import\n", encoding="utf-8")
-    errors = []
-    [reading] = parse_csv(path, errors=errors)
-    assert reading.meter_id == "TEST_METER" and reading.quality == "valid"
-    assert errors == []
-
-
-@pytest.mark.parametrize("bad", ["timestamp,meter_id,value_kwh\n", HEADER + "bad,TEST_METER,1,import\n",
-                                HEADER + '"unterminated', HEADER + "bad,TEST_METER,1,import,valid\n"])
-def test_invalid_file_never_marks_automatic_batch_successful(env, bad):
-    from shareomat.core.collector.leg_import import scan_inbox
-    from shareomat.core.collector.leg_storage import is_processed
-    from shareomat.core.leg_runner import run
-
-    _write(env, "good.csv", [_row(_PRODUCER, 1, "export"), _row(_CONSUMER, 1)])
-    path = env.config.paths.inbox / "bad.csv"
-    path.write_text(bad, encoding="utf-8")
-    files = scan_inbox(env.config.paths.inbox)
-    before = _outputs(env)
-    with pytest.raises(ValueError, match="bad.csv"):
-        run(env.config, mqtt_client=env.mqtt, db_path=env.db)
-    assert _outputs(env) == before
-    assert all(not is_processed(env.config.paths.state, item.sha256) for item in files)
-    assert all(item.path.exists() for item in files)
-    env.mqtt.publish.assert_not_called()
-
-
-@pytest.mark.parametrize("bad", ["timestamp,meter_id,value_kwh\n", HEADER + "bad,TEST_METER,1,import,valid\n"])
-def test_file_with_only_errors_blocks_interactive_billing_even_with_other_good_data(env, bad):
-    from shareomat.config import RuntimeConfig
-    from shareomat.database.billing import compute_billing_preview
-
-    _write(env, "good.csv", [_row(_PRODUCER, 1, "export"), _row(_CONSUMER, 1)])
-    (env.config.paths.inbox / "bad.csv").write_text(bad, encoding="utf-8")
-    preview = compute_billing_preview(env.db, RuntimeConfig(paths=env.config.paths),
-                                      date(2026, 11, 3), date(2026, 11, 3))
-    assert any("bad.csv" in issue for issue in preview.availability.hard_issues)
-
-
-@pytest.mark.parametrize("raw", ["abc", '"1,25"', "-1", "1e1000"])
-def test_csv_bad_number_formats_are_reported_and_later_rows_survive(tmp_path, raw):
-    path = tmp_path / "test.csv"
-    path.write_text(HEADER + f"2027-01-01T00:00:00Z,TEST_METER,{raw},import,valid\n" + NEXT, encoding="utf-8")
-    errors = []
-    assert [row.value_kwh for row in parse_csv(path, errors=errors)] == [2]
-    assert len(errors) == 1
 
 
 @pytest.mark.parametrize("kind", ["reference", "forecast"])

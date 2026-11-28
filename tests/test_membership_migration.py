@@ -16,7 +16,7 @@ import pytest
 
 import shareomat.database.membership_migration as migration
 from shareomat.config import PathConfig, RuntimeConfig
-from shareomat.database.billing import _result_fingerprint, compute_billing_preview, get_billing_run
+from shareomat.database.billing import compute_billing_preview, get_billing_run
 from shareomat.database.billing_eligibility import EligibilityResolver
 from shareomat.database.memberships import confirm_review, memberships_needing_review
 from shareomat.database.sqlite import init_db
@@ -123,9 +123,9 @@ def test_clean_reference_keeps_every_billing_decision(tmp_path):
     assert _content(backup) == before
     assert memberships_needing_review(db) == []
     assert _eligibility(db) == expected["eligibility"]                                   # A3: every day
-    for start, info in expected["previews"].items():                                     # A4
-        preview = compute_billing_preview(db, runtime, *_month(start), persist_readings=False)
-        assert _result_fingerprint(preview) == info["fingerprint"], start
+    # A4 (the previews of 0.6.12 recomputed to the same fingerprint) went with the CSV path in 0.6.34:
+    # those previews were computed on the CSV data source, which no longer exists. What they depended
+    # on - who is billable on which day - is A3 above, compared for every day.
     run = get_billing_run(db, expected["released_run"]["id"]).run
     assert run.status == "released" and run.result_fingerprint == expected["released_run"]["fingerprint"]
 

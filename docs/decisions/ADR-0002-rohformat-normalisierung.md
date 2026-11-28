@@ -4,6 +4,8 @@
 
 Angenommen
 
+**Ergänzt durch [ADR-0012](ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md) (0.6.34):** Der CSV-Weg mit den Parsern für CSV und EBL-Excel (`leg_parser.py`, `ebl_xlsx.py`) und der internen Aufteilung (`leg_matcher.py`) ist entfernt. Heute gibt es nur noch das Rohformat SDAT-CH (`raw/sdat_ch.py`), abgerechnet wird die Aufteilung des Netzbetreibers. Der Grundsatz gilt weiter für einen späteren Importadapter: eigenes Modul unter `core/pipeline/raw/`, kein Sonderfall in der Abrechnungslogik.
+
 ## Kontext
 
 Shareomat erhält Messdaten von Netzbetreibern in mehreren, unterschiedlichen

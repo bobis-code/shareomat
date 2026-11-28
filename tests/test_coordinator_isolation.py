@@ -211,20 +211,18 @@ def test_broken_coordinator_db_does_not_block_billing(case, monkeypatch, caplog,
     assert "coordinator step failed" in caplog.text and client.ncmd() == []
 
 
-def test_settlement_cycle_runs_with_a_broken_coordinator_db(tmp_path, monkeypatch, caplog):
+def test_coordinator_with_a_broken_coordinator_db_only_logs(tmp_path, monkeypatch, caplog):
+    """The clock-started coordinator (since 0.6.33/0.6.34) fails on its own; shareomat.db stays usable."""
     db = tmp_path / "shareomat.db"
     init_db(db)
     coordinator_db_path(db).write_bytes(b"keine datenbank " * 500)
-    runs = []
-    monkeypatch.setattr(app, "build_leg_config", lambda d, r: _leg_config())
-    monkeypatch.setattr(app, "run", lambda c, mqtt_client=None, db_path=None: runs.append(c))
-    monkeypatch.setattr(app, "_update_web_state", lambda *a, **k: None)
-    runtime = SimpleNamespace(paths=SimpleNamespace())
-    host, _ = _host()
+    host, client = _host()
     with caplog.at_level(logging.ERROR, logger="main"):
-        assert app._run_safe_cycle(runtime, db, None, host) is True
+        app._start_coordinator_tasks(host, _leg_config(), db)
         app._coordinator_thread.join(timeout=10)
-    assert len(runs) == 1 and "coordinator step failed" in caplog.text
+    assert "coordinator step failed" in caplog.text and client.ncmd() == []
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
 
 
 def test_store_is_reused_after_a_restart(tmp_path, monkeypatch):

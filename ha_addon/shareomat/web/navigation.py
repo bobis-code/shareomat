@@ -46,15 +46,12 @@ ROUTE_PATHS: dict[str, str] = {
     "billing": "/billing",
     "invoices": "/invoices",
     "automation": "/automation",
-    "reports": "/reports",
     "live_energy": "/live-energy",
     "live_energy_sources": "/live-energy/sources",
     "live_energy_diagnostics": "/live-energy/diagnostics",
-    "reports_download": "/reports/download",
     "settings": "/settings",
     "external_data": "/external-data",
     "apps": "/apps",
-    "run": "/actions/run",
     "static": "/static",
     "banner": "/static/banner.png",
 }
@@ -102,11 +99,9 @@ NAV_GROUPS: tuple[NavGroup, ...] = (
     NavGroup("energy", "Energie & Analyse", "Energie", "chart", (
         ("", (
             ("meter_data", "Messdaten"),
-            ("reports", "Berichte"),
         )),
         # Official E66 data of the grid operator (20.11.2026, operator's decision): sums and values apart.
         ("ANALYSE", (
-            ("analysis", "Übersicht"),
             ("analysis_sums", "Summen & Auswertung"),
             ("analysis_values", "Messwerte"),
         )),

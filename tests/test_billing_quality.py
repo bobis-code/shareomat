@@ -115,6 +115,8 @@ def test_first_local_hour_of_november_is_billed_in_november(db_path, runtime):
     deliver(db_path, db_path.parent, [
         ("2026-10-31T23:30:00+00:00", M1, "1.0", "export"),
         ("2026-10-31T23:30:00+00:00", M2, "1.0", "import"),
+        ("2026-10-31T23:30:00+00:00", M3, "0", "import"),     # every meter has a value in a billed quarter hour
+        ("2026-10-31T23:30:00+00:00", M3, "0", "export"),
     ])
     november = compute_billing_preview(db_path, runtime, date(2026, 11, 1), date(2026, 11, 30))
     october = compute_billing_preview(db_path, runtime, date(2026, 10, 1), date(2026, 10, 31))
@@ -136,8 +138,11 @@ def test_producer_credit_is_stored_and_prosumer_is_netted(db_path, runtime):
     deliver(db_path, db_path.parent, [
         ("2027-07-01T10:00:00+00:00", M1, "1.0", "export"),
         ("2027-07-01T10:00:00+00:00", M3, "0.333", "export"),
+        ("2027-07-01T10:00:00+00:00", M3, "0", "import"),
         ("2027-07-01T10:00:00+00:00", M2, "1.0", "import"),
         ("2027-07-01T11:00:00+00:00", M3, "0.5", "import"),
+        ("2027-07-01T11:00:00+00:00", M3, "0", "export"),
+        ("2027-07-01T11:00:00+00:00", M2, "0", "import"),
         ("2027-07-01T11:00:00+00:00", M1, "0.5", "export"),
     ])
     preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
@@ -161,14 +166,36 @@ def test_producer_credit_is_stored_and_prosumer_is_netted(db_path, runtime):
 # ── S8 quality gate ─────────────────────────────────────────────────────────
 
 
-def test_missing_official_values_block_release_even_with_a_reason(db_path, runtime):
-    """Official data: a missing quarter hour is never billed as 0 and can't be waved through (review 20.11.2026)."""
-    deliver(db_path, db_path.parent, _ALL_CHANNELS_ONE_SLOT)
-    preview = compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31))
-    assert any("Viertelstunden ohne Messwert" in i for i in preview.availability.hard_issues)
+def test_a_missing_value_leaves_its_quarter_hour_out_for_the_whole_leg(db_path, runtime):
+    """Operator's decision 28.11.2026: a quarter hour with a missing value is not billed for anyone.
+
+    The grid operator allocated 1 kWh LEG energy from solar (M1) to cons_a (M2) at 10:00, but the
+    delivery lacks cons_a's residual value there. Billing only solar's side would credit 1 kWh nobody
+    pays for; the whole quarter hour goes, the money balance stays exact, release needs a reason.
+    """
+    gap = datetime(2027, 7, 1, 10, 0, tzinfo=timezone.utc)
+    deliver(db_path, db_path.parent, _all_channels_one_day(), missing=[(gap, M2, "import", "residual")])
+    preview = compute_billing_preview(db_path, runtime, JULY_1, JULY_1)
+    availability = preview.availability
+    assert availability.hard_issues == []
+    soft = availability.blocking_issues
+    assert any(f"Messpunkt {M2} (Bezug): 1 von 96 Viertelstunden ohne Messwert" in i for i in soft)
+    assert any("Nicht abgerechnet: 1 Viertelstunde(n)" in i and "1.000 kWh LEG-Energie" in i for i in soft)
+    assert _line(preview, "cons_a").local_received_kwh == Decimal("95")
+    assert _line(preview, "solar").local_supplied_kwh == Decimal("95")
+    assert preview.money.consumers - preview.money.producers == preview.money.admin_fee + preview.money.rounding
     run = save_draft(db_path, preview)
-    with pytest.raises(BillingWorkflowError, match="nicht übersteuerbare"):
-        release_billing_run(db_path, run.id, override_reason="Probelauf, Daten unvollständig")
+    with pytest.raises(BillingWorkflowError, match="Freigabe gesperrt"):
+        release_billing_run(db_path, run.id)
+    released = release_billing_run(db_path, run.id, override_reason="EBL liefert den Wert nach, Viertelstunde fehlt")
+    assert released.status == "released"
+
+
+def test_a_meter_without_any_value_stays_a_hard_issue(db_path, runtime):
+    """Not a gap but a missing meter: never releasable."""
+    deliver(db_path, db_path.parent, [r for r in _all_channels_one_day() if r[1] != M2])
+    availability = compute_billing_preview(db_path, runtime, JULY_1, JULY_1).availability
+    assert f"Messpunkt {M2}: keine Messwerte für Bezug im ganzen Zeitraum." in availability.hard_issues
 
 
 def test_soft_issue_blocks_release_unless_a_reason_is_given(db_path, runtime):

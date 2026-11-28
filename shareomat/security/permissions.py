@@ -44,7 +44,6 @@ ROLES = {
 _POST_PERMISSIONS = {
     "billing": "billing.approve",
     "meter_data": "meterdata.import",
-    "actions": "meterdata.import",
     "community": "masterdata.edit",
     "participants": "masterdata.edit",
     "meters": "masterdata.edit",

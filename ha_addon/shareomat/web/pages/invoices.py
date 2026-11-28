@@ -59,7 +59,7 @@ from shareomat.core.delivery.document_mail import (
     send_document_email,
 )
 from shareomat.core.delivery.pdf import PdfError, pdf_unavailable_reason, render_pdf
-from shareomat.database.billing import BillingWorkflowError, list_billing_runs
+from shareomat.database.billing import BillingWorkflowError, get_billing_run, list_billing_runs
 from shareomat.database.invoicing import (
     InvoicingError,
     cancel_document,
@@ -266,6 +266,7 @@ def handle_get(ctx: RequestContext) -> str:
         return render_page(
             "invoices/issue_preview.html", ctx, "invoices", run_id=run_id, problems=problems, planned=planned,
             payment_blocked=blocked, label=_run_label(ctx, run_id),
+            override_reason=get_billing_run(ctx.db_path, run_id).run.release_override_reason,
             fingerprint=documents_fingerprint(planned), changes=recipient_changes(ctx.db_path, run_id),
             total_invoices=sum((p["amount"] for p in planned if p["doc_type"] == DOC_TYPE_INVOICE), Decimal(0)),
             total_credits=sum((p["amount"] for p in planned if p["doc_type"] == DOC_TYPE_CREDIT), Decimal(0)),

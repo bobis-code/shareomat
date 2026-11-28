@@ -10,7 +10,7 @@ Part of:
 
 Notes:
     participant_id is the business key the settlement core already uses
-    (shareomat.core.pipeline.leg_billing, leg_matcher); it is unique per
+    (shareomat.core.pipeline.leg_billing); it is unique per
     community, not globally in the table (see UNIQUE(community_id,
     participant_id) in shareomat.database.sqlite).
 """

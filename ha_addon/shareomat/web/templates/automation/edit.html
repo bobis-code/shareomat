@@ -3,41 +3,29 @@
 {% block heading %}Automatisierung{% endblock %}
 {% block content %}
 <div class="card">
-  <form class="form-card" method="post" action="{{ url_for('automation') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field">
-      <label for="cron_schedule">Zeitplan (Cron-Ausdruck)</label>
-      <input type="text" id="cron_schedule" name="cron_schedule" value="{{ settings.cron_schedule }}" placeholder="0 6 * * *">
-      <div class="field-hint">Leer lassen zum Deaktivieren. Beispiel: "0 6 * * *" = täglich 06:00 Uhr.</div>
-    </div>
-    <div class="field checkbox-row">
-      <input type="checkbox" id="auto_scan_enabled" name="auto_scan_enabled" {{ 'checked' if settings.auto_scan_enabled }}>
-      <label for="auto_scan_enabled" style="margin:0">Eingang automatisch überwachen</label>
-    </div>
-    <div class="field">
-      <label for="scan_interval_seconds">Scan-Intervall (Sekunden)</label>
-      <input type="number" id="scan_interval_seconds" name="scan_interval_seconds" min="5"
-             value="{{ settings.scan_interval_seconds }}">
-    </div>
-    <div class="field checkbox-row">
-      <input type="checkbox" id="auto_create_billing" name="auto_create_billing" {{ 'checked' if settings.auto_create_billing }}>
-      <label for="auto_create_billing" style="margin:0">Abrechnungen automatisch erstellen</label>
-    </div>
-    <div class="field checkbox-row">
-      <input type="checkbox" id="auto_create_invoices" name="auto_create_invoices" {{ 'checked' if settings.auto_create_invoices }}>
-      <label for="auto_create_invoices" style="margin:0">Rechnungen automatisch erstellen</label>
-    </div>
-    <div class="field checkbox-row">
-      <input type="checkbox" id="auto_send_invoices" name="auto_send_invoices" {{ 'checked' if settings.auto_send_invoices }}>
-      <label for="auto_send_invoices" style="margin:0">Rechnungen automatisch versenden</label>
-    </div>
-    <div class="field-hint">
-      Die letzten drei Optionen werden bereits gespeichert, aber noch nicht ausgeführt —
-      Rechnungserstellung und -versand sind in Vorbereitung.
-    </div>
-    <div class="actions-row">
-      <button type="submit">Speichern</button>
-    </div>
-  </form>
+  <h2>Abrechnung und Rechnungen</h2>
+  <p class="ts">Noch nicht verfügbar. Abrechnungen und Rechnungen werden von Hand erstellt, geprüft und
+    versendet (Abrechnungen → Rechnungen).</p>
+  <div class="field checkbox-row">
+    <input type="checkbox" id="auto_create_billing" disabled>
+    <label for="auto_create_billing" style="margin:0;opacity:.6">Abrechnungen automatisch erstellen — noch nicht verfügbar</label>
+  </div>
+  <div class="field checkbox-row">
+    <input type="checkbox" id="auto_create_invoices" disabled>
+    <label for="auto_create_invoices" style="margin:0;opacity:.6">Rechnungen automatisch erstellen — noch nicht verfügbar</label>
+  </div>
+  <div class="field checkbox-row">
+    <input type="checkbox" id="auto_send_invoices" disabled>
+    <label for="auto_send_invoices" style="margin:0;opacity:.6">Rechnungen automatisch versenden — noch nicht verfügbar</label>
+  </div>
+</div>
+<div class="card">
+  <h2>Was bereits automatisch läuft</h2>
+  <ul style="margin-left:18px">
+    <li>Messdaten des Netzbetreibers abholen und importieren:
+      <a href="{{ url_for('external_data') }}">Externe Daten → Swisseldex</a>.</li>
+    <li>Prognose und Preise an Emsomat: alle 15 Minuten und sobald Emsomat online kommt
+      (nur mit Sparkplug).</li>
+  </ul>
 </div>
 {% endblock %}

@@ -1,5 +1,7 @@
 # Tarifvalidierung und fehlerhafte Messdateien (F-03)
 
+> **Historisch (seit 0.6.34):** Das Einlesen von Messdateien (CSV) wurde mit dem CSV-Weg entfernt ([ADR-0012](decisions/ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)). Messdaten kommen nur noch als SDAT-Lieferung des Netzbetreibers über Swisseldex. Dieses Dokument bleibt als Nachweis der damaligen Prüfung. Die Tarifvalidierung gilt weiter.
+
 Stand: 7. November 2026. Die bestehenden Datenbankformate und fachlichen
 Preisformeln bleiben erhalten.
 

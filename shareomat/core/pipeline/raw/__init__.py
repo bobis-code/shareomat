@@ -1,17 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-File: shareomat/core/raw/__init__.py
+File: shareomat/core/pipeline/raw/__init__.py
 
 Purpose:
-    Provider-specific raw parser package.
-    Each module in this package handles one grid operator's file format
-    and exposes a single public function:
-
-        parse(path, slot_minutes, known_meter_ids) -> list[IntervalReading]
-
-    Provider-specific details (column positions, header structure, timezone
-    conventions, direction label mapping) stay inside this package.
-    The canonical model starts at IntervalReading.
+    Raw format parsers. Each module handles exactly one external format and
+    normalizes it to the internal model; the billing logic never knows the
+    delivery format. Today: SDAT-CH (sdat_ch.py). The EBL Excel parser was
+    removed with the CSV path in 0.6.34 (ADR-0012); a later import adapter
+    gets its own module here (ADR-0002, ADR-0003).
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine

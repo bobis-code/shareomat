@@ -38,26 +38,9 @@ from shareomat.core.collector.raw_backup import (
 from shareomat.database.audit import log_event
 from shareomat.database.backup import BackupError, backup_dir, create_backup, list_backups
 from shareomat.database.settings import get_operation_settings, save_operation_settings
-from shareomat.leg_const import (
-    METER_DATA_SOURCE_EMAIL_CSV,
-    METER_DATA_SOURCE_SDAT_LEG,
-    RAW_BACKUP_MODE_OFF,
-    RAW_BACKUP_MODE_REQUIRED,
-    UNKNOWN_METER_POLICY_FAIL,
-    UNKNOWN_METER_POLICY_SKIP,
-)
-from shareomat.web.rendering import FormError, RequestContext, form_bool, render_page
+from shareomat.leg_const import RAW_BACKUP_MODE_OFF, RAW_BACKUP_MODE_REQUIRED
+from shareomat.web.rendering import FormError, RequestContext, render_page
 from shareomat.web.state import get_state
-
-UNKNOWN_METER_POLICIES = [
-    (UNKNOWN_METER_POLICY_FAIL, "Lauf abbrechen (empfohlen)"),
-    (UNKNOWN_METER_POLICY_SKIP, "Unbekannte Messwerte überspringen"),
-]
-
-METER_DATA_SOURCES = [
-    (METER_DATA_SOURCE_EMAIL_CSV, "E-Mail / CSV (aktuell)"),
-    (METER_DATA_SOURCE_SDAT_LEG, "SDAT (EBL/Swisseldex) — offizielle Zuteilung des Netzbetreibers"),
-]
 
 
 RAW_BACKUP_MODES = [
@@ -160,7 +143,11 @@ def _documents_dir(ctx: RequestContext):
 
 
 def handle_get(ctx: RequestContext) -> str:
-    """Render processing settings, the backup card and a read-only technical-config summary."""
+    """Render the raw backup and backup cards and a read-only technical-config summary.
+
+    The processing settings card (meter data source, unknown meters, archiving)
+    went with the CSV path in 0.6.34 (ADR-0012).
+    """
     from shareomat.security.context import current_principal
     from shareomat.web.login import recent_auth_required
 
@@ -168,8 +155,7 @@ def handle_get(ctx: RequestContext) -> str:
     folder = backup_dir(ctx.runtime) if ctx.runtime else None
     return render_page(
         "settings/edit.html", ctx, "settings",
-        settings=settings, runtime=ctx.runtime, policies=UNKNOWN_METER_POLICIES,
-        meter_data_sources=METER_DATA_SOURCES,
+        settings=settings, runtime=ctx.runtime,
         backup_folder=folder, backups=list_backups(folder) if folder else [],
         backup_password_needed=recent_auth_required(current_principal()),
         raw_backup=_raw_backup_view(settings), raw_backup_modes=RAW_BACKUP_MODES,
@@ -191,7 +177,7 @@ def _create_backup(ctx: RequestContext) -> None:
 
 
 def handle_post(ctx: RequestContext) -> str | None:
-    """Save processing settings, or create a backup / confirm the password for downloads."""
+    """Save the raw backup settings, test them, or create a backup / confirm the password for downloads."""
     if ctx.segments == ["backup"]:
         _create_backup(ctx)
         return None
@@ -205,23 +191,4 @@ def handle_post(ctx: RequestContext) -> str | None:
         # The password itself is checked by the web server before this runs.
         get_state().set_flash("Passwort bestätigt. Sicherungen können jetzt 10 Minuten lang heruntergeladen werden.", ok=True)
         return None
-    if ctx.segments:
-        raise FormError("Unbekannte Aktion.")
-    current = get_operation_settings(ctx.db_path)
-    policy = (ctx.form.get("unknown_meter_policy") or "").strip()
-    if policy not in {UNKNOWN_METER_POLICY_FAIL, UNKNOWN_METER_POLICY_SKIP}:
-        raise FormError("Ungültige Auswahl bei 'Umgang mit unbekannten Messpunkten'.")
-
-    meter_data_source = (ctx.form.get("meter_data_source") or "").strip()
-    if meter_data_source not in {METER_DATA_SOURCE_EMAIL_CSV, METER_DATA_SOURCE_SDAT_LEG}:
-        raise FormError("Ungültige Auswahl bei 'Messdaten-Quelle'.")
-
-    updated = replace(
-        current,
-        unknown_meter_policy=policy,
-        archive_processed=form_bool(ctx, "archive_processed"),
-        meter_data_source=meter_data_source,
-    )
-    save_operation_settings(ctx.db_path, updated)
-    get_state().set_flash("Einstellungen gespeichert.", ok=True)
-    return None
+    raise FormError("Unbekannte Aktion.")

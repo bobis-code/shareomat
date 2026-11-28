@@ -5,9 +5,11 @@ File: shareomat/database/billing.py
 Purpose:
     The interactive "Abrechnungen" (billing) workflow: check which meter
     data is available for a user-chosen period, compute a live preview,
-    save it as an immutable draft, release it, or cancel it. Reuses the
-    existing settlement core (leg_parser/leg_matcher/leg_billing)
-    unchanged — only the persistence/versioning around it is new.
+    save it as an immutable draft, release it, or cancel it. The meter data
+    is the grid operator's official SDAT delivery with its own split (LEG /
+    residual energy, ADR-0008); since 0.6.34 it is the only data source
+    (ADR-0012, the CSV path was removed). The split is taken over as it is
+    (official_allocation) and settled by the unchanged leg_billing core.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
@@ -15,7 +17,7 @@ Part of:
 Notes:
     This module is the one deliberate exception to "database/ modules
     contain no core logic": computing a billing preview inherently needs
-    both file parsing (core) and period/version bookkeeping (SQL), and
+    both the official values (core) and period/version bookkeeping (SQL), and
     splitting that across two modules would be more ceremony than
     clarity — the same reasoning already applied to
     shareomat.database.config_builder.
@@ -50,12 +52,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from shareomat.config import RuntimeConfig
-from shareomat.core.collector.leg_import import scan_inbox
-from shareomat.core.leg_runner import parse_file
 from shareomat.core.pipeline.leg_billing import compute_billing
 from shareomat.core.pipeline.official_allocation import OfficialSplit, official_match_results
-from shareomat.core.pipeline.leg_matcher import match_all
-from shareomat.core.pipeline.leg_parser import readings_to_slots
 from shareomat.database.audit import record_event
 from shareomat.database.billing_eligibility import EligibilityResolver
 from shareomat.database.memberships import memberships_needing_review
@@ -66,13 +64,11 @@ from shareomat.database.meters import list_meters
 from shareomat.database.participants import list_participants
 from shareomat.database.tariffs import get_tariff_for_date
 from shareomat.database.sdat_store import SDAT_RESOLUTION_KWH
-from shareomat.database.settings import get_operation_settings
 from shareomat.database.sqlite import connect, date_to_str, now_iso, str_to_date
 from shareomat.leg_const import (
     BILLING_STATUS_CANCELLED,
     BILLING_STATUS_DRAFT,
     BILLING_STATUS_RELEASED,
-    METER_DATA_SOURCE_SDAT_LEG,
     SLOT_MINUTES,
 )
 from shareomat.models.billing_workflow import (
@@ -235,81 +231,6 @@ def _result_fingerprint(preview: BillingPreview) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def _collect_readings_for_period(
-    db_path: Path, runtime: RuntimeConfig, period_start: date, period_end: date,
-    *, persist_readings: bool = True,
-) -> tuple[list[IntervalReading], list[BillingSourceFile], list[str]]:
-    """Parse every inbox + archive file and keep only readings inside the period, de-duplicated.
-
-    Unlike the automatic engine, this deliberately re-parses ALREADY
-    ARCHIVED files too — an interactive billing run is for an arbitrary
-    historical period the user picks, not just "whatever is new".
-
-    Each (meter, quarter hour, direction) counts once: a file whose SHA-256
-    was already read (same file in inbox and archive) is skipped entirely;
-    the same value from two different files is kept once; DIFFERENT values
-    for the same key are a conflict — the newest file wins and the conflict
-    is returned as a blocking issue (never silently summed). Unparseable
-    files are blocking issues too (fail closed).
-    """
-    start_dt, end_dt = _period_bounds(period_start, period_end)
-    meter_data_source = get_operation_settings(db_path).meter_data_source
-
-    files = []
-    for origin, directory in (("inbox", runtime.paths.inbox), ("archive", runtime.paths.archive)):
-        if directory.exists():
-            files.extend((origin, imp) for imp in scan_inbox(directory))
-    files.sort(key=lambda item: item[1].path.stat().st_mtime)  # oldest first, newest wins on conflict
-
-    by_key: dict[tuple, IntervalReading] = {}
-    origin_of: dict[tuple, str] = {}
-    sources: list[BillingSourceFile] = []
-    issues: list[str] = []
-    seen_sha256: set[str] = set()
-    conflicts = 0
-
-    for origin, imp in files:
-        if imp.sha256 in seen_sha256:
-            continue  # identical file already read (e.g. inbox + archive)
-        row_errors: list[str] = []
-        try:
-            file_readings = parse_file(imp, SLOT_MINUTES, None, meter_data_source=meter_data_source,
-                                       errors=row_errors)
-        except Exception as exc:
-            logger.warning("Billing scan: failed to parse %s: %s", imp.path.name, exc)
-            issues.append(f"Datei {imp.path.name} konnte nicht gelesen werden: {exc}")
-            continue
-        in_range = [r for r in file_readings if start_dt <= r.slot_start < end_dt]
-        if row_errors:
-            issues.append(
-                f"Datei {imp.path.name}: {len(row_errors)} Zeile(n) abgewiesen (z. B. {row_errors[0]})."
-            )
-        if not in_range:
-            continue
-        seen_sha256.add(imp.sha256)
-        sources.append(BillingSourceFile(filename=imp.path.name, sha256=imp.sha256, origin=origin))
-        for r in in_range:
-            key = (r.meter_id, r.slot_start, r.direction)
-            previous = by_key.get(key)
-            if previous is not None and abs(previous.value_kwh - r.value_kwh) > 1e-9:
-                conflicts += 1
-                if conflicts <= 5:
-                    issues.append(
-                        f"Widersprüchliche Werte für {r.meter_id} {r.direction} "
-                        f"{r.slot_start.astimezone(_TZ).strftime('%d.%m.%Y %H:%M')}: "
-                        f"{previous.value_kwh} ({origin_of[key]}) vs. {r.value_kwh} ({imp.path.name}) — neuere Datei verwendet."
-                    )
-            by_key[key] = r
-            origin_of[key] = imp.path.name
-    if conflicts > 5:
-        issues.append(f"… insgesamt {conflicts} widersprüchliche Messwerte.")
-
-    readings = list(by_key.values())
-    if persist_readings:
-        save_meter_readings(db_path, readings)
-    return readings, sources, issues
-
-
 def _collect_official_for_period(
     db_path: Path, period_start: date, period_end: date, *, persist_readings: bool = True,
 ) -> tuple[list[IntervalReading], list[BillingSourceFile], list[str], list[str], dict]:
@@ -367,7 +288,8 @@ def _collect_official_for_period(
         splits[(meter_id, channel, slot)] = OfficialSplit(local_kwh=float(local.value), residual_kwh=float(residual.value))
 
     for meter_id, count in sorted(incomplete.items()):
-        hard.append(f"Messpunkt {meter_id}: für {count} Viertelstunde(n) fehlt LEG- oder Restenergie des Netzbetreibers.")
+        # A missing part is a missing value: the quarter hour is left out for the whole LEG (see _incomplete_slots).
+        soft.append(f"Messpunkt {meter_id}: für {count} Viertelstunde(n) fehlt LEG- oder Restenergie des Netzbetreibers.")
     for meter_id, count in sorted(rounded.items()):
         notes.append(
             f"Messpunkt {meter_id}: in {count} Viertelstunde(n) weicht Total um 0.001 kWh von LEG-Energie + "
@@ -455,18 +377,9 @@ def compute_billing_preview(
     days = [period_start + timedelta(days=i) for i in range((period_end - period_start).days + 1)]
     base_config = _base_config(db_path, runtime, days)
     # hard: never releasable (wrong or missing basis); soft: releasable only with a written reason.
-    official = get_operation_settings(db_path).meter_data_source == METER_DATA_SOURCE_SDAT_LEG
-    splits: dict = {}
-    if official:
-        readings, sources, hard, soft, splits, notes = _collect_official_for_period(
-            db_path, period_start, period_end, persist_readings=persist_readings,
-        )
-    else:
-        readings, sources, hard = _collect_readings_for_period(
-            db_path, runtime, period_start, period_end, persist_readings=persist_readings,
-        )
-        soft: list[str] = []
-        notes: list[str] = []
+    readings, sources, hard, soft, splits, notes = _collect_official_for_period(
+        db_path, period_start, period_end, persist_readings=persist_readings,
+    )
     resolver = EligibilityResolver(db_path)
     if resolver.contract_mode:
         # Conflicting data from before schema 18 (ADR-0009): never billed on a guess.
@@ -524,14 +437,30 @@ def compute_billing_preview(
             if present == 0:
                 hard.append(f"Messpunkt {meter_id}: keine Messwerte für {label} im ganzen Zeitraum.")
             elif present < expected:
-                # Official data: a final month must be complete - a missing value is never billed as 0
-                # and can't be waved through with a written reason (review 20.11.2026).
-                (hard if official else soft).append(
+                # A missing value is never billed as a value: the quarter hour is left out for the whole LEG
+                # (_incomplete_slots). Releasable only with a written reason (operator, 28.11.2026; until then
+                # a hard issue, review 20.11.2026).
+                soft.append(
                     f"Messpunkt {meter_id} ({label}): {expected - present} von {expected} Viertelstunden ohne Messwert."
-                    + (" Beim Netzbetreiber nachfordern oder Beitritt / bestätigten LEG-Start prüfen." if official else "")
+                    " Beim Netzbetreiber nachfordern oder Beitritt / bestätigten LEG-Start prüfen."
                 )
+    incomplete_slots = _incomplete_slots(days, tariffs_by_day, eligible_by_day, role_of, billable)
+    billed = [r for r in billable if r.slot_start not in incomplete_slots]
+    if incomplete_slots:
+        # The LEG energy of a left-out quarter hour, from whichever side is complete (received or supplied).
+        sides: dict[datetime, list[Decimal]] = {}
+        for r in billable:
+            key = (r.meter_id, r.direction, r.slot_start)
+            if r.slot_start in incomplete_slots and key in splits:
+                side = sides.setdefault(r.slot_start, [Decimal(0), Decimal(0)])
+                side[0 if r.direction == "import" else 1] += Decimal(str(splits[key].local_kwh))
+        left_out_kwh = sum((max(received, supplied) for received, supplied in sides.values()), Decimal(0))
+        soft.append(
+            f"Nicht abgerechnet: {len(incomplete_slots)} Viertelstunde(n) mit fehlenden Werten des Netzbetreibers, "
+            f"für alle Teilnehmer (zusammen {left_out_kwh:.3f} kWh LEG-Energie). Freigabe nur mit Begründung."
+        )
     if days_without_tariff:
-        (hard if official else soft).append(
+        hard.append(
             f"Kein gültiger LEG-Preis für {len(days_without_tariff)} Tag(e) ab "
             f"{days_without_tariff[0].strftime('%d.%m.%Y')} — diese Tage wurden nicht abgerechnet."
         )
@@ -553,7 +482,7 @@ def compute_billing_preview(
     totals: dict[str, dict] = {}
     readings_by_tariff: dict[int, list[IntervalReading]] = {}
     tariff_obj: dict[int, object] = {}
-    for r in billable:
+    for r in billed:
         t = tariffs_by_day[_local_day(r.slot_start)]
         readings_by_tariff.setdefault(t.id, []).append(r)
         tariff_obj[t.id] = t
@@ -566,7 +495,7 @@ def compute_billing_preview(
         t = tariff_obj[tariff_id]
         config = replace(base_config, tariff=t, meters=meters_all, participants=participants_all)
         # Official SDAT data is already allocated by the grid operator: take it over, never distribute again.
-        match_results = official_match_results(group, splits) if official else match_all(readings_to_slots(group))
+        match_results = official_match_results(group, splits)
         records = compute_billing(match_results, config, start_dt, end_dt, source_files=[x.filename for x in sources])
         group_fee, group_rounding = _balance_of_group(t, records)
         balance_fee += group_fee
@@ -613,18 +542,13 @@ def compute_billing_preview(
     # Energy clearing: every LEG kWh received was supplied by someone in the same quarter hour.
     received_total = sum(acc["local_received"] for acc in totals.values())
     supplied_total = sum(acc["local_supplied"] for acc in totals.values())
-    if official:
-        basis_hard, basis_soft = _official_monthly_basis(db_path, period_start, period_end, billable)
-        hard.extend(basis_hard)
-        soft.extend(basis_soft)
-        hard.extend(_official_energy_outside_billing(readings, billable, splits))
-        clearing_hard, clearing_notes = _official_clearing(billable, splits)
-        hard.extend(clearing_hard)
-        notes.extend(clearing_notes)
-    elif abs(received_total - supplied_total) > 1e-6:
-        hard.append(
-            f"Energie-Clearing stimmt nicht: bezogen {received_total:.4f} kWh ≠ geliefert {supplied_total:.4f} kWh."
-        )
+    basis_hard, basis_soft = _official_monthly_basis(db_path, period_start, period_end, billable)
+    hard.extend(basis_hard)
+    soft.extend(basis_soft)
+    hard.extend(_official_energy_outside_billing(readings, billable, splits))
+    clearing_hard, clearing_notes = _official_clearing(billed, splits)
+    hard.extend(clearing_hard)
+    notes.extend(clearing_notes)
     # Money clearing (contract prices): Bezugspreis = Produzentenvergütung + Verwaltungsgebühr, so consumers pay
     # exactly the producers' credits plus the agreed fee — any other margin has no contractual basis.
     if resolver.contract_mode:
@@ -664,9 +588,6 @@ def compute_billing_preview(
         grid_rate_chf_kwh=reference_tariff.grid_rate_chf_kwh,
         feed_in_rate_chf_kwh=reference_tariff.feed_in_rate_chf_kwh,
         line_items=line_items,
-        official_source=official,
-        # The preview showed "no data" while the grid operator's values were imported (20.11.2026).
-        official_data_unused=not official and _official_data_exists(db_path, period_start, period_end),
         money=MoneyBalance(
             consumers=sum((acc["local_cost"] for acc in totals.values()), Decimal(0)),
             producers=sum((acc["payout"] for acc in totals.values()), Decimal(0)),
@@ -685,6 +606,34 @@ _RUN_SELECT = """
     FROM billing_runs
     JOIN billing_periods ON billing_periods.id = billing_runs.billing_period_id
 """
+
+
+def _slots_of_local_day(day: date) -> list[datetime]:
+    """UTC starts of all quarter hours of a local day (92 / 96 / 100 with the DST changes)."""
+    start, _ = _period_bounds(day, day)
+    return [start + timedelta(minutes=SLOT_MINUTES * i) for i in range(_slots_in_local_day(day))]
+
+
+def _incomplete_slots(days, tariffs_by_day, eligible_by_day, role_of, billable) -> set[datetime]:
+    """Quarter hours in which an eligible meter lacks a required value of the grid operator.
+
+    Decision of the operator (28.11.2026): such a quarter hour is not billed, for the whole LEG.
+    Leaving out only the meter without a value would credit producers for LEG energy nobody pays
+    for (the money balance, B28, would refuse the documents). Release needs a written reason.
+    """
+    present: dict[datetime, set[tuple[str, str]]] = {}
+    for r in billable:
+        present.setdefault(r.slot_start, set()).add((r.meter_id, r.direction))
+    incomplete: set[datetime] = set()
+    for day in days:
+        meters = eligible_by_day.get(day) or {}
+        if tariffs_by_day.get(day) is None or not meters:
+            continue
+        required = {(m, d) for m in meters for d in _REQUIRED_CHANNELS.get(role_of.get(m, ""), ("import", "export"))}
+        for slot in _slots_of_local_day(day):
+            if not required <= present.get(slot, set()):
+                incomplete.add(slot)
+    return incomplete
 
 
 def _official_clearing(billable, splits) -> tuple[list[str], list[str]]:
@@ -732,14 +681,6 @@ def _official_clearing(billable, splits) -> tuple[list[str], list[str]]:
             f"(zusammen {rounded_kwh:+.3f} kWh). Abgerechnet werden die Werte des Netzbetreibers."
         )
     return hard, notes
-
-
-def _official_data_exists(db_path: Path, period_start: date, period_end: date) -> bool:
-    """Whether imported official SDAT values of this community fall into the period."""
-    from shareomat.database.sdat_store import load_official_values
-
-    start_dt, end_dt = _period_bounds(period_start, period_end)
-    return bool(load_official_values(db_path, start_dt, end_dt).values)
 
 
 def _month_parts(period_start: date, period_end: date) -> list[tuple[date, date]]:
@@ -836,10 +777,8 @@ def released_runs_needing_review(db_path: Path, runtime: RuntimeConfig, start: d
 
     Called after new official data was imported. A released run is never
     changed (ADR-0001); the operator gets a notice to check for a correction
-    billing instead. Only meaningful for the official data source.
+    billing instead.
     """
-    if get_operation_settings(db_path).meter_data_source != METER_DATA_SOURCE_SDAT_LEG:
-        return []
     affected = []
     for run in list_billing_runs(db_path):
         if run.status != BILLING_STATUS_RELEASED or run.period_start is None or not run.result_fingerprint:
@@ -950,37 +889,6 @@ def _workflow_transaction(db_path: Path) -> Iterator[sqlite3.Connection]:
         raise
 
 
-def _release_file_state(runtime: RuntimeConfig) -> list[tuple[str, int, int, str]]:
-    """Observe file content AND ordering metadata; SQLite cannot lock source files.
-
-    Include all supported files, even outside the period: a new file can
-    contain relevant readings. Fail closed on unreadable/disappearing files.
-    This detects changes during validation, but is not a filesystem lock.
-    """
-    state = []
-    try:
-        for directory in (runtime.paths.inbox, runtime.paths.archive):
-            if not directory.exists():
-                continue
-            for path in sorted(directory.iterdir()):
-                if path.suffix.lower() not in {".csv", ".xml", ".sdat", ".xlsx"} or not path.is_file():
-                    continue
-                before = path.stat()
-                with path.open("rb") as stream:
-                    digest = hashlib.file_digest(stream, "sha256").hexdigest()
-                after = path.stat()
-                if (before.st_size, before.st_mtime_ns, before.st_ino) != (
-                    after.st_size, after.st_mtime_ns, after.st_ino,
-                ):
-                    raise BillingWorkflowError("Messdateien haben sich während der Freigabe geändert — bitte erneut prüfen.")
-                state.append((str(path), after.st_size, after.st_mtime_ns, digest))
-    except OSError as exc:
-        raise BillingWorkflowError(
-            "Messdateien konnten während der Freigabe nicht verlässlich geprüft werden — bitte erneut versuchen."
-        ) from exc
-    return state
-
-
 def save_draft(db_path: Path, preview: BillingPreview) -> BillingRun:
     """Persist a computed preview as a new draft BillingRun (a new version if the period already has runs)."""
     now = now_iso()
@@ -1086,22 +994,23 @@ def release_billing_run(
 ) -> BillingRun:
     """Release a draft — from this point its billing_records are permanently immutable.
 
-    Hard issues (wrong or missing basis: nothing billable, unreadable or
-    conflicting data, unknown meters, clearing errors, unsupported storage)
-    can never be released. Soft issues (data gaps, missing grid-operator
-    confirmations) need a written reason, stored on the run and in the
-    audit log. With `runtime`, the period is recomputed first and the
-    release refused if anything changed since the draft was saved.
-    Recompute without writes, then reserve the SQLite writer and compare
-    data_version on the SAME connection. Any intervening commit invalidates
-    validation. Source files are observed before/after, not locked by SQLite.
+    Hard issues (wrong or missing basis: nothing billable, missing or
+    contradictory official values, unknown meters, clearing errors,
+    unsupported storage) can never be released. Soft issues (substitute
+    values, missing grid-operator confirmations) need a written reason,
+    stored on the run and in the audit log. With `runtime`, the period is
+    recomputed first and the release refused if anything changed since the
+    draft was saved. Recompute without writes, then reserve the SQLite
+    writer and compare data_version on the SAME connection. Any intervening
+    commit invalidates validation; since the official data is in the
+    database too, nothing outside it has to be observed.
     """
     with _workflow_transaction(db_path) as conn:
         version = conn.execute("PRAGMA data_version").fetchone()[0]
         draft = get_billing_run(db_path, run_id).run
-        checked_files = None
+        recomputed = False
         if runtime is not None and draft.status == BILLING_STATUS_DRAFT and draft.result_fingerprint:
-            checked_files = _release_file_state(runtime)
+            recomputed = True
             try:
                 current = compute_billing_preview(
                     db_path, runtime, draft.period_start, draft.period_end, persist_readings=False,
@@ -1116,15 +1025,10 @@ def release_billing_run(
                     "bitte den Zeitraum neu berechnen und als neuen Entwurf speichern."
                 )
         conn.execute("BEGIN IMMEDIATE")
-        if checked_files is not None:
-            if conn.execute("PRAGMA data_version").fetchone()[0] != version:
-                raise BillingWorkflowError(
-                    "Die Datenbank hat sich während der Freigabe geändert — bitte erneut prüfen und freigeben."
-                )
-            if _release_file_state(runtime) != checked_files:
-                raise BillingWorkflowError(
-                    "Messdateien haben sich während der Freigabe geändert — bitte erneut prüfen und freigeben."
-                )
+        if recomputed and conn.execute("PRAGMA data_version").fetchone()[0] != version:
+            raise BillingWorkflowError(
+                "Die Datenbank hat sich während der Freigabe geändert — bitte erneut prüfen und freigeben."
+            )
         row = conn.execute("SELECT status, quality_issues FROM billing_runs WHERE id = ?", (run_id,)).fetchone()
         if row is None:
             raise BillingWorkflowError(f"Abrechnung {run_id} wurde nicht gefunden.")

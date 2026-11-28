@@ -89,6 +89,9 @@ docs/decisions/ADR-NNNN-kurzbeschreibung.md
 * [ADR-0012](ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md) —
   Architekturumbau: mehrere LEGs, eigenständiger Betrieb, Aufteilung der Daten (ersetzt ADR-0008
   teilweise)
+* [ADR-0013](ADR-0013-fehlende-viertelstunden-und-freigabe-mit-begruendung.md) —
+  Fehlende Viertelstunden werden für die ganze LEG nicht abgerechnet; Freigabe mit Begründung ist
+  verrechenbar, Versand nur von Hand
 
 ## Verbindlichkeit
 

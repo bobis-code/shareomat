@@ -77,3 +77,43 @@ configuration:
       from_name:
         name: Absendername (optional)
         description: Zum Beispiel der Name der Gemeinschaft
+  command_topic_enabled:
+    name: MQTT-Befehl run_once (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  share_inbox:
+    name: Share-Ordner für Messdateien (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_enabled:
+    name: E-Mail-Import von Messdateien (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_imap_host:
+    name: IMAP-Server (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_imap_port:
+    name: IMAP-Port (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_username:
+    name: IMAP-Benutzername (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_password:
+    name: IMAP-Passwort (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_folder:
+    name: IMAP-Ordner (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_allowed_senders:
+    name: Erlaubte Absender (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.
+  email_poll_interval_seconds:
+    name: IMAP-Abfrageintervall (nicht mehr verwendet)
+    description: >-
+      Seit 0.6.34 nicht mehr verwendet: Messdaten kommen nur noch vom Netzbetreiber über Swisseldex. Bleibt bis zur neuen Konfiguration bestehen, damit die bisherigen Einstellungen weiter geladen werden.

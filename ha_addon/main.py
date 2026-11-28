@@ -5,9 +5,9 @@ File: main.py
 Purpose:
     Entry point for the Shareomat settlement engine and admin web
     interface. Loads the technical runtime configuration, opens (and if
-    needed initializes/imports) the SQLite administrative database, runs
-    the settlement cycle, and optionally enters daemon mode for
-    scheduled/command-triggered runs.
+    needed initializes/imports) the SQLite administrative database, and
+    starts the long-running parts: MQTT, live layer, Sparkplug with the
+    coordinator clock, the web UI and the Swisseldex receiver.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
@@ -16,13 +16,14 @@ Notes:
     Master data (community, participants, meters, tariff, operating
     settings) lives in SQLite, not in the runtime YAML — see
     SHAREOMAT_UMBAU_STRUKTUR.md. A fresh installation with an empty
-    database is not an error: the web UI shows a setup wizard, and
-    settlement runs are skipped (not crashed) until setup is complete.
+    database is not an error: the web UI shows a setup wizard.
 
-    Every settlement run rebuilds LegConfig fresh from SQLite
-    (shareomat.database.config_builder.build_leg_config) immediately
-    before calling shareomat.core.leg_runner.run(), so edits made in the
-    admin web UI take effect on the very next run.
+    Since 0.6.34 there is no settlement run in the background (ADR-0012):
+    the meter data is the grid operator's SDAT delivery, imported by the
+    Swisseldex receiver, and billing is the interactive workflow in the
+    web UI. Everything that needs the configuration builds LegConfig fresh
+    from SQLite (shareomat.database.config_builder.build_leg_config), so
+    edits made in the admin web UI take effect at once.
 
     Environment variables:
         SHAREOMAT_RUNTIME_CONFIG_PATH / SHAREOMAT_CONFIG_PATH
@@ -58,7 +59,6 @@ from shareomat.config import (
     load_runtime_config,
     validate_leg_config,
 )
-from shareomat.core.leg_runner import run
 from shareomat.core.pipeline.consumption_forecast import LOOKBACK_WEEKS, compute_leg_demand_forecast
 from shareomat.core.pipeline.export_price_forecast import fetch_and_persist_day_ahead_prices
 from shareomat.core.pipeline.leg_billing import resolve_producer_rate_series
@@ -67,10 +67,9 @@ from shareomat.database.consumption_forecasts import latest_computed_at, list_co
 from shareomat.database.day_ahead_prices import latest_fetched_at, list_day_ahead_prices
 from shareomat.database.external_settings import get_external_data_settings
 from shareomat.database.meter_readings import list_meter_readings
-from shareomat.database.settings import OperationSettings, get_operation_settings
 from shareomat.database.sqlite import init_db, resolve_db_path
 from shareomat.database.yaml_import import import_legacy_yaml_if_empty
-from shareomat.ha.mqtt_runtime import setup_mqtt, should_run_daemon, shutdown_mqtt
+from shareomat.ha.mqtt_runtime import setup_mqtt, shutdown_mqtt
 from shareomat.sparkplug import coordinator_mapping
 from shareomat.sparkplug.bridge import mirror_host_to_uplink
 from shareomat.sparkplug.coordinator_store import coordinator_db_path, ensure_separate_from, init_coordinator_db
@@ -98,12 +97,11 @@ _COORDINATOR_INTERVAL_SECONDS = 900.0
 _COORDINATOR_POLL_SECONDS = 5.0
 # How long a shutdown waits for running coordinator tasks. Home Assistant stops an add-on after 10 s.
 _COORDINATOR_STOP_TIMEOUT_SECONDS = 5.0
-# Web requests and a running settlement together. With the coordinator (5 s), Sparkplug and the
+# Running web requests (a release included). With the coordinator (5 s), Sparkplug and the
 # live layer this stays below the 30 s in ha_addon/config.yaml, after which Home Assistant kills the add-on.
 _SHUTDOWN_DRAIN_SECONDS = 15.0
 
 logger = logging.getLogger(__name__)
-_RUN_LOCK = threading.Lock()
 _COORDINATOR_LOCK = threading.Lock()
 _COORDINATOR_STOP = threading.Event()
 _COORDINATOR_THREAD_LOCK = threading.Lock()
@@ -125,11 +123,11 @@ def _coordinator_store(db_path: Path) -> Path:
 def _maybe_recompute_demand_forecast(db_path: Path) -> None:
     """Recompute the LEG demand forecast if the last one is stale, then always publish the latest.
 
-    Throttled independently of the settlement cycle itself: _run_safe_cycle
-    can run often (watcher/cron), but weekday/time-of-day consumption
-    patterns don't meaningfully change within half an hour, so recomputing
-    every cycle would be wasted work — publish always reflects the most
-    recently stored forecast regardless of whether this call recomputed it.
+    Throttled: the coordinator clock runs every 15 minutes, but weekday/
+    time-of-day consumption patterns don't meaningfully change within half
+    an hour, so recomputing every time would be wasted work — publish always
+    reflects the most recently stored forecast regardless of whether this
+    call recomputed it.
     """
     store = _coordinator_store(db_path)
     now = datetime.now(timezone.utc)
@@ -142,8 +140,7 @@ def _maybe_recompute_demand_forecast(db_path: Path) -> None:
 
 def _maybe_recompute_export_price_forecast(db_path: Path) -> None:
     """Fetch/persist native-resolution ENTSO-E day-ahead prices if stale,
-    throttled independently of the settlement cycle (same pattern as
-    _maybe_recompute_demand_forecast above). No-op without a configured
+    throttled (same pattern as _maybe_recompute_demand_forecast above). No-op without a configured
     ENTSO-E token - graceful degradation, not an error (see
     fetch_and_persist_day_ahead_prices())."""
     token = get_external_data_settings(db_path).entsoe_api_token
@@ -219,30 +216,6 @@ def setup_logging() -> None:
     )
 
 
-def _update_web_state(runtime: RuntimeConfig, status: str, error: str = "") -> None:
-    """Update the admin dashboard state after a settlement run attempt."""
-    try:
-        from datetime import datetime, timezone
-        state = get_web_state()
-        inbox_count = (
-            sum(1 for f in runtime.paths.inbox.iterdir() if f.is_file())
-            if runtime.paths.inbox.exists() else 0
-        )
-        report_count = (
-            sum(1 for f in runtime.paths.reports.iterdir() if f.is_file())
-            if runtime.paths.reports.exists() else 0
-        )
-        state.update(
-            status=status,
-            last_run=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            inbox_count=inbox_count,
-            report_count=report_count,
-            last_error=error,
-        )
-    except Exception as exc:
-        logger.warning("Web state update failed: %s", exc)
-
-
 def _report_communication_problem(message: str) -> None:
     """Log a communication configuration problem once and show it on the dashboard."""
     global _reported_communication_problem
@@ -257,17 +230,35 @@ def _report_communication_problem(message: str) -> None:
 
 
 def _validate_for_billing(config: LegConfig) -> None:
-    """Validate a settlement configuration; only billing errors stop the run.
+    """Validate a configuration; a Sparkplug/WAN problem is only reported.
 
     The rules stay in validate_leg_config() unchanged. Sparkplug and WAN are not
     needed to settle: an invalid combination is reported, and the affected
-    connection is not started (_setup_sparkplug), but billing goes on.
+    connection is not started (_setup_sparkplug), but billing goes on. Any other
+    ValueError is a billing configuration error and is raised.
     """
     try:
         validate_leg_config(config)
     except ValueError as exc:
         validate_leg_config(dataclasses.replace(config, sparkplug=SparkplugConfig(), wan=WanConfig()))
         _report_communication_problem(str(exc))
+
+
+def _check_configuration(runtime: RuntimeConfig, db_path: Path) -> None:
+    """At startup: report an invalid configuration once in the log and on the dashboard.
+
+    Until 0.6.33 this happened in the settlement run at startup (removed with
+    the CSV path, ADR-0012). A setup that is not complete yet is no error.
+    """
+    try:
+        _validate_for_billing(build_leg_config(db_path, runtime))
+    except IncompleteConfigError as exc:
+        logger.info("Configuration not complete yet: %s", exc)
+    except ValueError as exc:
+        logger.error("Invalid configuration: %s", exc)
+        get_web_state().add_warning(f"Konfiguration ungültig: {exc}")
+    except Exception:
+        logger.exception("Configuration could not be checked")
 
 
 def _coordinator_step(name: str, step: Callable[[], None]) -> None:
@@ -292,9 +283,9 @@ def _publish_coordinator_if_running(sparkplug_host: SparkplugHost, config: LegCo
 def _run_coordinator_tasks(sparkplug_host: SparkplugHost, config: LegConfig, db_path: Path) -> None:
     """Forecast, price fetch and LEG data for Emsomat (automatic, only with Emsomat online).
 
-    Runs outside _RUN_LOCK: a slow price server or a failing forecast can neither
-    delay nor block a settlement run. Forecast and prices are only ever used for
-    this message, so without an Emsomat session there is nothing to do.
+    Runs in its own thread: a slow price server or a failing forecast can neither
+    delay nor block billing. Forecast and prices are only ever used for this
+    message, so without an Emsomat session there is nothing to do.
     """
     if not _COORDINATOR_LOCK.acquire(blocking=False):
         logger.debug("Sparkplug coordinator tasks already running, skipped")
@@ -345,10 +336,10 @@ def _coordinator_due(now: float, last: float | None, online: bool, was_online: b
 
 
 def _coordinator_clock(runtime: RuntimeConfig, db_path: Path, sparkplug_host: SparkplugHost) -> None:
-    """Start the coordinator tasks on their own clock, independent of any billing or file run (B27).
+    """Start the coordinator tasks on their own clock, independent of billing (B27).
 
     Until 0.6.33 forecast, price fetch and LEG data only went to Emsomat at the end of a settlement
-    cycle, i.e. the CSV run. Contents and topics are unchanged; only the trigger is new.
+    cycle, i.e. the CSV run (removed in 0.6.34). Contents and topics are unchanged; only the trigger is new.
     """
     last: float | None = None
     was_online = False
@@ -393,67 +384,6 @@ def _stop_coordinator() -> None:
             "Sparkplug coordinator task still running after %.0f s (forecast or price request cannot be "
             "aborted); left behind, it sends nothing more", _COORDINATOR_STOP_TIMEOUT_SECONDS,
         )
-
-
-def _run_safe_cycle(
-    runtime: RuntimeConfig, db_path: Path, mqtt_client: object | None,
-    sparkplug_host: SparkplugHost | None = None,
-) -> bool:
-    """Build a fresh LegConfig from SQLite and run one settlement cycle, unless one is active.
-
-    Every trigger path (startup, MQTT command, cron, file watcher, share
-    importer, and the web UI) goes through this function, so the lock
-    protects the inbox, archive, reports, and processed-file state from
-    concurrent settlement runs.
-    """
-    if _SHUTDOWN.is_set():
-        logger.info("Settlement run skipped: shutting down")
-        return False
-    if not _RUN_LOCK.acquire(blocking=False):
-        logger.warning("Settlement run skipped: another run is already active")
-        try:
-            get_web_state().set_flash(
-                "Lauf übersprungen: Es läuft bereits ein Abrechnungslauf.", ok=False,
-            )
-        except Exception as exc:
-            logger.debug("Could not publish skipped-run notice to web UI: %s", exc)
-        return False
-
-    try:
-        try:
-            config = build_leg_config(db_path, runtime)
-            _validate_for_billing(config)
-        except IncompleteConfigError as exc:
-            logger.info("Settlement run skipped: %s", exc)
-            _update_web_state(runtime, "starting", str(exc))
-            return False
-        except ValueError as exc:
-            logger.error("Settlement run skipped: invalid configuration: %s", exc)
-            _update_web_state(runtime, "error", str(exc))
-            return False
-
-        try:
-            run(config, mqtt_client=mqtt_client, db_path=db_path)
-            _update_web_state(runtime, "ok", "")
-            return True
-        except Exception as exc:
-            logger.error("Settlement run failed: %s", exc)
-            if mqtt_client is not None:
-                from shareomat.ha.mqtt_runtime import publish_status
-                publish_status(mqtt_client, "error", runtime.mqtt)
-            _update_web_state(runtime, "error", str(exc))
-            return True
-        finally:
-            # Published on every cycle, independent of run() outcome, so
-            # Coordinator-/Market-data stays fresh on the normal cron
-            # cadence even on cycles where the inbox had nothing new. Only
-            # the local Sparkplug channel (ADR-0004) - no plain-MQTT
-            # fallback if Sparkplug is unavailable (Hard Cut). The work itself
-            # runs in the background, outside the settlement lock.
-            if sparkplug_host is not None:
-                _start_coordinator_tasks(sparkplug_host, config, db_path)
-    finally:
-        _RUN_LOCK.release()
 
 
 def _setup_live(db_path: Path, runtime: RuntimeConfig, mqtt_client: object | None) -> object | None:
@@ -501,8 +431,8 @@ def _log_automatic_functions(runtime: RuntimeConfig, db_path: Path, sparkplug_ho
     except Exception:
         price_fetch = "unknown"
     logger.info(
-        "Automatic functions: Sparkplug receives Emsomat node %s; while Emsomat is online each settlement "
-        "cycle also computes the demand forecast, sends LEG data to Emsomat; price fetch: %s",
+        "Automatic functions: Sparkplug receives Emsomat node %s; while Emsomat is online the demand forecast "
+        "and LEG data go to Emsomat every 15 minutes and when it comes online; price fetch: %s",
         runtime.sparkplug.emsomat_edge_node_id, price_fetch,
     )
 
@@ -529,16 +459,12 @@ def _notice_released_corrections(db_path: Path, runtime: RuntimeConfig, outcomes
 def _swisseldex_importer(db_path: Path, runtime: RuntimeConfig) -> Callable[[list, bool], list | None]:
     """SX-2 import of received files, then the correction notice for released periods.
 
-    Automatic (after a sync) only with the data source SDAT. With the default
-    source the official data is not used for billing, and an import - a write
-    to shareomat.db - must not be able to interrupt a running release (it
-    checks PRAGMA data_version). There the operator imports with the button.
+    Automatic after every sync: the official data is the only meter data
+    source (ADR-0012). An import during a release makes that release refuse
+    (PRAGMA data_version) - nothing is released on data that just changed.
     """
     def run_import(files: list, automatic: bool) -> list | None:
         from shareomat.core.collector.sdat_import import import_pending
-        from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
-        if automatic and get_operation_settings(db_path).meter_data_source != METER_DATA_SOURCE_SDAT_LEG:
-            return None
         outcomes = import_pending(db_path, files, origin="swisseldex")
         try:
             _notice_released_corrections(db_path, runtime, outcomes)
@@ -682,8 +608,8 @@ def _stop_sparkplug(components: tuple[object | None, ...]) -> None:
 class _ShutdownSequence:
     """Stops what was actually started, exactly once and newest first.
 
-    Start order gives the right stop order: daemon threads, web server, running
-    settlement, coordinator and Sparkplug, live layer, MQTT. A failing step does
+    Start order gives the right stop order: Swisseldex receiver, web server,
+    coordinator and Sparkplug, live layer, MQTT. A failing step does
     not keep the others from running. Whatever is still alive at the end is
     logged; the process then exits, and SQLite rolls back unfinished transactions.
     """
@@ -719,14 +645,6 @@ def _drain_seconds_left() -> float:
     return max(0.0, _shutdown_deadline - time.monotonic())
 
 
-def _wait_for_running_settlement() -> None:
-    """A cycle started by the scheduler, the watcher or the web UI may finish, within the deadline."""
-    if not _RUN_LOCK.acquire(timeout=_drain_seconds_left()):
-        logger.warning("A settlement run is still active at the end of the shutdown deadline")
-        return
-    _RUN_LOCK.release()
-
-
 def _request_shutdown(signum, frame) -> None:
     """SIGTERM and Ctrl+C ask for the shutdown; running work is not torn apart.
 
@@ -749,92 +667,15 @@ def _wait_for_shutdown() -> None:
         pass
 
 
-def _run_daemon(
-    runtime: RuntimeConfig,
-    mqtt_client: object | None,
-    settings: OperationSettings,
-    on_run: Callable[[], None],
-    *,
-    shutdown: _ShutdownSequence,
-) -> None:
-    """Start all background daemon services and block until a shutdown is requested."""
-    threads = []
-
-    if mqtt_client is not None and runtime.mqtt.command_topic_enabled:
-        from shareomat.ha.mqtt_runtime import setup_command_subscription
-        setup_command_subscription(mqtt_client, on_run, runtime.mqtt)
-
-    if settings.cron_schedule:
-        from shareomat.core.collector.leg_scheduler import SchedulerThread
-        t = SchedulerThread(settings.cron_schedule, on_run)
-        t.start()
-        threads.append(t)
-        shutdown.add("cron scheduler", t.stop)
-        logger.info("Cron scheduler started: %s", settings.cron_schedule)
-
-    if runtime.paths.share_inbox:
-        from shareomat.core.collector.leg_share_importer import ShareImporterThread
-        share_t = ShareImporterThread(
-            share_path=Path(runtime.paths.share_inbox),
-            inbox_path=runtime.paths.inbox,
-            interval=settings.scan_interval_seconds,
-        )
-        share_t.start()
-        threads.append(share_t)
-        shutdown.add("share importer", share_t.stop)
-        logger.info("Share importer started: %s", runtime.paths.share_inbox)
-
-    if runtime.email.enabled:
-        get_web_state().add_warning(
-            "E-Mail-Import: Der From-Filter authentifiziert keine Absender. "
-            "Der empfangende Mailserver muss vertrauenswürdige Zustellung gewährleisten."
-            + (" Die leere Absenderliste erlaubt Nachrichten von allen Absendern."
-               if not any(address.strip() for address in runtime.email.allowed_senders) else "")
-        )
-        from shareomat.core.collector.leg_email_importer import EmailImporterThread
-        email_t = EmailImporterThread(
-            imap_host=runtime.email.imap_host,
-            imap_port=runtime.email.imap_port,
-            username=runtime.email.username,
-            password=runtime.email.password,
-            folder=runtime.email.folder,
-            allowed_senders=runtime.email.allowed_senders,
-            inbox_path=runtime.paths.inbox,
-            state_dir=runtime.paths.state,
-            interval=runtime.email.poll_interval_seconds,
-        )
-        email_t.start()
-        threads.append(email_t)
-        shutdown.add("email importer", email_t.stop)
-        logger.info("Email importer started: %s@%s", runtime.email.username, runtime.email.imap_host)
-
-    watcher = None
-    if settings.auto_scan_enabled:
-        from shareomat.core.collector.leg_watcher import WatcherThread
-        watcher = WatcherThread(
-            runtime.paths.inbox,
-            on_run,
-            interval=settings.scan_interval_seconds,
-        )
-        watcher.start()
-        threads.append(watcher)
-        shutdown.add("file watcher", watcher.stop)
-        if mqtt_client is not None:
-            from shareomat.ha.mqtt_runtime import register_watcher
-            register_watcher(watcher)
-        if mqtt_client is not None:
-            prefix = runtime.mqtt.topic_prefix
-            mqtt_client.publish(f"{prefix}/auto_scan/state", "ON", qos=runtime.mqtt.qos, retain=True)
-
-    service_count = len(threads)
-    if mqtt_client is not None and runtime.mqtt.command_topic_enabled:
-        service_count += 1
-    if service_count == 0:
-        logger.warning("Daemon mode requested but no services configured — exiting")
-        return
-
-    logger.info("Daemon mode active — %d service(s) running", service_count)
-    _wait_for_shutdown()
+def _publish_ha_discovery(mqtt_client: object, runtime: RuntimeConfig, db_path: Path) -> None:
+    """Engine status sensor at startup (B26), and the entities of the former CSV run removed (P2d)."""
+    from shareomat.database.participants import list_participants
+    from shareomat.ha.mqtt_discovery import publish_engine_discovery, retire_entities
+    try:
+        publish_engine_discovery(mqtt_client, runtime.mqtt)
+        retire_entities(mqtt_client, runtime.mqtt, [p.participant_id for p in list_participants(db_path)])
+    except Exception:
+        logger.exception("HA Discovery could not be published; everything else keeps running")
 
 
 def _prepare_login(db_path, runtime) -> None:
@@ -858,7 +699,7 @@ def _serve_degraded(message: str, *, port: int = 8099, shutdown: _ShutdownSequen
     shutdown.add("web server", lambda: web_server.stop(timeout=_drain_seconds_left()))
 
     state = get_web_state()
-    state.update(status="error", last_run="-", inbox_count=0, report_count=0, last_error=message)
+    state.update(status="error")
     state.add_warning(
         "Shareomat konnte nicht vollständig starten, weil die technische Konfiguration "
         "fehlerhaft oder unvollständig ist. Bitte die Add-on-Konfiguration bzw. "
@@ -879,8 +720,7 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
         _serve_degraded(str(exc), shutdown=shutdown)
         return
 
-    for directory in (runtime.paths.inbox, runtime.paths.archive, runtime.paths.reports, runtime.paths.state):
-        directory.mkdir(parents=True, exist_ok=True)
+    runtime.paths.state.mkdir(parents=True, exist_ok=True)
 
     db_path = resolve_db_path()
     init_db(db_path)
@@ -920,7 +760,6 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
     _log_automatic_functions(runtime, db_path, sparkplug_host)
     if sparkplug_host is not None:
         _start_coordinator_clock(runtime, db_path, sparkplug_host)
-    shutdown.add("running settlement", _wait_for_running_settlement)
     if _SHUTDOWN.is_set():
         return
 
@@ -934,7 +773,6 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
         state.register_runtime(runtime)
         state.register_live_service(live_service)
         _prepare_login(db_path, runtime)
-        state.register_on_run(lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host))
         if sparkplug_host is not None:
             state.register_emsomat_online(lambda: sparkplug_host.emsomat_online)
         for warning in startup_warnings:
@@ -949,30 +787,22 @@ def _start_and_serve(shutdown: _ShutdownSequence) -> None:
     if _SHUTDOWN.is_set():
         return
 
+    _check_configuration(runtime, db_path)
+    get_web_state().update(status="ok")
     if mqtt_client is not None:
-        # "ok" as soon as Shareomat runs, also after a reconnect - not only after a CSV run (P2a).
+        # "ok" as soon as Shareomat runs, also after a reconnect (P2a).
         from shareomat.ha.mqtt_runtime import mark_running
         mark_running(mqtt_client, runtime.mqtt)
+        _publish_ha_discovery(mqtt_client, runtime, db_path)
 
-    # A signal during this cycle only sets the flag: the cycle ends normally, then the shutdown runs.
-    _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host)
-    if _SHUTDOWN.is_set():
+    parts = (("web UI", web_server), ("Swisseldex receiver", swisseldex), ("Sparkplug", sparkplug_host),
+             ("live layer", live_service), ("MQTT", mqtt_client))
+    running = [name for name, part in parts if part is not None]
+    if not running:
+        logger.warning("Nothing to run: web UI, Swisseldex, Sparkplug, live layer and MQTT are all off - exiting")
         return
-
-    settings = get_operation_settings(db_path)
-    if should_run_daemon(
-        runtime.mqtt, mqtt_client,
-        cron_schedule=settings.cron_schedule, auto_scan_enabled=settings.auto_scan_enabled,
-    ):
-        _run_daemon(
-            runtime, mqtt_client, settings,
-            on_run=lambda: _run_safe_cycle(runtime, db_path, mqtt_client, sparkplug_host),
-            shutdown=shutdown,
-        )
-    elif web_server is not None or swisseldex is not None:
-        # No daemon services, but the admin web UI (or the Swisseldex receiver) must keep running.
-        logger.info("No daemon services configured — web UI stays up")
-        _wait_for_shutdown()
+    logger.info("Shareomat running: %s", ", ".join(running))
+    _wait_for_shutdown()
 
 
 def main() -> None:

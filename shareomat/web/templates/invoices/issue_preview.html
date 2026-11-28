@@ -9,6 +9,13 @@
   <div class="actions-row"><a class="btn btn-muted" href="{{ url_for('invoices') }}">Zurück</a></div>
 </div>
 {% else %}
+{% if override_reason %}
+<div class="card">
+  <div class="error-box" style="margin-top:0"><strong>Abrechnung mit Begründung freigegeben:</strong> {{ override_reason }}
+    <div class="ts" style="margin-top:6px">Offene Prüfpunkte, zum Beispiel Viertelstunden ohne Werte des Netzbetreibers,
+      sind nicht abgerechnet. Belege vor dem Versand prüfen; versendet wird nur von Hand.</div></div>
+</div>
+{% endif %}
 {% if payment_blocked %}
 <div class="card">
   <div class="error-box" style="margin-top:0"><strong>Bankdaten fehlen – nicht versandbereit.</strong>

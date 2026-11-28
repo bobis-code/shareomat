@@ -16,7 +16,7 @@ def _ctx() -> RequestContext:
 
 def test_dashboard_logs_unknown_status(caplog) -> None:
     state = get_state()
-    state.update(status="paused", last_run="-", inbox_count=0, report_count=0, last_error="")
+    state.update(status="paused")
 
     with caplog.at_level(logging.WARNING):
         html = dashboard.handle_get(_ctx())
@@ -25,21 +25,19 @@ def test_dashboard_logs_unknown_status(caplog) -> None:
     assert "Unknown web status 'paused'" in caplog.text
 
 
-def test_dashboard_shows_open_task_for_last_error() -> None:
-    state = get_state()
-    state.update(
-        status="error", last_run="2026-01-01 12:00 UTC", inbox_count=0, report_count=0,
-        last_error="Settlement failed: missing column",
-    )
+def test_dashboard_has_no_tiles_of_the_removed_csv_run() -> None:
+    """Inbox files, reports, automation and "last run" belonged to the CSV run (removed in 0.6.34)."""
+    get_state().update(status="ok")
 
     html = dashboard.handle_get(_ctx())
-    assert "Settlement failed: missing column" in html
-    assert "error" in html
+    for gone in ("Messdaten im Eingang", "Berichte", "Letzter Lauf", "Lauf starten", "Automatik"):
+        assert gone not in html, gone
+    assert "Abrechnungen" in html
 
 
 def test_dashboard_shows_startup_warnings() -> None:
     state = get_state()
-    state.update(status="ok", last_run="-", inbox_count=0, report_count=0, last_error="")
+    state.update(status="ok")
     state.add_warning("MQTT is enabled but Shareomat could not connect to the broker.")
 
     html = dashboard.handle_get(_ctx())
@@ -50,7 +48,7 @@ def test_dashboard_shows_startup_warnings() -> None:
 def test_dashboard_without_db_shows_zero_counts() -> None:
     """No database registered yet (never happens in practice, but must not crash)."""
     state = get_state()
-    state.update(status="starting", last_run="-", inbox_count=0, report_count=0, last_error="")
+    state.update(status="starting")
 
     html = dashboard.handle_get(_ctx())
     assert "0 / 0 aktiv" in html

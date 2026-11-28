@@ -29,8 +29,11 @@ Notes:
       - Documents are rendered once and frozen with SHA-256; recipients come
         from the snapshot taken when the billing draft was saved, never from
         the current master data.
-      - Only runs released WITHOUT an override (all quality checks passed)
-        can be invoiced; an overridden run stays an internal evaluation.
+      - A run released with a written reason (open soft checks, e.g. quarter
+        hours left out for missing values) can be invoiced since 0.6.34
+        (operator's decision 28.11.2026; until then: internal evaluation
+        only). The reason is shown when issuing and in the month overview;
+        such documents are only ever sent by hand.
       - A delivered document can only be cancelled with a numbered
         cancellation notice (Stornobeleg) that must be delivered before a
         replacement is issued; an undelivered one is simply cancelled.
@@ -521,10 +524,6 @@ def issue_problems(db_path: Path, run_id: int, *, today: date | None = None, inc
     problems: list[str] = []
     if run.status != BILLING_STATUS_RELEASED:
         problems.append("Nur freigegebene Abrechnungen können verrechnet werden.")
-    if run.release_override_reason:
-        problems.append("Diese Abrechnung wurde trotz offener Prüfpunkte (mit Begründung) freigegeben — sie gilt nur "
-                        "als interne Auswertung. Rechnungen nur aus vollständig geprüften Abrechnungen: Daten "
-                        "ergänzen, neu berechnen und ohne Übersteuerung freigeben.")
     if include_payment and any(i.net_amount_chf > 0 for i in detail.line_items):
         problems.extend(payment_problems(db_path))
     creditor = _creditor(db_path, today, run.period_start, run.period_end)
@@ -1249,14 +1248,14 @@ def month_overview(db_path: Path, *, run_id: int | None = None, today: date | No
              f"Entwurf mit {len(run.quality_issues)} offenen Prüfpunkt(en)." if run.quality_issues
              else "Entwurf berechnet, Prüfungen bestanden.", "Abrechnung prüfen & freigeben", "billing", f"/{run.id}")
     elif run.release_override_reason:
-        step("billing", "Abrechnung prüfen", "blocked",
-             "Mit Begründung trotz Prüfpunkten freigegeben — nur interne Auswertung, keine Rechnungen. "
-             "Daten ergänzen und neu berechnen.", "Zur Abrechnung", "billing", f"/{run.id}")
+        step("billing", "Abrechnung prüfen", "done",
+             f"Mit Begründung freigegeben: {run.release_override_reason} — Belege vor dem Versand prüfen, "
+             "Versand nur von Hand.", "Zur Abrechnung", "billing", f"/{run.id}")
     else:
         step("billing", "Abrechnung prüfen", "done", "Messdaten vollständig, Abrechnung freigegeben.")
 
     docs = [d for d in list_documents(db_path, run_id=run.id) if d.status != DOC_STATUS_CANCELLED]
-    released = run.status == "released" and not run.release_override_reason
+    released = run.status == "released"
     issued, missing = missing_documents(db_path, run.id) if run.status == "released" else (0, 0)
     detail = get_billing_run(db_path, run.id)
     summary["invoices_chf"] = sum((i.net_amount_chf for i in detail.line_items if i.net_amount_chf > 0), Decimal(0))

@@ -158,8 +158,6 @@ def _swisseldex_view(receiver) -> dict | None:
     if receiver is None:
         return None
     from shareomat.database.sdat_store import documents_by_sha, established_community_id
-    from shareomat.database.settings import get_operation_settings
-    from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 
     view = receiver.snapshot()
     view["interval_choices"] = SWISSELDEX_SYNC_INTERVALS_HOURS
@@ -180,7 +178,6 @@ def _swisseldex_view(receiver) -> dict | None:
         entry["import_type"] = record.document_type if record else ""
     view["pending_import"] = sum(1 for f in view["files"] if f["status"] == "received" and f["import_outcome"] != "imported")
     view["community_id"] = established_community_id(db_path)
-    view["billing_uses_sdat"] = get_operation_settings(db_path).meter_data_source == METER_DATA_SOURCE_SDAT_LEG
     return view
 
 

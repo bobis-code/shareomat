@@ -32,13 +32,13 @@
 >   (Phase 3 unten) — bewusst als eigenes Modul, damit der bestehende
 >   Platzhalter-Parser nicht angefasst werden muss und nichts stillschweigend
 >   auf ungeprüfte Annahmen umgestellt wird.
-> - Die Datenquelle ist pro Community umschaltbar
->   (`Einstellungen → Messdaten-Quelle`, `email_csv` | `sdat_leg`,
->   siehe `shareomat.models.settings.OperationSettings.meter_data_source`).
->   Solange `sdat_leg` gewählt ist, aber die exakte XML-Struktur nicht anhand
->   der offiziellen XSDs verifiziert ist, wirft der Parser bewusst einen
->   klaren Fehler statt falsche Werte zu erzeugen (siehe §32, gleiches Muster
->   wie `shareomat.external_data.ebl`).
+> - Seit 0.6.34 sind die offiziellen SDAT-Daten die einzige Messdaten-Quelle
+>   der Abrechnung; die Einstellung «Messdaten-Quelle» (`email_csv` |
+>   `sdat_leg`) und der CSV-Weg sind entfernt (ADR-0012). Abschnitte unten,
+>   die CSV, EBL-Excel oder die Inbox beschreiben, sind Planungsgeschichte.
+>   Ist eine XML-Struktur nicht anhand der offiziellen XSDs verifiziert, wirft
+>   der Parser weiterhin bewusst einen klaren Fehler statt falsche Werte zu
+>   erzeugen (siehe §32, gleiches Muster wie `shareomat.external_data.ebl`).
 > - **Phase 1 (offizielles Referenzmaterial) ist nicht abgeschlossen**: es
 >   liegen keine offiziellen SDAT-CH-2025-XSDs oder Beispieldateien im Repo
 >   vor. Bis diese vorliegen, bleibt Phase 3 ein Gerüst mit klar markierten

@@ -292,9 +292,9 @@ def test_long_period_at_15_minutes_switches_to_days(leg):
 def test_menu_and_messdaten_point_to_the_analysis(leg):
     db, _, tmp = leg
     energy = next(g for g in NAV_GROUPS if g.key == "energy")
-    assert ("ANALYSE", (("analysis", "Übersicht"), ("analysis_sums", "Summen & Auswertung"),
+    assert ("ANALYSE", (("analysis_sums", "Summen & Auswertung"),
                         ("analysis_values", "Messwerte"))) in energy.sections
     _import(db, tmp, "e66.xml", _official_day())
     html = meter_data.handle_get(RequestContext(method="GET", ingress_path="", query={}))
     assert "bis <strong>01.12.2026</strong>" in html and "/analysis/sums" in html
-    assert "bisherigen Messdateien" in html
+    assert "Die Abrechnung verwendet nur diese Daten" in html and "bisherigen Messdateien" not in html

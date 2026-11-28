@@ -36,14 +36,9 @@ class WebState:
         self._lock = threading.Lock()
         self._data = {
             "status": "starting",
-            "last_run": "-",
-            "inbox_count": 0,
-            "report_count": 0,
-            "last_error": "",
             "warnings": [],
         }
 
-        self._on_run: Callable[[], None] | None = None
         self._db_path: Path | None = None
         self._runtime: RuntimeConfig | None = None
         self._emsomat_online_getter: Callable[[], bool] | None = None
@@ -52,7 +47,6 @@ class WebState:
 
         self._flash_msg: str = ""
         self._flash_ok: bool = True
-        self._run_active: bool = False
 
         # Fallback token for code running outside a logged-in web request
         # (unit tests calling page handlers directly). Inside a request the
@@ -107,11 +101,6 @@ class WebState:
         with self._lock:
             self._data["warnings"] = []
 
-    def register_on_run(self, callback: Callable[[], None]) -> None:
-        """Register the function called by the dashboard's "Jetzt ausführen" button."""
-        with self._lock:
-            self._on_run = callback
-
     def register_db(self, db_path: Path) -> None:
         """Register the SQLite database path used by every admin page."""
         with self._lock:
@@ -155,24 +144,6 @@ class WebState:
         with self._lock:
             getter = self._emsomat_online_getter
         return bool(getter()) if getter is not None else None
-
-    def trigger_run(self) -> bool:
-        """Start one settlement run unless another manual run is already active."""
-        with self._lock:
-            if self._on_run is None or self._run_active:
-                return False
-            callback = self._on_run
-            self._run_active = True
-
-        def _run_and_clear() -> None:
-            try:
-                callback()
-            finally:
-                with self._lock:
-                    self._run_active = False
-
-        threading.Thread(target=_run_and_clear, name="shareomat-web-run", daemon=True).start()
-        return True
 
     def set_flash(self, message: str, *, ok: bool = True) -> None:
         """Store a one-shot flash message shown on the next page load (redirect-after-POST).

@@ -173,19 +173,22 @@ def test_issue_requires_payment_details(db_path, runtime):
     assert list_documents(db_path) == []
 
 
-def test_overridden_release_is_never_invoiced(db_path, runtime):
-    """P0-06: a run released with a written reason (here: substitute values) stays an internal evaluation.
-
-    With official data gaps can't be waved through at all; a soft issue such as the grid operator's
-    substitute values (quality 56) can, and such a run is never invoiced.
-    """
+def test_overridden_release_can_be_invoiced_and_shows_the_reason(db_path, runtime):
+    """Until 0.6.33 (P0-06) a run released with a reason stayed an internal evaluation. Operator's decision
+    28.11.2026: it can be invoiced; the reason is shown when issuing, sending stays manual."""
     _write_month(db_path, _SIMPLE, conditions={datetime(2027, 6, 30, 22, 0, tzinfo=timezone.utc): "56"})
     run = save_draft(db_path, compute_billing_preview(db_path, runtime, date(2027, 7, 1), date(2027, 7, 31)))
     release_billing_run(db_path, run.id, override_reason="Ersatzwerte des Netzbetreibers")
     _ready_profile(db_path)
-    assert any("interne Auswertung" in p for p in issue_problems(db_path, run.id))
-    with pytest.raises(InvoicingError, match="interne Auswertung"):
-        issue_documents(db_path, run.id, render_document, today=ISSUED)
+    assert issue_problems(db_path, run.id) == []
+    html = invoices_page.handle_get(RequestContext(method="GET", ingress_path="", segments=["runs", str(run.id), "preview"]))
+    assert "Abrechnung mit Begründung freigegeben:" in html and "Ersatzwerte des Netzbetreibers" in html
+    assert "versendet wird nur von Hand" in html
+    docs = issue_documents(db_path, run.id, render_document, today=ISSUED)
+    assert sorted(d.number for d in docs) == ["G-2027-001", "R-2027-001", "R-2027-002"]
+    from shareomat.database.invoicing import month_overview
+    billing_step = next(s for s in month_overview(db_path)["steps"] if s["key"] == "billing")
+    assert billing_step["state"] == "done" and "Ersatzwerte des Netzbetreibers" in billing_step["detail"]
 
 
 def test_issue_creates_numbered_frozen_documents_once(db_path, runtime, issued):

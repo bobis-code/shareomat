@@ -30,7 +30,7 @@ import argparse
 import hashlib
 import sqlite3
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -50,9 +50,7 @@ from shareomat.database.participant_contract import (
 )
 from shareomat.database.participants import create_participant
 from shareomat.database.sdat_store import store_document
-from shareomat.database.settings import get_operation_settings, save_operation_settings
 from shareomat.database.sqlite import init_db
-from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 from shareomat.models.community import Community
 from shareomat.models.invoicing import PaymentProfile
 from shareomat.models.meter import Meter
@@ -204,7 +202,6 @@ def build_load(out: Path, *, participants: int = 1000, months: int = 24) -> Load
     save_community(db, Community(community_id=COMMUNITY_ID, name="Synthetische Last-LEG", address_line="Lastweg 1",
                                  postal_code="9999", city="Testdorf", eic_code=RECEIVER_EIC,
                                  vnb_confirmed_start=START))
-    save_operation_settings(db, replace(get_operation_settings(db), meter_data_source=METER_DATA_SOURCE_SDAT_LEG))
     invoicing.save_payment_profile(db, PaymentProfile(payee="Last-LEG Konto", street="Lastweg", building="1",
                                                       postal_code="9999", city="Testdorf", iban=IBAN,
                                                       contact_email="last@example.ch"))

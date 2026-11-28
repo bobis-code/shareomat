@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """Turn meter values of a test into an official SDAT delivery of the grid operator (P2b).
 
-Until 0.6.33 most billing tests wrote a CSV file into the inbox. With the CSV
-path gone, the only meter data source is the grid operator's SDAT delivery
-(ADR-0008, ADR-0012). This helper keeps the tests readable: they still list
+Until 0.6.33 most billing tests wrote a CSV file into the inbox. Since 0.6.34
+the only meter data source is the grid operator's SDAT delivery (ADR-0008,
+ADR-0012). This helper keeps the tests readable: they still list
 (timestamp, meter, kWh, direction) rows; `deliver` builds from them what the
 grid operator would send and imports it through the real importer.
 
 * LEG energy per quarter hour as the grid operator allocates it (Art. 19g
-  StromVV, the same rule as shareomat.core.pipeline.leg_matcher):
+  StromVV, the rule of the former shareomat.core.pipeline.leg_matcher):
   L = min(P, C), received = import * L / C, supplied = export * L / P.
   Only `members` take part (default: every meter in the rows).
 * Each LEG share is rounded to 0.001 kWh (SDAT resolution, ROUND_HALF_UP);
@@ -31,8 +31,6 @@ from zoneinfo import ZoneInfo
 
 from shareomat.core.collector.sdat_import import import_sdat_file
 from shareomat.database.community import get_community, save_community
-from shareomat.database.settings import get_operation_settings, save_operation_settings
-from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 from tests.sdat_fixtures import COMMUNITY, RECEIVER_EIC, Document, Series, build, eic
 
 ZURICH = ZoneInfo("Europe/Zurich")
@@ -51,11 +49,10 @@ def mpid(n: int) -> str:
 
 
 def use_official_data(db: Path) -> None:
-    """The community receives the grid operator's data: its EIC as receiver, SDAT as data source."""
+    """The community receives the grid operator's data: its EIC as the receiver of the deliveries."""
     community = get_community(db)
     assert community is not None, "save_community() first"
     save_community(db, replace(community, eic_code=RECEIVER_EIC))
-    save_operation_settings(db, replace(get_operation_settings(db), meter_data_source=METER_DATA_SOURCE_SDAT_LEG))
 
 
 def _utc(value) -> datetime:
@@ -135,20 +132,24 @@ def _series(point: str, direction: str, energy_type: str, values: dict[datetime,
 
 def documents(rows: Iterable[Row], *, members: Members = None, name: str = "lieferung", e31: bool = True,
               conditions: dict[datetime, str] | None = None, community: str = COMMUNITY,
-              created: datetime | None = None) -> list[tuple[str, bytes]]:
+              created: datetime | None = None, missing: Iterable[tuple] = ()) -> list[tuple[str, bytes]]:
     """(file name, SDAT bytes): per calendar month the monthly E66 delivery and, with `e31`, its E31 sums.
 
     `conditions` maps a slot to an SDAT quality code ("56" substitute, "21"
     provisional) for every series of that quarter hour. `created` orders
     deliveries: a later one supersedes the values of an earlier one.
+    `missing` lists (timestamp, meter, direction, energy_type) values the
+    delivery lacks although the grid operator allocated with them (a gap).
     """
     allocation = split(list(rows), members)
+    gaps = {(meter.strip().upper(), _DIRECTION[direction], energy_type, _utc(timestamp))
+            for timestamp, meter, direction, energy_type in missing}
     by_month: dict[tuple[datetime, datetime], dict] = defaultdict(lambda: defaultdict(dict))
     for (meter, direction, slot), (total, local) in allocation.items():
         flows = by_month[_month_bounds(slot)]
-        flows[(meter, direction, "total")][slot] = total
-        flows[(meter, direction, "local")][slot] = local
-        flows[(meter, direction, "residual")][slot] = total - local
+        for energy_type, value in (("total", total), ("local", local), ("residual", total - local)):
+            if (meter, direction, energy_type, slot) not in gaps:
+                flows[(meter, direction, energy_type)][slot] = value
     slot_conditions = {_utc(k): v for k, v in (conditions or {}).items()}
     out = []
     for (month_start, month_end), flows in sorted(by_month.items()):

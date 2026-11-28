@@ -102,7 +102,6 @@ def started_main(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(app, "_RUNTIME_CONFIG_PATH", config)
     monkeypatch.setenv("SHAREOMAT_DB_PATH", str(tmp_path / "shareomat.db"))
-    monkeypatch.setattr(app, "_update_web_state", lambda *a, **k: None)
     log = []
     return log
 
@@ -116,25 +115,28 @@ def test_sigterm_during_initialisation_runs_the_cleanup_of_what_started(started_
 
     monkeypatch.setattr(app, "_setup_live", live)
     monkeypatch.setattr(app, "_setup_sparkplug", lambda *a: pytest.fail("must not start after the signal"))
-    monkeypatch.setattr(app, "run", lambda *a, **k: pytest.fail("no settlement after the signal"))
     app.main()
     assert log == ["live"] and app._SHUTDOWN.is_set()
 
 
-def test_sigterm_during_the_first_cycle_lets_it_finish_then_cleans_up(started_main, monkeypatch):
+def test_sigterm_in_the_last_start_step_ends_the_wait_and_cleans_up(started_main, monkeypatch):
+    """There is no settlement run at startup any more (0.6.34); the start ends in the wait for the shutdown."""
     log = started_main
     monkeypatch.setattr(app, "_setup_live", lambda *a: Part("live", log))
     monkeypatch.setattr(app, "_setup_sparkplug", lambda *a: (None, None, None, None))
-    monkeypatch.setattr(app, "build_leg_config", lambda *a: _leg_config())
-    monkeypatch.setattr(app, "_run_daemon", lambda *a, **k: pytest.fail("no daemon after the signal"))
-
-    def settlement(config, mqtt_client=None, db_path=None):
-        signal.raise_signal(signal.SIGTERM)
-        log.append("settlement finished")
-
-    monkeypatch.setattr(app, "run", settlement)
+    monkeypatch.setattr(app, "_check_configuration", lambda *a: signal.raise_signal(signal.SIGTERM))
     app.main()
-    assert log == ["settlement finished", "live"]
+    assert log == ["live"] and app._SHUTDOWN.is_set()
+
+
+def test_nothing_to_run_ends_the_process(started_main, monkeypatch, caplog):
+    """Web UI, Swisseldex, Sparkplug, live layer and MQTT all off: nothing to wait for."""
+    monkeypatch.setattr(app, "_setup_live", lambda *a: None)
+    monkeypatch.setattr(app, "_setup_sparkplug", lambda *a: (None, None, None, None))
+    monkeypatch.setattr(app, "_wait_for_shutdown", lambda: pytest.fail("nothing runs, nothing to wait for"))
+    with caplog.at_level("WARNING"):
+        app.main()
+    assert "Nothing to run" in caplog.text
 
 
 def test_ctrl_c_takes_the_same_path(started_main, monkeypatch):
@@ -169,12 +171,6 @@ def test_signal_during_cleanup_does_not_interrupt_it():
     app._request_shutdown(signal.SIGTERM, None)
 
 
-def test_no_settlement_starts_once_a_shutdown_was_requested(tmp_path, monkeypatch):
-    monkeypatch.setattr(app, "run", lambda *a, **k: pytest.fail("no settlement during a shutdown"))
-    app._SHUTDOWN.set()
-    assert app._run_safe_cycle(SimpleNamespace(), tmp_path / "x.db", None) is False
-
-
 def test_no_coordinator_starts_once_a_shutdown_was_requested(tmp_path):
     app._SHUTDOWN.set()
     app._start_coordinator_tasks(SimpleNamespace(emsomat_online=True), object(), tmp_path / "x.db")
@@ -206,26 +202,6 @@ def test_a_failing_step_does_not_stop_the_others(caplog):
     with caplog.at_level(logging.ERROR, logger="main"):
         sequence.run()
     assert log == ["mqtt"] and "Shutdown step failed: web" in caplog.text
-
-
-def test_running_settlement_is_waited_for_within_the_deadline():
-    app._shutdown_deadline = time.monotonic() + 5
-    assert app._RUN_LOCK.acquire(blocking=False)
-    threading.Timer(0.3, app._RUN_LOCK.release).start()
-    started = time.perf_counter()
-    app._wait_for_running_settlement()
-    assert 0.2 < time.perf_counter() - started < 3
-
-
-def test_a_stuck_settlement_does_not_hold_up_the_shutdown(caplog):
-    app._shutdown_deadline = time.monotonic() + 0.1
-    assert app._RUN_LOCK.acquire(blocking=False)
-    try:
-        with caplog.at_level(logging.WARNING, logger="main"):
-            app._wait_for_running_settlement()
-    finally:
-        app._RUN_LOCK.release()
-    assert "still active" in caplog.text
 
 
 # ── Sparkplug host: check, publish and stop ──────────────────────────────────
@@ -522,7 +498,6 @@ def test_web_and_coordinator_shutdown_together(logged_in, monkeypatch):
     order = []
     sequence = app._ShutdownSequence()
     sequence.add("sparkplug", lambda: (order.append("sparkplug"), app._stop_sparkplug((host,))))
-    sequence.add("settlement", app._wait_for_running_settlement)
     sequence.add("web", lambda: (order.append("web"), env.web.stop(timeout=app._drain_seconds_left())))
     runner = threading.Thread(target=sequence.run)
     runner.start()

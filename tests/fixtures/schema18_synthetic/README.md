@@ -6,7 +6,7 @@ Siehe das Umbaukonzept `docs/development/Datenbank_Struktur_0.6.30.md` (vorerst 
 
 | Datei | Inhalt |
 |---|---|
-| `shareomat-schema18.db.gz` | Die Datenbank (Schema 18), erzeugt mit `tests/synthetic/schema18.py` und dem Code von 0.6.31, danach `VACUUM`, gzip ohne Zeitstempel |
+| `shareomat-schema18.db.gz` | Die Datenbank (Schema 18), erzeugt mit `tests/synthetic/schema18.py` und dem Code von 0.6.34, danach `VACUUM`, gzip ohne Zeitstempel |
 | `fingerprint.txt` | Prüfsumme des Inhalts (`content_fingerprint`): alle Werte ausser Zeitstempeln, Sitzungsschlüsseln, Passwort-Hashes und der Storno-Prüfsumme, die den Zeitpunkt enthält |
 
 **Erzeugung:** `python -m tests.synthetic.schema18 <leerer-ordner>`. Das dauert etwa 40 s
@@ -62,3 +62,15 @@ Dazu kommen:
 * Die Fassung aus 0.6.30 (Gebühr 0 in v1) wurde mit dieser Korrektur ersetzt. Vorher wurde
   nachgewiesen, dass ihre drei freigegebenen Läufe mit 0.6.31 denselben Fingerabdruck
   ergeben: Die Abrechnungslogik ist unverändert.
+
+**Stand 0.6.34 (CSV-Weg entfernt, ADR-0012; fehlende Viertelstunden, ADR-0013):**
+
+* Neu eingefroren am 28.11.2026. Gegenüber 0.6.31 unterscheidet sich genau eine Zeile: der
+  Entwurf November (`billing_runs`, nicht freigegeben). Seine fehlenden Viertelstunden sind
+  jetzt ein weicher Prüfpunkt mit der Zeile «Nicht abgerechnet …», dadurch ändern sich
+  `quality_issues` und `result_fingerprint` des Entwurfs. Alle anderen Tabellen, die drei
+  freigegebenen und der stornierte Lauf sind Feld für Feld gleich; die freigegebenen rechnen mit
+  0.6.34 unverändert nach.
+* Die Einstellungen der entfernten CSV-Funktionen (`meter_data_source`, `cron_schedule` usw.)
+  schreibt der Generator wie 0.6.31 direkt in die Tabelle. Seit 0.6.34 werden sie nicht mehr
+  gelesen; eine echte Installation hat sie ebenfalls noch.

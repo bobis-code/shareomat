@@ -23,10 +23,10 @@ Aufwand für kleinere Gemeinschaften, ohne teure Spezialsoftware.
 
 1. **Korrektheit** der Abrechnungsbeträge — Fehler hier kosten echtes Geld
    echter Teilnehmer. Deshalb: `Decimal` statt `float` in der
-   Geldrechnung, harte Matching-Invarianten (README, "Matching-Algorithmus"),
-   unveränderliche freigegebene Abrechnungsläufe.
+   Geldrechnung, harte Prüfungen der offiziellen Aufteilung (Clearing pro
+   Viertelstunde, Geldabstimmung), unveränderliche freigegebene Abrechnungsläufe.
 2. **Nachvollziehbarkeit** — jede Abrechnung muss im Nachhinein erklärbar
-   sein: welche Quelldateien, welcher Tarif, welcher Algorithmus-Schritt.
+   sein: welche Lieferungen des Netzbetreibers, welcher Tarif, welche Prüfung.
 3. **Betreibbarkeit ohne Spezialwissen** — Zielgruppe sind kleine
    Gemeinschaften, nicht IT-Abteilungen. Setup-Assistent statt Absturz bei
    fehlender Konfiguration, verständliche deutsche Fehlermeldungen im
@@ -80,14 +80,14 @@ Aufwand für kleinere Gemeinschaften, ohne teure Spezialsoftware.
 
 ```text
 Netzbetreiber (VNB)
-   │  Messdaten: CSV, S-DAT-XML, EBL-XLSX
-   │  per E-Mail-Anhang, Share-Ordner, oder manueller Upload
+   │  offizielle Messdaten SDAT-CH (E66 mit LEG-Aufteilung, E31)
+   │  über den Swisseldex Datahub
    ▼
 ┌─────────────────────────────────────────────┐
 │                  Shareomat                   │
 │                                               │
-│  Import → Normalisierung → Matching →        │
-│  Abrechnung → Berichte                       │
+│  Empfang → Prüfung/Import → Abrechnung       │
+│  (Aufteilung des Netzbetreibers) → Belege    │
 └─────────────────────────────────────────────┘
    │                              │
    │ Web-UI (Browser)             │ optional: MQTT
@@ -113,18 +113,16 @@ sources").
 
 ### Technischer Kontext
 
-* **Eingang:** `data/inbox/` — befüllt durch manuellen Upload, den
-  IMAP-E-Mail-Importer, den Share-Ordner-Importer, oder direkt vom
-  Betreiber kopiert.
-* **Swisseldex-Empfang (SX-1):** SDAT-Dateien aus dem FTPES-Postfach beim
-  Swisseldex Datahub landen in einem eigenen Empfangsarchiv
-  (`<state>/swisseldex/received/`), **nicht** in der Inbox. Danach prüft
-  der Import (SX-2) die Dateien und legt die offiziellen E66/E31-Zeitreihen
-  dieser LEG in `sdat_documents`/`sdat_series` ab. Mit der Messdaten-Quelle
-  «SDAT» rechnet die Abrechnung mit der Zuteilung des Netzbetreibers, ohne
-  selbst zu verteilen (ADR-0008).
-* **Ausgang:** `data/reports/` (CSV/JSON), Web-UI, optional MQTT-Topics
-  unter `{prefix}/...` (siehe `docs/emsomat-integration.md`).
+* **Eingang (SX-1):** SDAT-Dateien aus dem FTPES-Postfach beim Swisseldex
+  Datahub landen im Empfangsarchiv (`<state>/swisseldex/received/`).
+  Danach prüft der Import (SX-2) die Dateien und legt die offiziellen
+  E66/E31-Zeitreihen dieser LEG in `sdat_documents`/`sdat_series` ab. Die
+  Abrechnung rechnet mit der Zuteilung des Netzbetreibers, ohne selbst zu
+  verteilen (ADR-0008). Das ist seit 0.6.34 der einzige Eingang für
+  Messdaten: Inbox, Upload, E-Mail- und Share-Import sind entfernt (ADR-0012).
+* **Ausgang:** Web-UI (Abrechnungen, Belege als PDF), optional MQTT-Topics
+  unter `{prefix}/...` (Engine-Status, Live-Werte; siehe
+  `docs/emsomat-integration.md`).
 * **Persistenz:** `data/shareomat.db` (SQLite, Stammdaten + Betriebs­daten),
   `data/live.db` (letzte Live-Werte, ADR-0007), `data/coordinator.db`
   (Lastprognose und Day-Ahead-Preise für Emsomat, siehe §8),
@@ -138,16 +136,16 @@ sources").
 * **Vier Schichten** (`web → database → core → models`, siehe §5) mit
   klarer Abhängigkeitsrichtung — keine Schicht greift "nach oben".
 * **Zwei getrennte Konfigurationsquellen**: technische Laufzeit-Einstellungen
-  (`RuntimeConfig`, aus YAML/Add-on-Optionen — Pfade, MQTT, E-Mail,
-  Web-Port) versus fachliche Stammdaten/Einstellungen (SQLite — Gemeinschaft,
-  Teilnehmer, Messpunkte, Vertrag, Betriebs-Settings). Zusammengeführt pro
-  Lauf durch `config_builder.build_leg_config()`, damit Änderungen im Web-UI
-  ohne Neustart wirken.
-* **Ein gemeinsames internes Datenmodell für alle Rohformate**
-  (`IntervalReading`/`EnergySlot`) — CSV, S-DAT, EBL-XLSX und künftig
-  SDAT-CH-2025 (siehe `docs/sdat_leg_import.md`) landen alle darauf, bevor
-  Matching/Abrechnung sie sehen. Ein neues Format bekommt ein neues Modul
-  unter `core/pipeline/raw/`, keinen Sonderfall in der Abrechnungslogik.
+  (`RuntimeConfig`, aus YAML/Add-on-Optionen — Pfade, MQTT, Swisseldex,
+  Sparkplug, Web-Port) versus fachliche Stammdaten/Einstellungen (SQLite —
+  Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, Betriebs-Settings).
+  Zusammengeführt bei jeder Berechnung durch `config_builder.build_leg_config()`,
+  damit Änderungen im Web-UI ohne Neustart wirken.
+* **Ein gemeinsames internes Datenmodell** (`IntervalReading`, `MatchResult`)
+  zwischen Rohformat und Abrechnung. Heute gibt es nur SDAT-CH-2025 (siehe
+  `docs/sdat_leg_import.md`); ein späterer Importadapter bekommt ein eigenes
+  Modul unter `core/pipeline/raw/`, keinen Sonderfall in der Abrechnungslogik
+  (ADR-0002).
 * **"Raise, don't guess"** bei jedem extern vorgegebenen, aber nicht
   gesichert bekannten Format oder Regelwerk (SDAT-CH-XML-Struktur,
   EBL-API) — ein klarer, erklärender Fehler statt eine stillschweigend
@@ -174,7 +172,7 @@ shareomat/web/          Admin-Weboberfläche (dünne Handler, rendert Templates)
 shareomat/database/     SQLite-Persistenz, ein Modul pro Entität
         │  liefert Domänen-Objekte an
         ▼
-shareomat/core/         Business-Logik: collector → pipeline → report
+shareomat/core/         Business-Logik: collector → pipeline, delivery, payments
         │  arbeitet auf
         ▼
 shareomat/models/       Reine Dataclasses, keine I/O, keine Business-Logik
@@ -198,29 +196,16 @@ Dazu, quer zu den vier Schichten:
 
 ```text
 core/
-  leg_runner.py            Pipeline-Orchestrierung — run(config: LegConfig)
   collector/                Dateneingang
-    leg_import.py             Inbox-Scan & Archivierung
-    leg_scheduler.py          Cron-basierter Lauf-Scheduler
-    leg_watcher.py            Inbox-Datei-Watcher
-    leg_share_importer.py     Share-Ordner → Inbox
-    leg_email_importer.py     IMAP-Postfach → Inbox
     swisseldex_ftpes.py       FTPES-Client für das Swisseldex-Postfach (nur lesen)
-    swisseldex_receiver.py    Swisseldex-Empfang → Rohdatensicherung → Empfangsarchiv (nicht Inbox)
+    swisseldex_receiver.py    Swisseldex-Empfang → Rohdatensicherung → Empfangsarchiv
     raw_backup.py             Rohdatensicherung: Originale einmalig, geprüft auf Netzwerkspeicher (ADR-0010)
     sdat_import.py            Import empfangener SDAT-Dateien (SX-2)
-    leg_storage.py            Verarbeitet-Status (SHA-256-Dedup)
   pipeline/                  Abrechnungsverarbeitung
-    leg_parser.py              CSV / S-DAT (experimentell) / Aufruf von raw/
-    leg_normalizer.py          Reading-Normalisierung
-    leg_matcher.py             Proportionale Energieteilung (Rohdaten)
     official_allocation.py     Offizielle Zuteilung übernehmen, nicht verteilen (ADR-0008)
     leg_billing.py             Perioden-Aggregation & Kostenberechnung
     raw/                        Ein Modul pro externem Rohformat
-      ebl_xlsx.py                 EBL-Excel-Export
       sdat_ch.py                  SDAT-CH-2025 E31/E66 (VSE-XSDs, siehe docs/sdat_leg_import.md)
-  report/
-    leg_report.py             CSV-/JSON-Berichte
   delivery/                  Zustellung an Teilnehmer (ADR-0011)
     pdf.py                    PDF aus der eingefrorenen Druckseite (WeasyPrint, ohne externe Zugriffe)
     mail.py                   SMTP-Versand, nur verschlüsselt, ein Empfänger
@@ -254,7 +239,7 @@ models/                     Domänen-Dataclasses
   community.py / participant.py / meter.py / tariff.py / settings.py
   contract.py                  ContractVersion / ContractSettings
   membership.py                Membership (ADR-0009)
-  meter_data.py                IntervalReading / EnergySlot / ImportFile
+  meter_data.py                IntervalReading (EnergySlot/ImportFile: Reste des CSV-Wegs, Aufräumen mit Schema 19)
   billing.py                    MatchResult / BillingRecord
   billing_workflow.py           BillingRun / BillingPreview / BillingSourceFile
   external_data.py              DataImportRecord
@@ -278,12 +263,16 @@ Tabs (auf dem Handy als Leiste unten), die Seiten der offenen Gruppe in der Seit
 ```text
 Start              — Übersicht
 LEG-Verwaltung     — Checkliste, Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, Tarife
-Energie & Analyse  — Messdaten, Berichte · Analyse: Übersicht, Summen & Auswertung, Messwerte
+Energie & Analyse  — Messdaten · Analyse: Summen & Auswertung, Messwerte
                      · Live-Energie: Übersicht, Messquellen, Diagnose (ADR-0007)
 Abrechnung         — Abrechnungen, Rechnungen
 Dokumente          — EBL-Meldungen, E-Mail-Vorlagen
 System             — Einstellungen, Automatisierung, Externe Daten, Apps & Integrationen
 ```
+
+«Automatisierung» zeigt die drei Schalter (Abrechnungen, Rechnungen erstellen, versenden)
+ausgegraut als «noch nicht verfügbar» (E8 in ADR-0012). «Berichte», «Analyse → Übersicht»,
+Upload und «Jetzt ausführen» gehörten zum CSV-Weg und sind seit 0.6.34 entfernt.
 
 "Apps & Integrationen" (`web/pages/apps.py`) zeigt Emsomat an: installiert
 ja/nein und Version (liest `custom_components/emsomat/manifest.json` im
@@ -296,31 +285,22 @@ wird Emsomat weiter über HACS, die Geräte verwaltet Emsomat selbst.
 
 ## 6. Laufzeitsicht
 
-### Szenario: automatischer/manueller Abrechnungslauf
+### Szenario: offizielle Messdaten kommen an (seit 0.6.34 der einzige Weg)
 
-Ausgelöst durch Programmstart, Cron, Datei-Watcher, Share-/E-Mail-Importer,
-MQTT-Kommando, oder den "Jetzt ausführen"-Knopf im Web-UI — alle über
-`main._run_safe_cycle()`, geschützt durch einen Lock (`_RUN_LOCK`), damit
-nie zwei Läufe gleichzeitig auf Inbox/Archiv/State schreiben.
+Bis 0.6.33 gab es einen automatischen Abrechnungslauf über CSV-Dateien aus der
+Inbox (Start, Cron, Datei-Watcher, E-Mail-/Share-Import, MQTT `run_once`,
+«Jetzt ausführen»). Er ist mit ADR-0012 entfernt; im Hintergrund wird nichts
+mehr abgerechnet.
 
 ```text
-1. LegConfig frisch aus SQLite + RuntimeConfig bauen (config_builder)
-2. Inbox scannen (neue Dateien, per SHA-256 von bereits Verarbeitetem unterschieden)
-3. Parsen — Format-Router wählt csv / sdat (legacy oder sdat_ch, je nach
-   meter_data_source) / xlsx
-4. Unbekannte/inaktive Messpunkte herausfiltern (unknown_meter_policy)
-5. Matching — proportionale Energieteilung pro 15-Minuten-Slot
-6. Abrechnung — Perioden-Aggregation mit dem gültigen Tarif
-7. Berichte schreiben (CSV/JSON) — muss erfolgreich sein, bevor irgendwas
-   als verarbeitet markiert wird
-8. Quelldateien als verarbeitet markieren, ins Archiv verschieben
-9. MQTT publizieren (best effort — ein Fehler hier invalidiert den
-   Abrechnungslauf nicht mehr, er ist zu diesem Zeitpunkt schon
-   abgeschlossen)
+1. Swisseldex-Empfänger holt neue Dateien (Zeitplan unter «Externe Daten»
+   oder «Jetzt synchronisieren»), Rohdatensicherung zuerst (ADR-0010)
+2. Import (SX-2): Empfänger, Gemeinschaft, Messpunkte und Struktur prüfen,
+   E66/E31-Zeitreihen ablegen — eine Datei ganz oder gar nicht
+3. Betrifft die neue Lieferung einen freigegebenen Zeitraum: nur ein Hinweis
+   auf der Übersicht, der Lauf bleibt unverändert (ADR-0001)
+4. Abrechnung von Hand unter «Abrechnungen» (Szenario unten)
 ```
-
-Details und die exakte Reihenfolgebegründung: `shareomat/core/leg_runner.py`
-(Docstring "Notes").
 
 ### Szenario: Prognose und Preise an Emsomat (seit 0.6.33)
 
@@ -339,15 +319,15 @@ senden = LegConfig frisch bauen, dann Prognose, Exportpreis und NCMD
 
 * Es läuft höchstens ein Coordinator-Thread. Ein zweiter Auslöser wird
   übersprungen.
-* Der alte Auslöser am Ende von `_run_safe_cycle()` bleibt bis zum
-  Entfernen des CSV-Wegs bestehen. Er ist unschädlich.
+* Der frühere Auslöser am Ende des CSV-Laufs ist mit diesem in 0.6.34
+  entfallen.
 * Live-Werte haben keinen Takt. Sie gehen ereignisgesteuert an Emsomat
   (WAN-Downlink → ParticipantRelay → Emsomat).
 * Der Engine-Status (`shareomat/status`) ist ab dem Start «ok». Nach einem
   MQTT-Reconnect sendet Shareomat den letzten Status erneut, nicht mehr
   «starting».
 
-### Szenario: Vertragsänderung wirkt auf den nächsten Lauf
+### Szenario: Vertragsänderung wirkt auf die nächste Berechnung
 
 ```text
 Admin ändert/publiziert einen Vertrag im Web-UI
@@ -356,33 +336,33 @@ Admin ändert/publiziert einen Vertrag im Web-UI
 contract_versions.publish_version() — neue Tarif-Version, draft → published
         │
         ▼
-Nächster Abrechnungslauf: config_builder.build_leg_config() liest den
-zu diesem Zeitpunkt gültigen Tarif frisch aus SQLite
+Nächste Vorschau unter «Abrechnungen»: der Tarif jedes Tages wird frisch
+aus SQLite gelesen
 ```
 
-Kein Neustart nötig — mit einer dokumentierten Ausnahme: Änderungen an
-Cron-Zeitplan/Automatik-Scan wirken erst nach einem Neustart, weil die
-zugehörigen Threads nur beim Programmstart erzeugt werden (siehe `TODO.md`,
-"Betrieb").
+Kein Neustart nötig.
 
 ### Szenario: Programmende
 
 SIGTERM (Home Assistant stoppt das Add-on) und Ctrl+C lösen denselben Ablauf aus.
-Ein laufender Abrechnungszyklus wird nicht unterbrochen. Danach stoppt
-`main.py` genau das, was gestartet wurde, jeweils einmal und in umgekehrter
-Reihenfolge: Daemon-Threads, Webserver (nimmt nichts Neues an, laufende Anfragen
-dürfen fertig werden), laufende Abrechnung (beide zusammen höchstens 15 s),
-Coordinator (5 s), Sparkplug, Live-Ebene, MQTT. Das Add-on hat dafür 30 s
+`main.py` stoppt genau das, was gestartet wurde, jeweils einmal und in umgekehrter
+Reihenfolge: Swisseldex-Empfänger, Webserver (nimmt nichts Neues an, laufende
+Anfragen wie eine Freigabe dürfen fertig werden, höchstens 15 s), Coordinator
+(5 s), Sparkplug, Live-Ebene, MQTT. Das Add-on hat dafür 30 s
 (`timeout` in `ha_addon/config.yaml`, Vorgabe von Home Assistant: 10 s),
 Docker Compose ebenso. Was bei Fristablauf noch läuft, endet mit dem Prozess;
 SQLite verwirft dann die offene Transaktion.
 
 ### Szenario: interaktive Abrechnung für eine frei gewählte Periode
 
-`shareomat/database/billing.py` parst dafür bewusst **auch bereits
-archivierte** Dateien erneut (nicht nur "was ist neu") — ein Betreiber kann
-so eine beliebige historische Periode abrechnen, nicht nur "was seit dem
-letzten Lauf reinkam".
+`shareomat/database/billing.py` liest die offiziellen Werte der Periode aus
+`sdat_series` (für jeden Wert die zuletzt gelieferte gültige Fassung), prüft
+Monatslieferung, Vollständigkeit, Clearing und Geldabstimmung und zeigt eine
+Vorschau. Eine Viertelstunde, in der ein Wert des Netzbetreibers fehlt, wird für
+die ganze LEG nicht abgerechnet; freigeben lässt sich das nur mit Begründung, und
+auch ein solcher Lauf ist verrechenbar (ADR-0013). Ein Entwurf wird gespeichert und erst nach erneuter Berechnung
+freigegeben; ändert sich dazwischen etwas in der Datenbank, wird die Freigabe
+verweigert.
 
 ---
 
@@ -394,7 +374,7 @@ letzten Lauf reinkam".
 Home Assistant Host
   └── Docker-Container (aus ha_addon/, Multi-Arch-Image)
         ├── main.py (Python-Prozess)
-        ├── data/ (Volume: inbox, archive, reports, state, shareomat.db, live.db, coordinator.db)
+        ├── data/ (Volume: state, shareomat.db, live.db, coordinator.db)
         └── Web-UI erreichbar über HA Ingress (Pfad-Präfix aus X-Ingress-Path)
   MQTT-Broker (z. B. Home Assistant Mosquitto Add-on) ── optional
 ```
@@ -448,8 +428,9 @@ end-to-end verifiziert (siehe §11).
     unerwartete Exception ab und liefern immer eine Antwort — ein
     konkreter früherer Vorfall (unbehandelte `KeyError` → 502 ohne
     Antwort) hat das erzwungen (siehe `TODO.md`).
-  * Nebenläufigkeitsschutz: `_RUN_LOCK` verhindert parallele
-    Abrechnungsläufe, egal welcher Trigger sie ausgelöst hat.
+  * Nebenläufigkeitsschutz: Freigabe, Stornierung und Belege laufen in
+    eigenen SQLite-Transaktionen; eine Freigabe rechnet neu und verweigert,
+    wenn sich die Datenbank dazwischen geändert hat (`PRAGMA data_version`).
 * **Geldbeträge:** immer `Decimal`, nie direkt aus `float` konstruiert
   (`Decimal(str(round(value, 4)))`-Muster, siehe `database/billing.py`).
 * **Audit-Trail externer Abrufe:** jeder Abruf von ElCom/BFE/SNB/ENTSO-E/EBL
@@ -500,12 +481,12 @@ Kurzer Qualitätsbaum (Details/Priorisierung siehe §1):
 ```text
 Korrektheit
   ├── Decimal statt float in der Geldrechnung
-  ├── Matching-Invarianten (exporter ≠ importer im selben Slot, README)
+  ├── Clearing pro Viertelstunde und exakte Geldabstimmung (B28)
   └── Unveränderliche freigegebene Abrechnungsläufe
 
 Nachvollziehbarkeit
   ├── Audit-Trail externer Abrufe (data_imports)
-  ├── Quelldateien pro Abrechnungslauf referenziert (source_files)
+  ├── Lieferungen pro Abrechnungslauf referenziert (billing_sources)
   └── Geplant: Raw-Archiv für SDAT-Importe (docs/sdat_leg_import.md §16)
 
 Robustheit
@@ -541,8 +522,6 @@ architektur-relevanten Punkte, Stand 2026-08-13:
 * **Live-Energie** ist mit automatischen Tests geprüft. Realtests mit Broker,
   Home Assistant, WAN und Add-on sowie die Audit-Befunde AUD-02, AUD-03, AUD-04
   und AUD-07 sind offen (`docs/Live-Energie-Arbeitsliste.md`).
-* **Cron-/Watcher-Änderungen** wirken erst nach einem Neustart (Threads nur
-  bei Programmstart erzeugt) — bekannte Einschränkung, keine Regression.
 * **Tarifwechsel mitten in einer Abrechnungsperiode** wird nicht anteilig
   aufgeteilt — der zu `period_start` gültige Tarif gilt für die ganze
   Periode (bewusste Vereinfachung, siehe `TODO.md`).
@@ -561,9 +540,8 @@ architektur-relevanten Punkte, Stand 2026-08-13:
 | **HT/NT** | Hochtarif/Niedertarif — zeitabhängige Tarifzonen |
 | **Prosumer** | Teilnehmer mit gleichzeitigem Export (Produktion) und Import (Verbrauch) |
 | **Slot** | 15-Minuten-Messintervall — die kleinste Zeiteinheit im gesamten Modell |
-| **Mangel / Überschuss / Ausgeglichen** | Verhältnis von lokaler Produktion zu Verbrauch in einem Slot (README, Matching-Beispiele) |
-| **IntervalReading** | Ein roher Messwert (ein Meter, ein Slot, eine Richtung) — gemeinsames internes Modell aller Rohformate |
-| **EnergySlot** | Alle Messwerte eines Slots, nach Meter gruppiert — Eingabe für das Matching |
+| **Mangel / Überschuss / Ausgeglichen** | Verhältnis von lokaler Produktion zu Verbrauch in einem Slot (`tests/test_official_billing_scenarios.py`) |
+| **IntervalReading** | Ein Messwert (ein Meter, ein Slot, eine Richtung) — internes Modell zwischen Rohformat und Abrechnung |
 | **BillingRun** | Ein Abrechnungslauf für eine Periode — draft/released/cancelled, released ist unveränderlich |
 | **SDAT** | Standardisierter Schweizer Messdatenaustausch (VSE) — siehe `docs/sdat_leg_import.md` |
 | **E31 / E66** | SDAT-Nachrichtentypen: E31 = aggregierte LEG-Daten, E66 = Messdaten je Teilnehmer |

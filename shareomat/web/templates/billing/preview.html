@@ -5,14 +5,7 @@
 {% set issues = preview.availability.blocking_issues %}{% set hard_issues = preview.availability.hard_issues %}
 <div class="card">
   <p class="ts" style="margin:0">Datenquelle:
-    <strong>{{ 'SDAT (EBL/Swisseldex) — offizielle Zuteilung des Netzbetreibers' if preview.official_source
-               else 'E-Mail / CSV — Shareomat verteilt selbst' }}</strong>
-    &middot; <a href="{{ url_for('settings') }}">unter Einstellungen ändern</a></p>
-  {% if preview.official_data_unused %}
-  <div class="error-box">Für diesen Zeitraum liegen offizielle Messdaten des Netzbetreibers (SDAT) vor, die
-    Vorschau rechnet aber mit der Messdaten-Quelle «E-Mail / CSV». Unter System → Einstellungen →
-    Messdaten-Quelle auf «SDAT (EBL/Swisseldex)» umstellen.</div>
-  {% endif %}
+    <strong>SDAT (EBL/Swisseldex) — offizielle Zuteilung des Netzbetreibers</strong></p>
 </div>
 {% if issues %}
 <div class="card">

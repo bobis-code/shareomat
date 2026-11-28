@@ -43,21 +43,6 @@ METER_ROLE_STORAGE: str = "storage"
 # liefern, Speicher) follows from the roles of its meters, see
 # shareomat.core.participant_roles.
 
-# ── Unknown meter handling ────────────────────────────────────────────────────
-
-UNKNOWN_METER_POLICY_FAIL: str = "fail"
-UNKNOWN_METER_POLICY_SKIP: str = "skip"
-
-# ── Meter data source ─────────────────────────────────────────────────────────
-# Per-community switch (see shareomat.models.settings.OperationSettings):
-# how the community *receives* meter data. Independent of file_type routing
-# in leg_import.py/leg_runner.py, which picks a parser by extension — this
-# picks which parser handles the "sdat" file_type (see shareomat.core.leg_runner
-# .parse_file and docs/sdat_leg_import.md).
-
-METER_DATA_SOURCE_EMAIL_CSV: str = "email_csv"
-METER_DATA_SOURCE_SDAT_LEG: str = "sdat_leg"
-
 # Write-once backup of the Swisseldex originals on a network storage (ADR-0010).
 RAW_BACKUP_MODE_OFF: str = "off"            # transition: originals only in the local archive
 RAW_BACKUP_MODE_REQUIRED: str = "required"  # nothing is processed without a verified backup
@@ -89,13 +74,6 @@ MQTT_STATUS_STARTING: str = "starting"
 MQTT_STATUS_OK: str = "ok"
 MQTT_STATUS_ERROR: str = "error"
 MQTT_STATUS_OFFLINE: str = "offline"
-
-# ── File extensions ───────────────────────────────────────────────────────────
-
-FILE_EXT_CSV: str = ".csv"
-FILE_EXT_XML: str = ".xml"
-FILE_EXT_SDAT: str = ".sdat"
-FILE_EXT_XLSX: str = ".xlsx"
 
 # ── Reading quality flags ─────────────────────────────────────────────────────
 

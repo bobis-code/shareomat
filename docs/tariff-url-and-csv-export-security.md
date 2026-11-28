@@ -1,5 +1,7 @@
 # Externe Tarif-URL und CSV-Berichte (S-05 / S-06)
 
+> **Historisch (seit 0.6.34):** Die CSV-Berichte (S-06) wurde mit dem CSV-Weg entfernt ([ADR-0012](decisions/ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)). Messdaten kommen nur noch als SDAT-Lieferung des Netzbetreibers über Swisseldex. Dieses Dokument bleibt als Nachweis der damaligen Prüfung. Der Abschnitt zur Tarif-URL (S-05) gilt weiter.
+
 Stand: 7. November 2026.
 
 ## S-05: Abruf der VNB-Tarifdatei

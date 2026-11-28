@@ -25,15 +25,11 @@ Notes:
     = HT) are a common Swiss starting convention, not a verified EBL rule —
     adjust once the community's actual grid-operator definition is known.
 
-    meter_data_source: which channel the community currently receives meter
-    data through — METER_DATA_SOURCE_* from shareomat.leg_const. "email_csv"
-    (default) is today's flow: CSV/xlsx attachments via the email/share
-    importers. "sdat_leg" makes billing use the grid operator's official
-    E66 split (LEG / residual energy) imported from the Swisseldex Datahub
-    (shareomat.database.sdat_store, ADR-0008) instead of distributing raw
-    meter data itself, and switches "sdat"-typed inbox files to the real
-    SDAT-CH 2025 parser (shareomat.core.pipeline.raw.sdat_ch) instead of the
-    legacy experimental one in leg_parser.py — see docs/sdat_leg_import.md.
+    The CSV path and its settings (meter data source, unknown meter policy,
+    archiving, cron schedule, automatic inbox scan) were removed in 0.6.34
+    (ADR-0012): billing always uses the grid operator's official SDAT split.
+    Values stored by an older version stay in the settings table and are
+    ignored.
 """
 
 from __future__ import annotations
@@ -45,18 +41,12 @@ from dataclasses import dataclass
 class OperationSettings:
     """Community-level automation mode and processing rules."""
 
-    unknown_meter_policy: str = "fail"     # UNKNOWN_METER_POLICY_* from shareomat.leg_const
-    archive_processed: bool = True
-    cron_schedule: str = ""                # cron expression, empty = disabled
-    auto_scan_enabled: bool = False
-    scan_interval_seconds: int = 60
     auto_create_billing: bool = False
     auto_create_invoices: bool = False
     auto_send_invoices: bool = False
     peak_start_hour: int = 6               # Hochtarif start hour (0-23), local time
     peak_end_hour: int = 22                # Hochtarif end hour (0-23, exclusive), local time
     peak_weekdays_only: bool = True        # True: Sat/Sun always Niedertarif
-    meter_data_source: str = "email_csv"   # METER_DATA_SOURCE_* from shareomat.leg_const
     # Write-once backup of the Swisseldex originals (ADR-0010): RAW_BACKUP_MODE_* from leg_const,
     # the network storage below /share (e.g. "omv") and the subfolder on it.
     raw_backup_mode: str = "off"

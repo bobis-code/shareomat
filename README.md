@@ -42,7 +42,7 @@ Ausführliche Beschreibung: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 1. In Home Assistant: **Settings → Add-ons → Add-on Store**
 2. Add this repository as a custom repository:
    `https://github.com/bobis-code/shareomat`
-3. Install **Shareomat**, configure MQTT/e-mail if wanted, start it.
+3. Install **Shareomat**, configure MQTT and Swisseldex if wanted, start it.
 4. Set up the login (see **Erstes Login** below).
 5. Open it from the sidebar (Ingress panel) and complete the setup wizard
    (Gemeinschaft → Teilnehmer → Messpunkte → Vertrag).
@@ -50,7 +50,7 @@ Ausführliche Beschreibung: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 Gemeinschaft, Teilnehmer, Messpunkte, Vertrag, and automation settings are
 managed entirely through this web interface — not through `leg_config.yaml`
 — and are stored in a SQLite database. Add-on options cover only technical
-runtime settings (MQTT, e-mail import).
+runtime settings (MQTT, Swisseldex, Sparkplug).
 
 Prices are set on the **Vertrag** page, not the Tarife page: publishing a
 contract version there creates the tariff that governs billing for its
@@ -58,9 +58,12 @@ validity period, with the notice periods from the LEG-Mustervertrag enforced
 before publishing. The Tarife page still exists, but only as a manual
 fallback for first-time setup or emergencies — see its own warning banner.
 
-Once set up, drop CSV or S-DAT files into the inbox (or upload them through
-the "Messdaten" page) and trigger a run from the web interface. Reports are
-written to the reports folder; processed files move to the archive.
+Meter data comes only from the grid operator: its official SDAT deliveries
+(E66 with the LEG split, E31 sums) arrive through the Swisseldex Datahub and
+are imported automatically (**Externe Daten → Swisseldex**). Billing is then
+computed, checked and released on the **Abrechnungen** page. The former CSV
+path (inbox, upload, e-mail and share import, automatic run, reports) was
+removed in 0.6.34 (ADR-0012).
 
 The canonical Python source lives in `shareomat/` and `main.py`. The
 `ha_addon/` directory contains a synced build copy so Home Assistant can
@@ -128,22 +131,13 @@ weit Zahlungen eingegangen sind). Rechnungen enthalten einen Schweizer
 QR-Zahlteil. Mahnungen werden ab 5 Tagen nach Fälligkeit vorgeschlagen.
 E-Mail-Versand (SMTP) und Bankdatei-Import folgen später.
 
-## Input formats
+## Meter data
 
-### CSV
-
-```
-timestamp,meter_id,value_kwh,direction[,quality]
-2024-06-01T12:00:00+00:00,CH001...,0.125,export
-2024-06-01T12:00:00+00:00,CH002...,0.080,import
-```
-
-`quality` defaults to `valid`. Use `invalid` to exclude a reading. Older files
-with the column name `mpid` instead of `meter_id` are still accepted.
-
-### S-DAT XML
-
-Standard Swiss S-DAT metering data exchange format. Both namespaced (`xmlns="http://www.strom.ch/sdat/MeteringData"`) and plain variants are accepted.
+Shareomat bills only the grid operator's official SDAT-CH 2025 data: E66
+(per metering point: total, LEG and residual energy per quarter hour) and E31
+(the LEG sums, used as a cross-check). Billing takes the grid operator's split
+as it is and never redistributes. Details: [`docs/sdat_leg_import.md`](docs/sdat_leg_import.md)
+and [ADR-0008](docs/decisions/ADR-0008-offizielle-sdat-zuteilung-als-zweiter-abrechnungsweg.md).
 
 ## External data sources
 
@@ -167,11 +161,11 @@ and logged in a recent-imports history on the same page.
 Shareomat splits configuration into two places, deliberately:
 
 - **`leg_config.yaml`** (technical runtime settings only) — paths, MQTT
-  broker, e-mail import, web server port. For the add-on this is generated
+  broker, Swisseldex, Sparkplug, web server port. For the add-on this is generated
   from the add-on options; for standalone use, copy
   `config/leg_config.example.yaml` to `config/leg_config.yaml` and edit the
   local file. It is intentionally ignored by Git because it may contain
-  broker addresses and MQTT/IMAP credentials.
+  broker addresses and MQTT/Swisseldex credentials.
 - **The admin web interface** (backed by `data/shareomat.db`) —
   Gemeinschaft, Teilnehmer, Messpunkte, Vertrag (which governs Tarife), and
   automation settings. This is the data that actually changes as a LEG
@@ -180,17 +174,14 @@ Shareomat splits configuration into two places, deliberately:
 
 | `leg_config.yaml` key | Description |
 |-----|-------------|
-| `paths.inbox` / `archive` / `reports` / `state` | Runtime filesystem paths |
-| `paths.share_inbox` | External share folder to watch for meter files; empty = disabled |
-| `mqtt.enabled` / `broker` / `port` | Optional — publish status/prices/tariffs as MQTT topics (with Home Assistant MQTT Discovery) for Home Assistant or any other MQTT-aware system. Off by default; Shareomat runs fully without it. |
-| `email.enabled` | Poll an IMAP mailbox (e.g. a dedicated Gmail account) for meter-data attachments |
-| `email.allowed_senders` | Filters only the spoofable `From` header; this is not sender authentication. Empty = accept any sender. |
+| `paths.state` | Data folder (Swisseldex archive, backups) |
+| `paths.inbox` / `archive` / `reports`, `paths.share_inbox`, `email.*` | Not used since 0.6.34 (CSV path removed); still read so that an existing configuration keeps loading |
+| `mqtt.enabled` / `broker` / `port` | Optional — engine status and live values as MQTT topics (with Home Assistant MQTT Discovery) for Home Assistant or any other MQTT-aware system. Off by default; Shareomat runs fully without it. |
 | `web.enabled` / `port` | Admin web interface — always available; standalone (`http://localhost:8099`) or, if run as the HA add-on, also behind Home Assistant Ingress |
 
-Never commit real passwords or private MQTT/email credentials. Use the Home
+Never commit real passwords or private MQTT/Swisseldex credentials. Use the Home
 Assistant add-on options for add-on deployments, or keep local credentials
-only in the ignored `config/leg_config.yaml`. For Gmail, use an App Password
-(requires 2-Step Verification), never the account password.
+only in the ignored `config/leg_config.yaml`.
 
 Upgrading from a version where `leg_config.yaml` still contained
 `participants`/`meters`/`tariffs`/`leg`? Those sections are imported into
@@ -315,26 +306,17 @@ risks, glossary): [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ```
 shareomat/                    Python package
   leg_const.py               Domain constants
-  config.py                  Technical runtime config (paths/MQTT/e-mail/web) + LegConfig + validation
+  config.py                  Technical runtime config (paths/MQTT/Swisseldex/web) + LegConfig + validation
   core/
-    leg_runner.py            Pipeline orchestration — run(config: LegConfig)
     collector/                Data intake
-      leg_import.py            Inbox scan & archive
-      leg_email_importer.py    IMAP mailbox → inbox importer
-      leg_scheduler.py         Cron-based run scheduler
-      leg_watcher.py           Inbox file watcher
-      leg_share_importer.py    Share folder → inbox importer
-      leg_storage.py           Processed-file state (SHA-256 dedup)
+      swisseldex_receiver.py   Swisseldex Datahub: fetch and archive the SDAT deliveries
+      sdat_import.py           Check and import SDAT documents into the database
+      raw_backup.py            Write-once backup of the originals (ADR-0010)
     pipeline/                  Settlement processing
-      leg_parser.py            CSV / S-DAT / XLSX parser
-      leg_normalizer.py        Reading normalization
-      leg_matcher.py           Proportional energy sharing
+      official_allocation.py   The grid operator's split as MatchResults (no redistribution)
       leg_billing.py           Period aggregation & cost calculation
       raw/
-        ebl_xlsx.py            EBL Excel format parser
-        sdat_ch.py             SDAT-CH (E31/E66) parser — raises until the real structure is verified
-    report/
-      leg_report.py            CSV + JSON report writers
+        sdat_ch.py             SDAT-CH 2025 (E31/E66) parser
     payments/
       swiss_qr.py              Swiss QR bill payload + payment part
   database/                   SQLite admin database (source of truth for master data)
@@ -358,11 +340,10 @@ shareomat/                    Python package
     invoicing.py                Invoices, payments, payouts, payment profile
     integrations.py             EmsomatInstall (Apps & Integrationen page)
   web/                        Admin web interface (standalone or behind HA Ingress)
-    server.py                  HTTP server, routing, upload/download, CSRF
+    server.py                  HTTP server, routing, uploads/downloads, CSRF
     login.py                   Central login gate, cookies, client address
     state.py                   Shared engine <-> web state
     navigation.py               Sidebar structure + URL generation
-    reports.py                  Report discovery/rendering helpers
     pages/                      One module per page (dashboard, participants, meters, ...)
     templates/                  Jinja2 templates
     static/                     app.css, banner.png
@@ -371,7 +352,7 @@ shareomat/                    Python package
     mqtt_runtime.py          MQTT client lifecycle
     mqtt_discovery.py        Home Assistant MQTT Discovery
     emsomat_install.py       Detects the installed Emsomat integration (read-only)
-    entities/                HA entity definitions (sensors, buttons, numbers, switches)
+    entities/                HA entity definitions (sensors, numbers, retired entities)
   sparkplug/                  Sparkplug B: host, participant relay, WAN up/downlink (Emsomat, Cross-House)
 ha_addon/                    Home Assistant Add-on
   config.yaml                 Add-on manifest (technical options only)
@@ -379,10 +360,7 @@ ha_addon/                    Home Assistant Add-on
   run.sh                      Container entrypoint
   generate_runtime_config.py  options.json → technical leg_config.yaml
 main.py                      Entry point
-data/inbox/                  Drop input files here
-data/archive/                Processed files land here
-data/reports/                billing_*.csv/json, match_detail_*.csv
-data/state/                  processed_files.json
+data/state/                  Swisseldex archive and state, backups
 data/shareomat.db            Admin database (Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife)
 ```
 

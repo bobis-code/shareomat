@@ -1,5 +1,7 @@
 # IMAP-Import: Vertrauensgrenze, Ressourcen und Wiederanlauf
 
+> **Historisch (seit 0.6.34):** Der IMAP-Import wurde mit dem CSV-Weg entfernt ([ADR-0012](decisions/ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)). Messdaten kommen nur noch als SDAT-Lieferung des Netzbetreibers über Swisseldex. Dieses Dokument bleibt als Nachweis der damaligen Prüfung.
+
 ## S-01: Betriebskompatibilität der Dateispeicherung
 
 Die sichere Speicherung aus S-01 bleibt bestehen: privates Staging innerhalb der

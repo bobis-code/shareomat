@@ -93,14 +93,12 @@ def _steps(monkeypatch, *, fail=()):
     return calls
 
 
-def _cycle_stubs(monkeypatch, config=None):
-    runs = []
-    monkeypatch.setattr(app, "build_leg_config", lambda db, rt: config if config is not None else object())
-    if config is None:
-        monkeypatch.setattr(app, "validate_leg_config", lambda c: None)
-    monkeypatch.setattr(app, "run", lambda c, mqtt_client=None, db_path=None: runs.append(c))
-    monkeypatch.setattr(app, "_update_web_state", lambda *a, **k: None)
-    return runs
+def _config_stub(monkeypatch, config):
+    """The startup check (main._check_configuration) builds this configuration; its warnings are collected."""
+    from shareomat.web.state import get_state
+    monkeypatch.setattr(app, "build_leg_config", lambda db, rt: config)
+    get_state().clear_warnings()
+    return get_state()
 
 
 # ── 1. Automatic Sparkplug reception and live processing ─────────────────────
@@ -203,25 +201,41 @@ def _config_with(**overrides):
     (SparkplugConfig(enabled=True, emsomat_edge_node_id="n"), WanConfig(enabled=True, broker="b", group_id="g", edge_node_id="e", own_participant_id="UNBEKANNT")),
 ])
 def test_invalid_communication_settings_do_not_stop_billing(tmp_path, monkeypatch, caplog, sparkplug, wan):
-    runs = _cycle_stubs(monkeypatch, _config_with(sparkplug=sparkplug, wan=wan))
+    """Checked at startup since 0.6.34 (there is no startup settlement run any more)."""
+    state = _config_stub(monkeypatch, _config_with(sparkplug=sparkplug, wan=wan))
     with caplog.at_level(logging.ERROR, logger="main"):
-        assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None) is True
-    assert len(runs) == 1
+        app._check_configuration(_runtime(tmp_path), tmp_path / "x.db")
     assert "billing continues" in caplog.text
+    assert not any(w.startswith("Konfiguration ungültig") for w in state.get()["warnings"])
 
 
-def test_a_billing_error_still_stops_the_run(tmp_path, monkeypatch):
+def test_a_billing_error_is_reported(tmp_path, monkeypatch, caplog):
     tariff = dataclasses.replace(_leg_config().tariff, grid_rate_chf_kwh=Decimal("-1"))
-    runs = _cycle_stubs(monkeypatch, _config_with(tariff=tariff))
-    assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None) is False
-    assert runs == []
+    state = _config_stub(monkeypatch, _config_with(tariff=tariff))
+    with caplog.at_level(logging.ERROR, logger="main"):
+        app._check_configuration(_runtime(tmp_path), tmp_path / "x.db")
+    assert "Invalid configuration" in caplog.text
+    assert any(w.startswith("Konfiguration ungültig") and "grid_rate_chf_kwh" in w for w in state.get()["warnings"])
 
 
 def test_billing_error_is_reported_together_with_a_communication_error(tmp_path, monkeypatch):
     tariff = dataclasses.replace(_leg_config().tariff, grid_rate_chf_kwh=Decimal("-1"))
-    runs = _cycle_stubs(monkeypatch, _config_with(tariff=tariff, wan=WanConfig(enabled=True)))
-    assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None) is False
-    assert runs == []
+    state = _config_stub(monkeypatch, _config_with(tariff=tariff, wan=WanConfig(enabled=True)))
+    app._check_configuration(_runtime(tmp_path), tmp_path / "x.db")
+    warnings = state.get()["warnings"]
+    assert any(w.startswith("Konfiguration ungültig") and "grid_rate_chf_kwh" in w for w in warnings)
+
+
+def test_incomplete_setup_is_no_error_at_startup(tmp_path, monkeypatch, caplog):
+    from shareomat.database.config_builder import IncompleteConfigError
+
+    def incomplete(db, rt):
+        raise IncompleteConfigError("Keine Gemeinschaft eingerichtet.")
+
+    monkeypatch.setattr(app, "build_leg_config", incomplete)
+    with caplog.at_level(logging.INFO, logger="main"):
+        app._check_configuration(_runtime(tmp_path), tmp_path / "x.db")
+    assert "not complete yet" in caplog.text and "Invalid configuration" not in caplog.text
 
 
 def test_the_communication_rules_themselves_are_unchanged():
@@ -259,58 +273,15 @@ def test_sparkplug_without_node_is_not_started(caplog):
     assert "emsomat_edge_node_id" in caplog.text
 
 
-def test_coordinator_runs_outside_the_settlement_lock(tmp_path, monkeypatch):
-    done = threading.Event()
-    cycle_returned = threading.Event()
-    lock_free = []
-    _cycle_stubs(monkeypatch)
-
-    def publish(*args):
-        # The cycle finishes without waiting for this work, which then runs with the lock free.
-        assert cycle_returned.wait(timeout=5)
-        free = app._RUN_LOCK.acquire(blocking=False)
-        if free:
-            app._RUN_LOCK.release()
-        lock_free.append(free)
-        done.set()
-
-    _steps(monkeypatch)
-    monkeypatch.setattr(app, "_publish_coordinator_sparkplug", publish)
-    assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None, Host()) is True
-    cycle_returned.set()
-    assert done.wait(timeout=5) and lock_free == [True]
-
-
-def test_hanging_price_server_does_not_block_the_next_run(tmp_path, monkeypatch):
-    release = threading.Event()
-    started = threading.Event()
-    runs = _cycle_stubs(monkeypatch)
-    _steps(monkeypatch)
-
-    def hanging(db):
-        started.set()
-        release.wait(timeout=10)
-
-    monkeypatch.setattr(app, "_maybe_recompute_export_price_forecast", hanging)
-    try:
-        assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None, Host()) is True
-        assert started.wait(timeout=5)
-        assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None, Host()) is True
-        assert len(runs) == 2
-    finally:
-        release.set()
-
-
-def test_failing_thread_start_does_not_touch_the_run(tmp_path, monkeypatch):
-    runs = _cycle_stubs(monkeypatch)
-
+def test_failing_thread_start_is_logged_and_nothing_else_breaks(tmp_path, monkeypatch, caplog):
     class Broken:
         def __init__(self, *a, **k):
             raise RuntimeError("keine Threads mehr")
 
     monkeypatch.setattr(app.threading, "Thread", Broken)
-    assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None, Host()) is True
-    assert len(runs) == 1
+    with caplog.at_level(logging.ERROR, logger="main"):
+        app._start_coordinator_tasks(Host(), object(), tmp_path / "x.db")
+    assert "could not be started" in caplog.text
 
 
 # ── 5. Start with an unavailable live module ─────────────────────────────────
@@ -483,13 +454,6 @@ def test_only_the_overview_refreshes_itself(db_path):
 
 
 # ── 7. Billing without Live-Energie ──────────────────────────────────────────
-
-
-def test_billing_runs_without_live_energy_and_without_sparkplug(tmp_path, monkeypatch):
-    runs = _cycle_stubs(monkeypatch)
-    calls = _steps(monkeypatch)
-    assert app._run_safe_cycle(_runtime(tmp_path), tmp_path / "x.db", None, None) is True
-    assert len(runs) == 1 and calls == []
 
 
 def test_billing_modules_do_not_import_the_live_package():

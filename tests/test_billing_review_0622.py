@@ -16,7 +16,6 @@ from tests.test_sdat_import_and_billing import (  # noqa: F401  (leg is a fixtur
     SLOTS,
     _import,
     _official_day,
-    _use_sdat_source,
     _with_consumer,
     leg,
 )
@@ -44,7 +43,6 @@ def test_review_example_is_not_rounded_twice(leg):
     series = leg_day(["2.000"] * SLOTS, local, ["3.000"] * SLOTS, local)
     _import(db, tmp, "e66.xml", Document(series=series, report_start=DAY_START,
                                          report_end=datetime(2026, 12, 31, 23, 0, tzinfo=timezone.utc)))
-    _use_sdat_source(db)
     lines = {i.participant_id: i for i in _preview(db, runtime).line_items}
     consumer, producer = lines["test-load"], lines["test-pv"]
     assert consumer.local_amount_exact_chf == Decimal("0.004995")
@@ -55,7 +53,6 @@ def test_review_example_is_not_rounded_twice(leg):
 def test_amounts_are_exact_decimal_products(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day(consumer_local="0.333", producer_local="0.333"))
-    _use_sdat_source(db)
     line = {i.participant_id: i for i in _preview(db, runtime).line_items}["test-load"]
     # 96 x 0.333 kWh x 0.10 CHF exactly; float would carry binary residue.
     assert line.local_amount_exact_chf == Decimal("0.333") * 96 * Decimal("0.10")
@@ -69,7 +66,6 @@ def test_daily_deliveries_alone_never_allow_a_release(leg):
     db, runtime, tmp = leg
     daily = _official_day(report_start=DAY_START, report_end=DAY_START + timedelta(days=1))
     _import(db, tmp, "daily.xml", daily)
-    _use_sdat_source(db)
     preview = _preview(db, runtime)
     assert any("noch keine Monatslieferung" in i for i in preview.availability.hard_issues)
 
@@ -82,7 +78,6 @@ def test_value_only_in_a_daily_delivery_blocks(leg):
     _import(db, tmp, "daily.xml", _official_day(document_id="D1", report_start=DAY_START,
                                                 report_end=DAY_START + timedelta(days=1),
                                                 created=datetime(2026, 12, 8, tzinfo=timezone.utc)))
-    _use_sdat_source(db)
     hard = _preview(db, runtime).availability.hard_issues
     assert any(PRODUCER in i and "nur aus Tageslieferungen" in i for i in hard)
     assert not any(CONSUMER in i and "nur aus Tageslieferungen" in i for i in hard)
@@ -96,23 +91,26 @@ def test_later_daily_value_differing_from_the_month_needs_a_reason(leg):
                                          created=datetime(2026, 12, 9, tzinfo=timezone.utc)), "local", {3: "1.400"})
     _with_consumer(later, "residual", {3: "0.600"})
     _import(db, tmp, "daily.xml", later)
-    _use_sdat_source(db)
     preview = _preview(db, runtime)
     soft = [i for i in preview.availability.blocking_issues if i not in preview.availability.hard_issues]
     assert any("weicht ab" in i or "abweicht" in i for i in soft)
     assert not any("Monatslieferung" in i for i in preview.availability.hard_issues)
 
 
-def test_missing_quarter_hours_are_hard_with_official_data(leg):
+def test_missing_quarter_hours_are_left_out_and_need_a_reason(leg):
+    """Until 0.6.33 a hard issue (review 20.11.2026); since the operator's decision of 28.11.2026 the
+    quarter hours without a value are not billed, for the whole LEG, and release needs a reason."""
     db, runtime, tmp = leg
     doc = _official_day()
     for s in doc.series:
         if s.point == PRODUCER:
             s.values = s.values[:50]
     _import(db, tmp, "month.xml", doc)
-    _use_sdat_source(db)
-    hard = _preview(db, runtime).availability.hard_issues
-    assert any("46 von 96 Viertelstunden ohne Messwert" in i for i in hard)
+    availability = _preview(db, runtime).availability
+    soft = [i for i in availability.blocking_issues if i not in availability.hard_issues]
+    assert any("46 von 96 Viertelstunden ohne Messwert" in i for i in soft)
+    assert any("Nicht abgerechnet: 46 Viertelstunde(n)" in i for i in soft)
+    assert not any("ohne Messwert" in i for i in availability.hard_issues)
 
 
 # ── notes kept with the run ──
@@ -123,7 +121,6 @@ def test_rounding_notes_are_stored_with_the_run(leg):
     doc = _with_consumer(_official_day(), "local", {5: "1.501"})       # received 0.001 more than supplied
     _with_consumer(doc, "residual", {5: "0.499"})
     _import(db, tmp, "month.xml", doc)
-    _use_sdat_source(db)
     preview = _preview(db, runtime)
     assert any("Rundungsdifferenz" in n for n in preview.availability.notes)
     run = billing.save_draft(db, preview)
@@ -141,7 +138,6 @@ def test_prosumer_with_two_metering_points_gets_both_lines(leg):
         conn.execute("UPDATE meters SET participant_id = (SELECT participant_id FROM meters WHERE meter_id = ?) "
                      "WHERE meter_id = ?", (CONSUMER, PRODUCER))
     _import(db, tmp, "month.xml", _official_day())
-    _use_sdat_source(db)
     preview = _preview(db, runtime)
     [line] = preview.line_items
     assert sorted(line.meter_ids) == sorted([CONSUMER, PRODUCER])
@@ -182,7 +178,6 @@ def test_official_leg_energy_before_the_confirmed_start_blocks(leg, monkeypatch)
         mark_accepted(db, assignment.id, date(2025, 12, 1), method="paper", signed_by="Test",
                       paper_location="Ordner 1")
     _import(db, tmp, "month.xml", _official_day())
-    _use_sdat_source(db)
     assert not any("nicht abrechnungsberechtigt" in i for i in _preview(db, runtime).availability.hard_issues)
 
     save_community(db, replace(get_community(db), vnb_confirmed_start=DAY + timedelta(days=1)))

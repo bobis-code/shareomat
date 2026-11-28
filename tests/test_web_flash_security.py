@@ -11,7 +11,6 @@ from unittest.mock import Mock
 import pytest
 from markupsafe import Markup, escape
 
-from shareomat.config import PathConfig, RuntimeConfig
 from shareomat.database.auth import create_admin, create_session
 from shareomat.database.sqlite import init_db
 from shareomat.database.supplier_tariffs import list_supplier_tariffs
@@ -107,41 +106,21 @@ def test_real_http_form_error_roundtrip_escapes_invalid_input(server, field):
     assert str(escape(payload)) in html
 
 
-def test_upload_notice_keeps_controlled_bold_without_interpreting_the_filename(tmp_path):
-    paths = PathConfig(inbox=tmp_path / "inbox", archive=tmp_path / "archive",
-                       reports=tmp_path / "reports", state=tmp_path / "state")
-    get_state().register_runtime(RuntimeConfig(paths=paths))
-    name = '<img src=x> & "quoted".csv'
-    handler = object.__new__(_Handler)
-    handler._save_file_upload = Mock(return_value=(get_state().csrf_token, name, 1234))
-    handler._redirect = Mock()
-    handler._handle_upload("", "multipart/form-data")
-
-    html = _render()
-    notice = NoticeParser(html)
-    assert notice.tags == ["strong"]
-    assert name in notice.text and "1,234 bytes" in notice.text
-    assert "✓" in notice.text and "→ Eingang" in notice.text
-    assert name not in html
-
-
 def test_upload_failure_is_escaped_once_not_double_escaped(tmp_path):
-    get_state().register_runtime(RuntimeConfig(paths=PathConfig(
-        inbox=tmp_path / "inbox", archive=tmp_path / "archive",
-        reports=tmp_path / "reports", state=tmp_path / "state",
-    )))
+    """Signed documents: the only file upload left after 0.6.34 (the meter-data upload went with the CSV path)."""
+    db = tmp_path / "test.db"
+    init_db(db)
+    get_state().register_db(db)
     payload = '<bad-file> & "details"'
     handler = object.__new__(_Handler)
-    handler._save_file_upload = Mock(side_effect=ValueError(payload))
-    handler._redirect = Mock()
-    handler._handle_upload("", "multipart/form-data")
+    handler._read_multipart = Mock(side_effect=ValueError(payload))
+    assert handler._receive_signed_document("1", "multipart/form-data") is None
     notice = NoticeParser(_render())
     assert notice.text == f"Upload fehlgeschlagen: {payload}"
     assert notice.tags == []
 
 
-@pytest.mark.parametrize("upload", [False, True])
-def test_session_persisted_flash_obeys_the_same_text_rule(tmp_path, upload):
+def test_session_persisted_flash_obeys_the_same_text_rule(tmp_path):
     db = tmp_path / "test.db"
     init_db(db)
     get_state().register_db(db)
@@ -151,14 +130,10 @@ def test_session_persisted_flash_obeys_the_same_text_rule(tmp_path, upload):
     payload = '<strong>persisted</strong> & "text"'
     set_principal(principal)
     try:
-        if upload:
-            from shareomat.web.rendering import upload_flash_message
-            get_state().set_flash(upload_flash_message(payload, 1234))
-        else:
-            get_state().set_flash(payload)
+        get_state().set_flash(payload)
         notice = NoticeParser(_render())
         assert payload in notice.text
-        assert notice.tags == (["strong"] if upload else [])
+        assert notice.tags == []
         assert NoticeParser(_render()).text == ""
     finally:
         set_principal(None)

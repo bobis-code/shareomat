@@ -40,8 +40,6 @@ from shareomat.leg_const import (
     METER_ROLE_PRODUCER_CONSUMER,
     METER_ROLE_STORAGE,
     SLOT_MINUTES,
-    UNKNOWN_METER_POLICY_FAIL,
-    UNKNOWN_METER_POLICY_SKIP,
 )
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
@@ -58,9 +56,6 @@ _VALID_METER_ROLES = {
     METER_ROLE_GRID,
 }
 
-_VALID_METER_POLICIES = {UNKNOWN_METER_POLICY_FAIL, UNKNOWN_METER_POLICY_SKIP}
-
-
 # ── Dataclasses ───────────────────────────────────────────────────────────────
 
 
@@ -72,7 +67,7 @@ class PathConfig:
     archive: Path
     reports: Path
     state: Path
-    share_inbox: str = ""  # External share folder to watch; empty = disabled
+    share_inbox: str = ""  # Not used since 0.6.34 (CSV path removed, ADR-0012); add-on option kept until P3
     backups: Path | None = None  # "Sicherung erstellen" target; None = <state>/backups
 
 
@@ -82,18 +77,14 @@ class ProcessingConfig:
 
     slot_minutes is a fixed Swiss LEG/ZEV constant; every other field is
     populated from the database-backed OperationSettings by
-    shareomat.database.config_builder.build_leg_config().
+    shareomat.database.config_builder.build_leg_config(). The CSV-run fields
+    (archiving, unknown meter policy, cron, inbox scan, meter data source)
+    were removed in 0.6.34 (ADR-0012).
     """
 
     slot_minutes: int = SLOT_MINUTES
-    archive_processed: bool = True
-    unknown_meter_policy: str = UNKNOWN_METER_POLICY_FAIL
-    cron_schedule: str = ""
-    auto_scan_enabled: bool = False
-    scan_interval_seconds: int = 60
     peak_start_hour: int = 6               # Hochtarif-Fenster für Tariff.rate_mode="ht_nt"
     peak_end_hour: int = 22
-    meter_data_source: str = "email_csv"   # METER_DATA_SOURCE_* from shareomat.leg_const
     peak_weekdays_only: bool = True
 
 
@@ -120,7 +111,11 @@ class MqttConfig:
 
 @dataclass
 class EmailConfig:
-    """IMAP mailbox polling for automatic meter-data ingestion (e.g. a dedicated Gmail inbox)."""
+    """IMAP mailbox polling for meter-data files. Not used since 0.6.34 (CSV path removed, ADR-0012).
+
+    The add-on options email_* stay readable until the config interface (P3),
+    so an existing add-on configuration keeps loading.
+    """
 
     enabled: bool = False
     imap_host: str = "imap.gmail.com"
@@ -555,12 +550,6 @@ def validate_leg_config(config: LegConfig) -> None:
             f"got {config.processing.slot_minutes}"
         )
 
-    if config.processing.unknown_meter_policy not in _VALID_METER_POLICIES:
-        errors.append(
-            f"unknown_meter_policy must be one of {sorted(_VALID_METER_POLICIES)}, "
-            f"got '{config.processing.unknown_meter_policy}'"
-        )
-
     t = config.tariff
     for name, val in [
         ("local_rate_chf_kwh", t.local_rate_chf_kwh),
@@ -610,23 +599,6 @@ def validate_leg_config(config: LegConfig) -> None:
                 f"wan.own_participant_id '{config.wan.own_participant_id}' does not match any "
                 "configured participant_id"
             )
-
-    if config.email.enabled:
-        if not (1 <= config.email.imap_port <= 65535):
-            errors.append(f"email.imap_port must be between 1 and 65535, got {config.email.imap_port}")
-        if not config.email.imap_host:
-            errors.append("email.imap_host is required when email.enabled is true")
-        if not config.email.username:
-            errors.append("email.username is required when email.enabled is true")
-
-    cron = config.processing.cron_schedule
-    if cron:
-        try:
-            from croniter import croniter
-            if not croniter.is_valid(cron):
-                errors.append(f"processing.cron_schedule '{cron}' is not a valid cron expression")
-        except ImportError:
-            pass  # croniter not installed — skip validation
 
     if errors:
         msg = "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in errors)

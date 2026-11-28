@@ -118,9 +118,8 @@ EXPECTED_MENU = [
                                      ("participants", "Teilnehmer"), ("meters", "Messpunkte"),
                                      ("contract", "Vertrag"), ("tariffs", "Tarife")])]),
     ("energy", "Energie & Analyse", [
-        ("", [("meter_data", "Messdaten"), ("reports", "Berichte")]),
-        ("ANALYSE", [("analysis", "Übersicht"), ("analysis_sums", "Summen & Auswertung"),
-                     ("analysis_values", "Messwerte")]),
+        ("", [("meter_data", "Messdaten")]),
+        ("ANALYSE", [("analysis_sums", "Summen & Auswertung"), ("analysis_values", "Messwerte")]),
         ("LIVE-ENERGIE", [("live_energy", "Übersicht"), ("live_energy_sources", "Messquellen"),
                           ("live_energy_diagnostics", "Diagnose")]),
     ]),

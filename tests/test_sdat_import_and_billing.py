@@ -2,10 +2,8 @@
 """SX-2 import + versioning and SX-3 official billing (ADR-0008), on a synthetic two-member LEG."""
 from __future__ import annotations
 
-import csv
 import hashlib
 import sqlite3
-from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -18,10 +16,8 @@ from shareomat.database.community import save_community
 from shareomat.database.meters import create_meter
 from shareomat.database.participants import create_participant
 from shareomat.database.sdat_store import established_community_id, list_documents, load_official_values
-from shareomat.database.settings import get_operation_settings, save_operation_settings
 from shareomat.database.sqlite import init_db
 from shareomat.database.tariffs import create_tariff
-from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 from shareomat.models.community import Community
 from shareomat.models.meter import Meter
 from shareomat.models.participant import Participant
@@ -93,10 +89,6 @@ def _import(db, tmp_path, name, doc_or_bytes):
     data = doc_or_bytes if isinstance(doc_or_bytes, bytes) else build(doc_or_bytes)
     path, sha, name = _file(tmp_path, name, data)
     return import_sdat_file(db, path, sha, file_name=name, origin="swisseldex")
-
-
-def _use_sdat_source(db):
-    save_operation_settings(db, replace(get_operation_settings(db), meter_data_source=METER_DATA_SOURCE_SDAT_LEG))
 
 
 def _meter_readings(db) -> int:
@@ -217,7 +209,6 @@ def test_cancellation_removes_the_values(leg):
 def test_official_split_is_billed_as_delivered_not_redistributed(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day())
-    _use_sdat_source(db)
     preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
     lines = {i.participant_id: i for i in preview.line_items}
     # match_all would share min(2, 3) = 2 kWh per quarter hour (192 kWh); EBL allocated 1.5 kWh (144 kWh).
@@ -233,7 +224,6 @@ def test_official_split_is_billed_as_delivered_not_redistributed(leg):
 def test_temporary_values_block_the_release(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day(conditions=["21"] * SLOTS))
-    _use_sdat_source(db)
     hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
     assert any("vorläufige" in issue for issue in hard)
 
@@ -243,9 +233,12 @@ def test_missing_residual_series_is_never_assumed_zero(leg):
     doc = _official_day()
     doc.series = [s for s in doc.series if not (s.point == CONSUMER and s.energy_type == "residual")]
     _import(db, tmp, "e66.xml", doc)
-    _use_sdat_source(db)
-    hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
-    assert any(CONSUMER in issue and "fehlt LEG- oder Restenergie" in issue for issue in hard)
+    preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
+    availability = preview.availability
+    assert any(CONSUMER in issue and "fehlt LEG- oder Restenergie" in issue for issue in availability.blocking_issues)
+    # Without its residual value no quarter hour of the consumer counts: a meter without values, a hard issue.
+    assert f"Messpunkt {CONSUMER}: keine Messwerte für Bezug im ganzen Zeitraum." in availability.hard_issues
+    assert all(item.local_received_kwh == 0 for item in preview.line_items)
 
 
 def test_total_not_equal_local_plus_residual_blocks(leg):
@@ -255,7 +248,6 @@ def test_total_not_equal_local_plus_residual_blocks(leg):
         if s.point == CONSUMER and s.energy_type == "residual":
             s.values = ["0.400"] * SLOTS
     _import(db, tmp, "e66.xml", doc)
-    _use_sdat_source(db)
     hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
     assert any("Total ≠ LEG-Energie + Restenergie" in issue for issue in hard)
 
@@ -263,7 +255,6 @@ def test_total_not_equal_local_plus_residual_blocks(leg):
 def test_official_energy_of_a_meter_not_billed_that_day_blocks(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day())
-    _use_sdat_source(db)
     with sqlite3.connect(db) as conn:
         conn.execute("UPDATE meters SET valid_from = '2026-12-05' WHERE meter_id = ?", (PRODUCER,))
     hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
@@ -272,7 +263,6 @@ def test_official_energy_of_a_meter_not_billed_that_day_blocks(leg):
 
 def test_no_imported_data_is_a_hard_issue(leg):
     db, runtime, tmp = leg
-    _use_sdat_source(db)
     hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
     assert any("noch keine offiziellen E66-Daten" in issue for issue in hard)
 
@@ -280,7 +270,6 @@ def test_no_imported_data_is_a_hard_issue(leg):
 def test_e31_crosscheck_is_only_a_hint(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day())
-    _use_sdat_source(db)
     issues = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.blocking_issues
     assert any("Keine E31-Summen" in issue for issue in issues)
     e31 = Document(document_type="E31", document_id="E31", series=[
@@ -294,7 +283,6 @@ def test_e31_crosscheck_is_only_a_hint(leg):
 def test_release_and_later_correction_never_changes_the_released_run(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day())
-    _use_sdat_source(db)
     preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
     draft = billing.save_draft(db, preview)
     released = billing.release_billing_run(db, draft.id, override_reason="Test: E31 fehlt", runtime=runtime)
@@ -314,30 +302,11 @@ def test_release_and_later_correction_never_changes_the_released_run(leg):
 def test_new_sdat_data_between_draft_and_release_refuses_the_release(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _official_day())
-    _use_sdat_source(db)
     draft = billing.save_draft(db, billing.compute_billing_preview(db, runtime, DAY, DAY))
     _import(db, tmp, "corr.xml", _official_day(consumer_local="1.000", producer_local="1.000",
                                                created=datetime(2026, 12, 10, tzinfo=timezone.utc), document_id="CORR"))
     with pytest.raises(billing.BillingWorkflowError, match="geändert"):
         billing.release_billing_run(db, draft.id, override_reason="x", runtime=runtime)
-
-
-def test_default_source_ignores_sdat_data_completely(leg):
-    """Bestandsschutz: with the existing data source, imported SDAT data changes nothing."""
-    db, runtime, tmp = leg
-    source = runtime.paths.inbox / "test-day.csv"
-    with source.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.writer(stream)
-        writer.writerow(["timestamp", "meter_id", "value_kwh", "direction"])
-        for slot in range(SLOTS):
-            ts = (START + timedelta(minutes=15 * slot)).isoformat()
-            writer.writerow([ts, PRODUCER, "3", "export"])
-            writer.writerow([ts, CONSUMER, "2", "import"])
-    before = billing.compute_billing_preview(db, runtime, DAY, DAY, persist_readings=False)
-    _import(db, tmp, "e66.xml", _official_day())
-    after = billing.compute_billing_preview(db, runtime, DAY, DAY, persist_readings=False)
-    assert billing._result_fingerprint(before) == billing._result_fingerprint(after)
-    assert {i.participant_id: i.local_received_kwh for i in after.line_items}["test-load"] == Decimal("192.0000")
 
 
 # ── rounding of the grid operator (first real EBL deliveries, 11.2026) ──
@@ -357,7 +326,6 @@ def test_total_off_by_one_digit_is_rounding_not_a_contradiction(leg):
     db, runtime, tmp = leg
     # 2.000 total vs 1.500 + 0.501: EBL rounds each value on its own.
     _import(db, tmp, "e66.xml", _with_consumer(_official_day(), "residual", {3: "0.501", 40: "0.499", 77: "0.501"}))
-    _use_sdat_source(db)
     preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
     assert not any("Total ≠" in issue for issue in preview.availability.blocking_issues)
     assert any(CONSUMER in note and "3 Viertelstunde(n)" in note and "Rundung" in note
@@ -370,7 +338,6 @@ def test_total_off_by_one_digit_is_rounding_not_a_contradiction(leg):
 def test_total_off_by_two_digits_still_blocks(leg):
     db, runtime, tmp = leg
     _import(db, tmp, "e66.xml", _with_consumer(_official_day(), "residual", {3: "0.502"}))
-    _use_sdat_source(db)
     hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
     assert any("Total ≠ LEG-Energie + Restenergie" in issue for issue in hard)
 
@@ -380,7 +347,6 @@ def test_clearing_rounding_per_quarter_hour_is_only_a_note(leg):
     doc = _with_consumer(_official_day(), "local", {5: "1.501", 6: "1.501"})
     _with_consumer(doc, "residual", {5: "0.499", 6: "0.499"})
     _import(db, tmp, "e66.xml", doc)
-    _use_sdat_source(db)
     preview = billing.compute_billing_preview(db, runtime, DAY, DAY)
     assert not any("Energie-Clearing" in issue for issue in preview.availability.blocking_issues)
     assert any("Energie-Clearing: in 2 Viertelstunde(n) Rundungsdifferenz" in note and "+0.002 kWh" in note
@@ -392,6 +358,5 @@ def test_clearing_difference_beyond_rounding_blocks(leg):
     doc = _with_consumer(_official_day(), "local", {5: "1.502"})
     _with_consumer(doc, "residual", {5: "0.498"})
     _import(db, tmp, "e66.xml", doc)
-    _use_sdat_source(db)
     hard = billing.compute_billing_preview(db, runtime, DAY, DAY).availability.hard_issues
     assert any("Energie-Clearing stimmt nicht: in 1 Viertelstunde(n)" in issue for issue in hard)

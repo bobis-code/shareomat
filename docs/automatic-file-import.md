@@ -1,5 +1,7 @@
 # Automatische Dateiauswertung: überlappende Intervallmessungen
 
+> **Historisch (seit 0.6.34):** Der automatische Dateilauf (`leg_runner.py`) wurde mit dem CSV-Weg entfernt ([ADR-0012](decisions/ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)). Messdaten kommen nur noch als SDAT-Lieferung des Netzbetreibers über Swisseldex. Dieses Dokument bleibt als Nachweis der damaligen Prüfung.
+
 Die folgende Regel gilt ausschliesslich für einen automatischen Dateilauf in
 `shareomat/core/leg_runner.py`. Sie ändert weder MQTT-Livedaten noch das
 Sparkplug-Relay, die Bedarfsprognose oder die interaktive LEG-Abrechnung.

@@ -292,17 +292,22 @@ def test_operation_settings_defaults_when_unset(db_path):
 
 def test_operation_settings_roundtrip(db_path):
     save_operation_settings(db_path, OperationSettings(
-        unknown_meter_policy="skip", archive_processed=False,
-        cron_schedule="0 6 * * *", auto_scan_enabled=True, scan_interval_seconds=30,
-        meter_data_source="sdat_leg",
+        auto_create_billing=True, peak_start_hour=7, peak_end_hour=21, peak_weekdays_only=False,
+        raw_backup_mode="required", raw_backup_mount="omv", raw_backup_subdir="roh",
     ))
     settings = get_operation_settings(db_path)
-    assert settings.unknown_meter_policy == "skip"
-    assert settings.archive_processed is False
-    assert settings.cron_schedule == "0 6 * * *"
-    assert settings.auto_scan_enabled is True
-    assert settings.scan_interval_seconds == 30
-    assert settings.meter_data_source == "sdat_leg"
+    assert settings.auto_create_billing is True
+    assert (settings.peak_start_hour, settings.peak_end_hour, settings.peak_weekdays_only) == (7, 21, False)
+    assert (settings.raw_backup_mode, settings.raw_backup_mount, settings.raw_backup_subdir) == ("required", "omv", "roh")
+
+
+def test_settings_of_the_removed_csv_path_are_ignored(db_path):
+    """0.6.33 and older stored the CSV-run settings; since 0.6.34 they stay in the table and are not read."""
+    from shareomat.database.settings import set_setting
+    for key, value in (("meter_data_source", "email_csv"), ("cron_schedule", "0 6 * * *"), ("auto_scan_enabled", "1"),
+                       ("unknown_meter_policy", "skip"), ("archive_processed", "0"), ("scan_interval_seconds", "30")):
+        set_setting(db_path, key, value)
+    assert get_operation_settings(db_path) == OperationSettings()
 
 
 # ── YAML one-time import ────────────────────────────────────────────────────

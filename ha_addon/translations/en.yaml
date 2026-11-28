@@ -77,3 +77,43 @@ configuration:
       from_name:
         name: Sender name (optional)
         description: For example the community's name
+  command_topic_enabled:
+    name: MQTT command run_once (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  share_inbox:
+    name: Share folder for meter files (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_enabled:
+    name: E-mail import of meter files (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_imap_host:
+    name: IMAP server (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_imap_port:
+    name: IMAP port (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_username:
+    name: IMAP username (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_password:
+    name: IMAP password (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_folder:
+    name: IMAP folder (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_allowed_senders:
+    name: Allowed senders (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.
+  email_poll_interval_seconds:
+    name: IMAP poll interval (no longer used)
+    description: >-
+      Not used since 0.6.34: meter data comes only from the grid operator through Swisseldex. Kept until the new configuration, so that existing settings keep loading.

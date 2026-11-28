@@ -20,9 +20,9 @@ Notes:
 
     Classification happens in LOCAL time (zoneinfo), not raw UTC — a slot's
     UTC hour shifts across DST transitions, but "is this Hochtarif" must
-    follow the wall clock, same reasoning as leg_report.py/
-    consumption_forecast.py, which already convert to local time before
-    any weekday/time-of-day comparison.
+    follow the wall clock, same reasoning as consumption_forecast.py,
+    which also converts to local time before any weekday/time-of-day
+    comparison.
 """
 
 from __future__ import annotations

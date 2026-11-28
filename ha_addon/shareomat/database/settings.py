@@ -34,9 +34,8 @@ from shareomat.models.settings import OperationSettings, SwisseldexSchedule
 logger = logging.getLogger(__name__)
 
 # bool/int/str fields on OperationSettings, in the order they are (de)serialized.
-_BOOL_FIELDS = {"archive_processed", "auto_scan_enabled", "auto_create_billing",
-                "auto_create_invoices", "auto_send_invoices", "peak_weekdays_only"}
-_INT_FIELDS = {"scan_interval_seconds", "peak_start_hour", "peak_end_hour"}
+_BOOL_FIELDS = {"auto_create_billing", "auto_create_invoices", "auto_send_invoices", "peak_weekdays_only"}
+_INT_FIELDS = {"peak_start_hour", "peak_end_hour"}
 
 # Automatic Swisseldex sync (SwisseldexSchedule): own keys, absent until saved on "Externe Daten".
 SWISSELDEX_AUTO_SYNC_KEY = "swisseldex_auto_sync"

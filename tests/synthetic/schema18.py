@@ -74,12 +74,11 @@ from shareomat.database.participant_contract import (
 )
 from shareomat.database.participants import create_participant, set_participant_active, update_participant
 from shareomat.database.reference_prices import save_reference_price
-from shareomat.database.settings import get_operation_settings, save_operation_settings, save_swisseldex_schedule
+from shareomat.database.settings import save_swisseldex_schedule, set_setting
 from shareomat.database.sqlite import connect, init_db
 from shareomat.database.supplier_tariffs import create_supplier_tariff
 from shareomat.external_data.elcom import ElcomTariffComponents
 from shareomat.external_data.market_forecast import ExchangeRate
-from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 from shareomat.models.community import Community
 from shareomat.models.contract import ContractSettings, ContractVersion
 from shareomat.models.external_data import DataImportRecord, ExternalDataSettings, ReferencePrice, SupplierTariff
@@ -603,9 +602,21 @@ def _documents(db: Path, result: BuildResult) -> None:
                                               phone="+41 00 000 00 13"))
 
 
+# The operating settings exactly as 0.6.31 stored them: save_operation_settings() wrote every field, in field
+# order. Six keys belonged to the CSV path removed in 0.6.34 and are ignored since; a real installation keeps
+# them, and so does the frozen fixture.
+_OPERATION_SETTINGS_0631 = (
+    ("unknown_meter_policy", "fail"), ("archive_processed", "1"), ("cron_schedule", ""), ("auto_scan_enabled", "0"),
+    ("scan_interval_seconds", "60"), ("auto_create_billing", "1"), ("auto_create_invoices", "1"),
+    ("auto_send_invoices", "0"), ("peak_start_hour", "6"), ("peak_end_hour", "22"), ("peak_weekdays_only", "1"),
+    ("meter_data_source", "sdat_leg"), ("raw_backup_mode", "off"), ("raw_backup_mount", ""),
+    ("raw_backup_subdir", "swisseldex-rohdaten"),
+)
+
+
 def _settings(db: Path) -> None:
-    save_operation_settings(db, replace(get_operation_settings(db), meter_data_source=METER_DATA_SOURCE_SDAT_LEG,
-                                        auto_create_billing=True, auto_create_invoices=True, auto_send_invoices=False))
+    for key, value in _OPERATION_SETTINGS_0631:
+        set_setting(db, key, value)
     save_contract_settings(db, ContractSettings(representative_name="Test Vertretung", representative_address_line="Testweg 1",
                                                 representative_postal_code="9999", representative_city="Testdorf",
                                                 representative_email="vertretung@example.ch",

@@ -5,9 +5,9 @@ File: shareomat/database/consumption_forecasts.py
 Purpose:
     Persistence for computed short-term LEG demand forecasts (see
     shareomat.core.pipeline.consumption_forecast for the algorithm). A
-    rolling, upserted forecast — not an immutable historical fact like
-    shareomat.database.settlement_history — so re-computation overwrites
-    the previous value for the same slot rather than accumulating rows.
+    rolling, upserted forecast — not an immutable historical fact — so
+    re-computation overwrites the previous value for the same slot rather
+    than accumulating rows.
 
 Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine

@@ -171,11 +171,6 @@ class BillingPreview:
     grid_rate_chf_kwh: Decimal
     feed_in_rate_chf_kwh: Decimal
     line_items: list[BillingLineItem]
-    # True: computed from the grid operator's official SDAT allocation; False: from e-mail/CSV meter data.
-    official_source: bool = False
-    # With e-mail/CSV: official SDAT values exist for the period but are not used. Shown on the
-    # preview only - never part of the issues, so imported SDAT data changes nothing in a CSV billing.
-    official_data_unused: bool = False
     # Exact money totals (0.6.31); not part of the result fingerprint, which stays as before.
     money: MoneyBalance | None = None
 

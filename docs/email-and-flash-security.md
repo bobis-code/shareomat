@@ -1,5 +1,7 @@
 # Sichere E-Mail-Anhänge und Flash-Nachrichten (S-01 / S-02)
 
+> **Historisch (seit 0.6.34):** Der E-Mail-Import von Messdateien (S-01) wurde mit dem CSV-Weg entfernt ([ADR-0012](decisions/ADR-0012-architekturumbau-mehrere-legs-eigenstaendig-datenaufteilung.md)). Messdaten kommen nur noch als SDAT-Lieferung des Netzbetreibers über Swisseldex. Dieses Dokument bleibt als Nachweis der damaligen Prüfung. Die Regeln für Flash-Nachrichten (S-02) gelten weiter; die besondere Upload-Meldung ist mit dem Upload entfallen.
+
 ## S-01: Dateispeicherung
 
 Der E-Mail-Importer verwendete MIME-Dateinamen direkt als Zielpfad. Dadurch

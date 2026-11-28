@@ -58,13 +58,11 @@ from shareomat.web.pages import (
     meter_data,
     meters,
     participants,
-    reports as reports_page,
     settings as settings_page,
     setup,
     tariffs,
 )
-from shareomat.web.rendering import FormError, Redirect, RequestContext, check_csrf, render_page, upload_flash_message
-from shareomat.web.reports import report_path
+from shareomat.web.rendering import FormError, Redirect, RequestContext, check_csrf, render_page
 from shareomat.web.state import get_state
 
 logger = logging.getLogger(__name__)
@@ -72,11 +70,9 @@ logger = logging.getLogger(__name__)
 __all__ = ["WebServer", "get_state"]
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
-_ALLOWED_UPLOAD_EXT = {".csv", ".xml", ".xlsx"}
 _ALLOWED_DOCUMENT_EXT = {".pdf", ".jpg", ".jpeg", ".png"}
 _MAX_DOCUMENT_BYTES = 20 * 1024 * 1024  # 20 MB per signed declaration
 _DOCUMENT_MIME = {".pdf": "application/pdf", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png"}
-_MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 100 MB
 _SOCKET_TIMEOUT_SECONDS = 30
 _UPLOAD_CHUNK_SIZE = 64 * 1024  # 64 KB chunks for binary streaming
 _MAX_UPLOAD_SECONDS = 120  # Total time budget per upload
@@ -125,7 +121,6 @@ _PAGE_MODULES = {
     "billing": billing,
     "invoices": invoices,
     "automation": automation,
-    "reports": reports_page,
     "live_energy": _load_live_energy_page(),
     "settings": settings_page,
     "external_data": external_data,
@@ -244,41 +239,6 @@ class _Handler(BaseHTTPRequestHandler):
         with path.open("rb") as f:
             shutil.copyfileobj(f, self.wfile, length=1024 * 1024)
 
-    def _serve_download(self, query: str) -> None:
-        """Serve a report file as a download, constrained to the reports directory."""
-        params = parse_qs(query)
-        filename = params.get("f", [""])[0]
-        file_path = report_path(filename)
-
-        if file_path is None:
-            self.send_response(404)
-            self.end_headers()
-            return
-
-        suffix = file_path.suffix.lower()
-        mime = {
-            ".csv": "text/csv; charset=utf-8",
-            ".json": "application/json; charset=utf-8",
-            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        }.get(suffix, "application/octet-stream")
-
-        safe_name = Path(filename).name
-        ascii_name = safe_name.encode("ascii", errors="ignore").decode("ascii") or "report"
-        encoded_name = quote(safe_name)
-        size = file_path.stat().st_size
-
-        self.send_response(200)
-        self.send_header("Content-Type", mime)
-        self.send_header(
-            "Content-Disposition",
-            f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{encoded_name}',
-        )
-        self.send_header("Content-Length", str(size))
-        self.end_headers()
-        with file_path.open("rb") as f:
-            shutil.copyfileobj(f, self.wfile, length=1024 * 1024)
-        logger.debug("Download served: %s (%d bytes)", safe_name, size)
-
     # ── GET ──────────────────────────────────────────────────────────────
 
     def do_GET(self) -> None:
@@ -306,10 +266,6 @@ class _Handler(BaseHTTPRequestHandler):
         gate_segments = [unquote(s) for s in path.split("/") if s]
         gate_route = gate_segments[0].replace("-", "_") if gate_segments else ""
         if not self._gate("GET", path, ingress_path, gate_route, gate_segments[1:]):
-            return
-
-        if path == "/reports/download":
-            self._serve_download(parsed.query)
             return
 
         segments = [unquote(s) for s in path.split("/") if s]
@@ -412,30 +368,6 @@ class _Handler(BaseHTTPRequestHandler):
         gate_route = gate_segments[0].replace("-", "_") if gate_segments else ""
         if not self._gate("POST", path, ingress_path, gate_route, gate_segments[1:]):
             return          # nothing read, nothing stored, nothing run
-
-        if path == "/actions/run":
-            form = self._parse_urlencoded_form()
-            if form is None:
-                return
-            ctx = RequestContext(method="POST", ingress_path=ingress_path, form=form)
-            try:
-                check_csrf(ctx)
-            except FormError as exc:
-                get_state().set_flash(str(exc), ok=False)
-                self._redirect(url_for(ingress_path, "meter_data"))
-                return
-            if get_state().trigger_run():
-                logger.info("Web: manual run triggered")
-            else:
-                get_state().set_flash(
-                    "Lauf nicht gestartet: Es läuft bereits ein Abrechnungslauf.", ok=False,
-                )
-            self._redirect(url_for(ingress_path, "meter_data"))
-            return
-
-        if path == "/meter-data/upload":
-            self._handle_upload(ingress_path, content_type)
-            return
 
         segments = [unquote(s) for s in path.split("/") if s]
         route = segments[0].replace("-", "_") if segments else ""
@@ -689,73 +621,18 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ── File upload (multipart, streamed) ───────────────────────────────
 
-    def _handle_upload(self, ingress_path: str, content_type: str) -> None:
-        """Parse the meter-data upload form (file + CSRF token) and save it to the inbox."""
-        runtime = get_state().runtime
-        redirect_target = url_for(ingress_path, "meter_data")
-
-        if runtime is None:
-            get_state().set_flash("Upload fehlgeschlagen: System noch nicht bereit.", ok=False)
-            self._redirect(redirect_target)
-            return
-
-        inbox = runtime.paths.inbox
-        try:
-            inbox.mkdir(parents=True, exist_ok=True)
-            try:
-                result = self._save_file_upload(inbox, content_type)
-            except _CsrfRejected:
-                self.close_connection = True  # the rest of the body was not read
-                result = ("", "", 0)          # handled right below as a token mismatch, nothing was stored
-
-            if result is None:
-                get_state().set_flash("Upload fehlgeschlagen: keine gültige Datei erhalten.", ok=False)
-                self._redirect(redirect_target)
-                return
-
-            csrf_token_received, filename, size = result
-            if not csrf_token_received or csrf_token_received != get_state().csrf_token:
-                get_state().set_flash(
-                    "Ungültige Anfrage (Sicherheits-Token fehlt oder ist abgelaufen). "
-                    "Bitte die Seite neu laden und erneut versuchen.", ok=False,
-                )
-                self._redirect(redirect_target)
-                return
-
-            logger.info("Upload: saved %s (%d bytes) to inbox", filename, size)
-            try:
-                get_state().update(inbox_count=sum(1 for f in inbox.iterdir() if f.is_file()))
-            except Exception as exc:
-                logger.warning("Upload: inbox counter refresh failed: %s", exc)
-            get_state().set_flash(
-                upload_flash_message(filename, size), ok=True,
-            )
-        except Exception as exc:
-            logger.error("Upload failed: %s", exc)
-            get_state().set_flash(f"Upload fehlgeschlagen: {exc}", ok=False)
-
-        self._redirect(redirect_target)
-
-    def _save_file_upload(self, inbox: Path, content_type: str) -> tuple[str, str, int] | None:
-        """Parse a meter-data upload: returns (csrf_token, filename, bytes_written) or None without a valid file."""
-        fields, saved = self._read_multipart(inbox, content_type, allowed_ext=_ALLOWED_UPLOAD_EXT,
-                                             max_bytes=_MAX_UPLOAD_BYTES, keep_name=True)
-        if fields is None or saved is None:
-            return None
-        filename, _path, size = saved
-        return fields.get("csrf_token", ""), filename, size
-
     def _read_multipart(
-        self, dest_dir: Path, content_type: str, *, allowed_ext: set[str], max_bytes: int, keep_name: bool = False,
+        self, dest_dir: Path, content_type: str, *, allowed_ext: set[str], max_bytes: int,
     ) -> tuple[dict[str, str] | None, tuple[str, Path, int] | None]:
         """Parse multipart/form-data, streaming at most one file part into dest_dir.
 
         Returns (fields, saved) — fields are the plain form fields BEFORE the
         file part (so forms must put the file input last), saved is
         (original filename, stored path, bytes) or None when no file was
-        attached. (None, None) for a malformed request. keep_name stores the
-        file under its own (sanitised) name, otherwise under a temporary
-        name the caller renames. Intentionally small and dependency-free —
+        attached. (None, None) for a malformed request. The file is stored
+        under a temporary name the caller renames (the meter-data upload that
+        kept the original name went with the CSV path in 0.6.34). Intentionally
+        small and dependency-free —
         Shareomat's web layer uses only the standard library plus Jinja2.
         """
         if "multipart/form-data" not in content_type:
@@ -841,7 +718,7 @@ class _Handler(BaseHTTPRequestHandler):
             if part_filename:
                 filename = part_filename
                 # The CSRF token comes before the file part (forms put the file input last). Check it NOW,
-                # before a single byte is written: a refused upload must never touch the inbox.
+                # before a single byte is written: a refused upload must never touch the target folder.
                 if fields.get("csrf_token") != get_state().csrf_token:
                     raise _CsrfRejected()
                 break
@@ -870,7 +747,7 @@ class _Handler(BaseHTTPRequestHandler):
             logger.warning("Upload: rejected file type '%s'", ext)
             raise ValueError(f"Dateityp '{ext}' nicht erlaubt ({', '.join(sorted(allowed_ext))}).")
 
-        dest_name = filename if keep_name else f".upload-{uuid.uuid4().hex}{ext}"
+        dest_name = f".upload-{uuid.uuid4().hex}{ext}"
         temp_dest = dest_dir / f".{filename}.upload-{uuid.uuid4().hex}.tmp"
         total = 0
         overlap = len(body_boundary)

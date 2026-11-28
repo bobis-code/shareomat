@@ -5,13 +5,12 @@ Until 0.6.30 issue_documents() demanded "sum of invoices = sum of credits". With
 (Bezugspreis = Produzentenvergütung + Verwaltungsgebühr) the invoices are higher by the fee, so no
 document could ever be issued. The balance is now exact: invoices = rounded consumer amounts,
 credits = rounded producer amounts, consumer - producer amounts = admin fee + grid-operator
-rounding. All values synthetic; official SDAT path (the CSV path goes with the rebuild).
+rounding. All values synthetic; official SDAT path.
 """
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -23,10 +22,8 @@ from shareomat.database import billing, invoicing
 from shareomat.database.community import save_community
 from shareomat.database.meters import create_meter
 from shareomat.database.participants import create_participant
-from shareomat.database.settings import get_operation_settings, save_operation_settings
 from shareomat.database.sqlite import connect, init_db
 from shareomat.database.tariffs import create_tariff
-from shareomat.leg_const import METER_DATA_SOURCE_SDAT_LEG
 from shareomat.models.community import Community
 from shareomat.models.invoicing import PaymentProfile
 from shareomat.models.meter import Meter
@@ -67,7 +64,6 @@ def leg(tmp_path):
         create_participant(db, Participant(pid, f"Test {pid}", email=f"{pid}@example.ch", address_line="Testweg 2",
                                            postal_code="9999", city="Testdorf"))
         create_meter(db, Meter(mpid, pid, f"Zähler {pid}", role))
-    save_operation_settings(db, replace(get_operation_settings(db), meter_data_source=METER_DATA_SOURCE_SDAT_LEG))
     invoicing.save_payment_profile(db, PaymentProfile(payee="Test-LEG Konto", street="Testweg", building="1",
                                                       postal_code="9999", city="Testdorf",
                                                       iban="CH93 0076 2011 6238 5295 7", contact_email="leg@example.ch"))

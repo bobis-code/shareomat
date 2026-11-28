@@ -17,7 +17,6 @@ Part of:
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -54,28 +53,6 @@ def _asset_version() -> str:
 
 
 _env.globals["asset_version"] = _asset_version()
-
-_UPLOAD_FLASH_PREFIX = "shareomat-upload-v1:"
-
-
-def _upload_flash_data(message: str) -> dict | None:
-    """Decode only data for the fixed upload notice, never HTML from a message."""
-    if not message.startswith(_UPLOAD_FLASH_PREFIX):
-        return None
-    try:
-        data = json.loads(message[len(_UPLOAD_FLASH_PREFIX):])
-    except (ValueError, TypeError):
-        return None
-    if (isinstance(data, dict) and isinstance(data.get("filename"), str)
-            and type(data.get("size")) is int and data["size"] >= 0):
-        return data
-    return None
-
-
-def upload_flash_message(filename: str, size: int) -> str:
-    """Serializable data for a fixed template; preserves the existing session storage schema."""
-    return _UPLOAD_FLASH_PREFIX + json.dumps({"filename": str(filename), "size": size})
-
 
 @dataclass
 class RequestContext:
@@ -192,7 +169,6 @@ def render_page(template_name: str, ctx: RequestContext, active_route: str, **ex
         active_route=active_route,
         community_name=community_name,
         flash_message=flash_message,
-        flash_upload=_upload_flash_data(flash_message),
         flash_ok=flash_ok,
         warnings=snapshot.get("warnings", []),
         csrf_token=state.csrf_token,

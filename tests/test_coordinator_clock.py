@@ -233,7 +233,7 @@ def test_reconnect_repeats_the_last_status_not_a_fixed_one(mqtt_client):
     mqtt_runtime.publish_status(client, MQTT_STATUS_ERROR, config)
     client.reconnect()
     assert client.status()[-1] == MQTT_STATUS_ERROR
-    mqtt_runtime.publish_system_state(client, config, status=MQTT_STATUS_OK)
+    mqtt_runtime.publish_status(client, MQTT_STATUS_OK, config)
     client.reconnect()
     assert client.status()[-1] == MQTT_STATUS_OK
 

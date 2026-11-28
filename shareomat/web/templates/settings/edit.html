@@ -3,42 +3,6 @@
 {% block heading %}Einstellungen{% endblock %}
 {% block content %}
 <div class="card">
-  <h2>Grundeinstellungen</h2>
-  <form class="form-card" method="post" action="{{ url_for('settings') }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <div class="field">
-      <label for="unknown_meter_policy">Umgang mit unbekannten Messpunkten</label>
-      <select id="unknown_meter_policy" name="unknown_meter_policy">
-        {% for value, label in policies %}
-        <option value="{{ value }}" {{ 'selected' if settings.unknown_meter_policy == value }}>{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    <div class="field checkbox-row">
-      <input type="checkbox" id="archive_processed" name="archive_processed" {{ 'checked' if settings.archive_processed }}>
-      <label for="archive_processed" style="margin:0">Verarbeitete Dateien ins Archiv verschieben</label>
-    </div>
-    <div class="field">
-      <label for="meter_data_source">Messdaten-Quelle</label>
-      <select id="meter_data_source" name="meter_data_source">
-        {% for value, label in meter_data_sources %}
-        <option value="{{ value }}" {{ 'selected' if settings.meter_data_source == value }}>{{ label }}</option>
-        {% endfor %}
-      </select>
-      <div class="field-hint">
-        Wie diese Gemeinschaft Messdaten erhält. Mit "SDAT (EBL/Swisseldex)" rechnet
-        Shareomat mit den vom Netzbetreiber zugeteilten LEG- und Restenergiemengen
-        (Import unter Externe Daten → Swisseldex) und verteilt nichts selbst.
-        Erst wählen, wenn die ersten Lieferungen importiert und geprüft sind.
-      </div>
-    </div>
-    <div class="actions-row">
-      <button type="submit">Speichern</button>
-    </div>
-  </form>
-</div>
-
-<div class="card">
   <h2>Rohdatensicherung (Swisseldex-Originale)</h2>
   <p class="field-hint" style="margin-bottom:10px">
     Jede vom Swisseldex-Datahub abgeholte Datei wird unverändert und einmalig auf einen
@@ -182,11 +146,8 @@
   <div class="table-wrap">
     <table style="margin-top:12px">
       <tbody>
-        <tr><td>Eingang</td><td style="font-family:monospace">{{ runtime.paths.inbox }}</td></tr>
-        <tr><td>Archiv</td><td style="font-family:monospace">{{ runtime.paths.archive }}</td></tr>
-        <tr><td>Berichte</td><td style="font-family:monospace">{{ runtime.paths.reports }}</td></tr>
+        <tr><td>Datenordner</td><td style="font-family:monospace">{{ runtime.paths.state }}</td></tr>
         <tr><td>MQTT</td><td>{{ 'aktiviert (' + runtime.mqtt.broker + ':' + runtime.mqtt.port|string + ')' if runtime.mqtt.enabled else 'deaktiviert' }}</td></tr>
-        <tr><td>E-Mail-Import</td><td>{{ 'aktiviert (' + runtime.email.imap_host + ')' if runtime.email.enabled else 'deaktiviert' }}</td></tr>
         <tr><td>Web-Port</td><td>{{ runtime.web.port }}</td></tr>
       </tbody>
     </table>

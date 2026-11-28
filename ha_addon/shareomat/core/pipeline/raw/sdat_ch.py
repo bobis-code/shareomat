@@ -12,10 +12,6 @@ Part of:
     Shareomat — Swiss LEG/ZEV Settlement Engine
 
 Notes:
-    This is a DIFFERENT format from the simplified experimental XML parser
-    in leg_parser.py:parse_sdat() (MeteringPoint/Observation, no
-    namespaces, no E31/E66, no product IDs). That parser stays untouched.
-
     Implemented against the official VSE material (SDAT-CH 2025, Stand
     04.12.2025): ValidatedMeteredData_1p6.xsd, AggregatedMeteredData_1p3.xsd
     with their core components and code lists, the example messages
@@ -46,8 +42,6 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from shareomat.models.meter_data import IntervalReading
-from shareomat.leg_const import SLOT_MINUTES
 
 # ── Product IDs (docs/sdat_leg_import.md §3) ───────────────────────────────────
 
@@ -533,41 +527,3 @@ def parse_sdat_ch_document(data: bytes) -> SdatDocument:
     series = [_series(block, header, index) for index, block in enumerate(blocks, start=1)]
     _check_consistency(series)
     return SdatDocument(header=header, series=tuple(series))
-
-
-def parse_sdat_ch(
-    path: Path,
-    slot_minutes: int = SLOT_MINUTES,
-    known_meter_ids: set[str] | None = None,
-) -> list[IntervalReading]:
-    """E66 total energy (the physical meter data) as 15-minute IntervalReadings.
-
-    For the file inbox of the automatic engine (meter_data_source "sdat_leg").
-    Only the measured total (8716867000030) becomes a reading - consumption as
-    "import", production as "export". The grid operator's LEG/residual split
-    is not an IntervalReading: it is stored and billed through
-    shareomat.database.sdat_store (see ADR-0008), never redistributed.
-    E31 documents carry no metering point and yield no readings.
-    """
-    if slot_minutes != RESOLUTION_MINUTES:
-        raise _fail("UNSUPPORTED_RESOLUTION", f"SDAT-CH liefert 15 Minuten, nicht {slot_minutes}.")
-    document = parse_sdat_ch_document(read_sdat_bytes(path))
-    readings: list[IntervalReading] = []
-    if document.header.document_type != DOCUMENT_TYPE_E66 or document.header.status == STATUS_CANCELLATION:
-        return readings
-    for series in document.series:
-        if series.energy_type != "total":
-            continue
-        if known_meter_ids is not None and series.metering_point_id not in known_meter_ids:
-            continue
-        direction = "import" if series.direction == DIRECTION_CONSUMPTION else "export"
-        for index, (value, condition) in enumerate(zip(series.values, series.conditions)):
-            readings.append(IntervalReading(
-                meter_id=series.metering_point_id,
-                slot_start=series.interval_start + timedelta(minutes=RESOLUTION_MINUTES * index),
-                value_kwh=float(value),
-                direction=direction,
-                quality={"": "valid", CONDITION_TEMPORARY: "temporary", CONDITION_ESTIMATED: "estimated"}[condition],
-                source_file=path.name,
-            ))
-    return readings

@@ -45,7 +45,7 @@ not here — see "Ersteinrichtung" below.
 | `mqtt_password` | MQTT password (optional) | |
 | `base_topic` | Root MQTT topic prefix | `shareomat` |
 | `discovery_prefix` | HA MQTT Discovery prefix | `homeassistant` |
-| `command_topic_enabled` | Listen on `shareomat/cmd/run_once` for manual trigger | `true` |
+| `command_topic_enabled` | Not used since 0.6.34 (the `run_once` command went with the CSV run) | `true` |
 | `sparkplug` → `mode` | Emsomat connection: `auto` finds the Emsomat on this Home Assistant, `manual` uses the two values below, `off` disables it | `auto` |
 | `sparkplug` → `node_id` | Emsomat node ID, only used with `manual` | `emsomat-node` |
 | `sparkplug` → `group_id` | Emsomat Sparkplug group, only used with `manual` | `emsomat` |
@@ -53,15 +53,7 @@ not here — see "Ersteinrichtung" below.
 | `log_level` | Log verbosity (`debug/info/warning/error`) | `info` |
 | `mqtt_tls` / `mqtt_ca_cert` | MQTT broker TLS | `false` / |
 | `ingress_enabled` | Enable the Shareomat web interface | `true` |
-| `share_inbox` | External share folder to watch for meter files | |
-| `email_enabled` | Poll an IMAP mailbox for meter-data attachments | `false` |
-| `email_imap_host` | IMAP server hostname | `imap.gmail.com` |
-| `email_imap_port` | IMAP server port (TLS) | `993` |
-| `email_username` | Mailbox address (e.g. a dedicated Gmail account) | |
-| `email_password` | IMAP password — for Gmail use an **App Password**, not the account password | |
-| `email_folder` | IMAP folder to watch | `INBOX` |
-| `email_allowed_senders` | Only accept attachments whose `From` header matches one of these addresses. The header can be spoofed, so this is a filter, not sender authentication. Empty = accept any sender | `[]` |
-| `email_poll_interval_seconds` | How often to check the mailbox | `300` |
+| `share_inbox`, `email_*` (IMAP import) | Not used since 0.6.34: meter data comes only from the grid operator via Swisseldex. The options stay so that an existing configuration keeps loading; they will be removed with the new configuration interface. | |
 
 ## Ersteinrichtung
 
@@ -76,7 +68,7 @@ Schritt für Schritt: `docs/Erstes_Login.md` im Repository.
 
 Nach dem Login führt beim ersten Start (leere Datenbank) ein
 Einrichtungsassistent durch: Gemeinschaft → Teilnehmer → Messpunkte →
-Vertrag. Danach lassen sich Teilnehmer, Messpunkte, Vertrag und die Automatik
+Vertrag. Danach lassen sich Teilnehmer, Messpunkte und Vertrag
 jederzeit über die Weboberfläche verwalten — Änderungen gelten sofort, ohne
 Add-on-Neustart.
 
@@ -86,21 +78,19 @@ Gültigkeitsdauer massgebend ist, unter Einhaltung der im LEG-Mustervertrag
 vorgesehenen Ankündigungsfristen. Die Tarife-Seite existiert weiterhin, aber
 nur als manueller Notfall-/Erstinbetriebnahme-Fallback.
 
-### Email import
+### Meter data
 
-Use a mailbox dedicated to meter data only — e.g. if your grid operator sends
-readings by email, or you want to forward them yourself. The mailbox is
-never modified: messages are read via `BODY.PEEK[]` (no `\Seen` flag set) and
-nothing is deleted. Already-seen messages are tracked locally by IMAP UID in
-`/config/shareomat/state/email_import_state.json`.
-
-For Gmail: enable 2-Step Verification on the account, then create an
-**App Password** under Google Account → Security → App passwords, and use
-that as `email_password`.
+Meter data comes only from the grid operator: the official SDAT deliveries
+(E66, E31) arrive through the Swisseldex Datahub and are imported
+automatically (see *Automatic Swisseldex sync* below). Billing uses the grid
+operator's split as it is. The former CSV path (inbox, upload, IMAP and share
+import, automatic run, reports) was removed in 0.6.34; files left in
+`/config/shareomat/inbox/`, `archive/` and `reports/` are not touched and can
+be deleted by hand.
 
 Roles: `producer` · `consumer` · `producer_consumer` · `grid`
 
-`role` is used only as a startup plausibility check (at least one producer and one consumer must exist). Matching and billing are fully data-driven based on measured import/export direction per slot.
+`role` is used as a plausibility check (at least one producer and one consumer must exist) and for the completeness check of the official data per channel.
 
 ---
 
@@ -112,10 +102,7 @@ add-on's own persistent `/data` (both survive add-on updates):
 ```
 /config/shareomat/
 ├── leg_config.yaml   ← auto-generated technical config from add-on options
-├── inbox/            ← drop CSV or S-DAT XML files here
-├── archive/          ← processed input files moved here
-├── reports/          ← billing_*.csv, billing_*.json, match_detail_*.csv
-└── state/            ← processed_files.json (SHA-256 deduplication)
+└── state/            ← Swisseldex archive and receiver state
 
 /data/
 ├── shareomat.db       ← Gemeinschaft/Teilnehmer/Messpunkte/Vertrag/Tarife/Automatik
@@ -223,10 +210,6 @@ and the login outside the Home Assistant machine, otherwise a backup can't
 be restored on new hardware. `/share/shareomat/backups/` is only in a Home
 Assistant backup if the share folder is selected.
 
-Drop meter data files into `/config/shareomat/inbox/` via SSH or the
-HA File Editor add-on. Shareomat scans inbox on each startup and on
-every `shareomat/cmd/run_once` MQTT command.
-
 ---
 
 ## MQTT Topics
@@ -234,19 +217,14 @@ every `shareomat/cmd/run_once` MQTT command.
 | Topic | Retained | Description |
 |-------|----------|-------------|
 | `shareomat/status` | yes | `starting` · `ok` · `error` · `offline` (LWT). Since 0.6.33 `ok` as soon as Shareomat runs, and the last status is sent again after a reconnect |
-| `shareomat/last_run` | yes | ISO timestamp of last successful run |
-| `shareomat/billing/{mpid}/total_cost_chf` | yes | Total billing cost |
-| `shareomat/billing/{mpid}/local_share_kwh` | yes | Locally shared energy |
-| `shareomat/billing/{mpid}/grid_import_kwh` | yes | Grid-sourced energy |
-| `shareomat/cmd/run_once` | **no** | Publish any payload to trigger a run |
+| `shareomat/live/*` | yes | Live values (Live-Energie) |
 
----
-
-## Manual Trigger
-
-```bash
-mosquitto_pub -h core-mosquitto -t "shareomat/cmd/run_once" -m "run"
-```
+Since 0.6.34 the engine device in Home Assistant has only the sensor
+*Shareomat Engine Status*, published at every start. The entities of the
+former CSV run (*Last Run*, *Inbox Files*, *Report Count*, *Last Error*, the
+button *Run Now*, the switch *Auto Scan* and the six billing sensors per
+participant) are removed from Home Assistant at startup, and their retained
+values on the broker are cleared.
 
 ---
 
@@ -270,20 +248,3 @@ docker build -f ha_addon/Dockerfile ha_addon
 ```bash
 python tools/prepare_addon.py --check
 ```
-
----
-
-## Input File Formats
-
-### CSV
-
-```
-timestamp,mpid,value_kwh,direction
-2024-06-01T12:00:00+00:00,CH001...,0.500,export
-2024-06-01T12:00:00+00:00,CH002...,0.200,import
-```
-
-### S-DAT XML (Experimental)
-
-Standard Swiss S-DAT metering data exchange format.
-Validate output against source files before production use.
